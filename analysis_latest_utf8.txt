@@ -1,0 +1,48 @@
+﻿Analyzing lib...                                                
+
+   info - The file name 'bill's_page.dart' isn't a lower_case_with_underscores identifier - lib\bill's_page.dart:1:1 - file_names
+   info - The imported package 'http' isn't a dependency of the importing package - lib\daily_wear.dart:8:8 - depend_on_referenced_packages
+warning - The value of the field '_currentTemp' isn't used - lib\daily_wear.dart:92:8 - unused_field
+   info - 'announce' is deprecated and shouldn't be used. Use sendAnnouncement instead. This API is incompatible with multiple windows. This feature was deprecated after v3.35.0-0.1.pre - lib\daily_wear.dart:696:22 - deprecated_member_use
+warning - The declaration '_accent4' isn't referenced - lib\everything_else.dart:115:13 - unused_element
+warning - The declaration '_accent5' isn't referenced - lib\everything_else.dart:116:13 - unused_element
+   info - The file name 'home & utilities.dart' isn't a lower_case_with_underscores identifier - lib\home & utilities.dart:1:1 - file_names
+warning - The declaration '_BackArrowPainter' isn't referenced - lib\home & utilities.dart:13:7 - unused_element
+warning - The declaration '_ChevronRightPainter' isn't referenced - lib\home & utilities.dart:46:7 - unused_element
+warning - The declaration '_MealIconPainter' isn't referenced - lib\home & utilities.dart:74:7 - unused_element
+warning - The declaration '_MediIconPainter' isn't referenced - lib\home & utilities.dart:119:7 - unused_element
+warning - The declaration '_BillIconPainter' isn't referenced - lib\home & utilities.dart:150:7 - unused_element
+  error - The name 'Screen4' isn't a class - lib\home & utilities.dart:240:30 - creation_with_non_type
+  error - Invalid constant value - lib\home.dart:1:345 - invalid_constant
+  error - The function 'Screen4' isn't defined - lib\home.dart:1:345 - undefined_function
+  error - The name 'Screen4' isn't a class - lib\main.dart:859:33 - creation_with_non_type
+   info - The private field _plans could be 'final' - lib\meal_planner.dart:79:18 - prefer_final_fields
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:165:54 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:229:7 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:231:51 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:232:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:233:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:234:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:235:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:236:10 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:239:29 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:240:35 - curly_braces_in_flow_control_structures
+warning - The value of the local variable 'accent' isn't used - lib\meal_planner.dart:271:11 - unused_local_variable
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:311:75 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:312:42 - curly_braces_in_flow_control_structures
+warning - The value of the local variable 'accent' isn't used - lib\meal_planner.dart:461:11 - unused_local_variable
+warning - A value for optional parameter 'isTextArea' isn't ever given - lib\meal_planner.dart:1345:85 - unused_element_parameter
+   info - Statements in a for should be enclosed in a block - lib\meal_planner.dart:1842:44 - curly_braces_in_flow_control_structures
+   info - Unnecessary use of 'toList' in a spread - lib\medi_tracker.dart:1272:14 - unnecessary_to_list_in_spreads
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1584:48 - deprecated_member_use
+   info - Invalid use of a private type in a public API - lib\occasion.dart:29:9 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\occasion.dart:30:9 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\occasion.dart:39:19 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\occasion.dart:40:19 - library_private_types_in_public_api
+   info - The 'child' argument should be last in widget constructor invocations - lib\occasion.dart:367:25 - sort_child_properties_last
+   info - The 'child' argument should be last in widget constructor invocations - lib\occasion.dart:378:25 - sort_child_properties_last
+warning - A value for optional parameter 'duration' isn't ever given - lib\profile.dart:102:10 - unused_element_parameter
+warning - The declaration '_accentDimLocal' isn't referenced - lib\profile.dart:351:13 - unused_element
+warning - The declaration '_accentBorderLocal' isn't referenced - lib\profile.dart:352:13 - unused_element
+   info - The imported package 'http' isn't a dependency of the importing package - lib\skincare.dart:3:8 - depend_on_referenced_packages
+

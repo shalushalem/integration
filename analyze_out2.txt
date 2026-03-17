@@ -1,0 +1,164 @@
+﻿Analyzing lib...                                                
+
+   info - The file name 'bill's_page.dart' isn't a lower_case_with_underscores identifier - lib\bill's_page.dart:1:1 - file_names
+   info - The imported package 'http' isn't a dependency of the importing package - lib\daily_wear.dart:8:8 - depend_on_referenced_packages
+warning - The value of the field '_currentTemp' isn't used - lib\daily_wear.dart:92:8 - unused_field
+   info - 'announce' is deprecated and shouldn't be used. Use sendAnnouncement instead. This API is incompatible with multiple windows. This feature was deprecated after v3.35.0-0.1.pre - lib\daily_wear.dart:696:22 - deprecated_member_use
+warning - The declaration '_panelShell2' isn't referenced - lib\everything_else.dart:113:13 - unused_element
+warning - The declaration '_muted' isn't referenced - lib\everything_else.dart:116:13 - unused_element
+warning - The declaration '_tileText' isn't referenced - lib\everything_else.dart:117:13 - unused_element
+warning - The declaration '_accent' isn't referenced - lib\everything_else.dart:118:13 - unused_element
+warning - The declaration '_accent2' isn't referenced - lib\everything_else.dart:119:13 - unused_element
+warning - The declaration '_accent3' isn't referenced - lib\everything_else.dart:120:13 - unused_element
+warning - The declaration '_accent4' isn't referenced - lib\everything_else.dart:121:13 - unused_element
+warning - The declaration '_accent5' isn't referenced - lib\everything_else.dart:122:13 - unused_element
+warning - The declaration '_card' isn't referenced - lib\everything_else.dart:123:13 - unused_element
+warning - The declaration '_cardBorder' isn't referenced - lib\everything_else.dart:124:13 - unused_element
+warning - The declaration '_panel' isn't referenced - lib\everything_else.dart:125:13 - unused_element
+warning - The declaration '_transparent' isn't referenced - lib\everything_else.dart:126:13 - unused_element
+   info - The file name 'home & utilities.dart' isn't a lower_case_with_underscores identifier - lib\home & utilities.dart:1:1 - file_names
+   info - Unnecessary use of multiple underscores - lib\home & utilities.dart:45:25 - unnecessary_underscores
+  error - Too many positional arguments: 3 expected, but 4 found - lib\home & utilities.dart:827:62 - extra_positional_arguments
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\home & utilities.dart:827:68 - deprecated_member_use
+warning - The declaration '_PlaceholderPage' isn't referenced - lib\home & utilities.dart:1131:7 - unused_element
+warning - The declaration '_panelBorder' isn't referenced - lib\home.dart:57:13 - unused_element
+   info - The private field _likedState could be 'final' - lib\home.dart:87:12 - prefer_final_fields
+warning - The value of the field '_currentTime' isn't used - lib\home.dart:112:8 - unused_field
+warning - The value of the field '_activeQuery' isn't used - lib\home.dart:131:8 - unused_field
+   info - Statements in an if should be enclosed in a block - lib\home.dart:234:43 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\home.dart:235:43 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\home.dart:236:43 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\home.dart:237:44 - curly_braces_in_flow_control_structures
+   info - Statements in a for should be enclosed in a block - lib\home.dart:254:33 - curly_braces_in_flow_control_structures
+   info - Statements in a for should be enclosed in a block - lib\home.dart:259:32 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\home.dart:445:42 - curly_braces_in_flow_control_structures
+   info - Unnecessary use of multiple underscores - lib\home.dart:682:22 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\home.dart:915:22 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\home.dart:1282:22 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\home.dart:1864:22 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\home.dart:2177:22 - unnecessary_underscores
+warning - The declaration '_SignalIcon' isn't referenced - lib\home.dart:2749:7 - unused_element
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\home.dart:2828:72 - deprecated_member_use
+   info - The private field _plans could be 'final' - lib\meal_planner.dart:79:18 - prefer_final_fields
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:165:54 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:229:7 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:231:51 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:232:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:233:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:234:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:235:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:236:10 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:239:29 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:240:35 - curly_braces_in_flow_control_structures
+warning - The value of the local variable 'kBg2' isn't used - lib\meal_planner.dart:273:11 - unused_local_variable
+warning - The value of the local variable 'kPanel' isn't used - lib\meal_planner.dart:274:11 - unused_local_variable
+warning - The value of the local variable 'kPanel2' isn't used - lib\meal_planner.dart:275:11 - unused_local_variable
+warning - The value of the local variable 'kCard' isn't used - lib\meal_planner.dart:276:11 - unused_local_variable
+warning - The value of the local variable 'kCardBorder' isn't used - lib\meal_planner.dart:277:11 - unused_local_variable
+warning - The value of the local variable 'kText' isn't used - lib\meal_planner.dart:278:11 - unused_local_variable
+warning - The value of the local variable 'kMuted' isn't used - lib\meal_planner.dart:279:11 - unused_local_variable
+warning - The value of the local variable 'kTileText' isn't used - lib\meal_planner.dart:280:11 - unused_local_variable
+warning - The value of the local variable 'kAccent' isn't used - lib\meal_planner.dart:281:11 - unused_local_variable
+warning - The value of the local variable 'kAccent2' isn't used - lib\meal_planner.dart:282:11 - unused_local_variable
+warning - The value of the local variable 'kAccent3' isn't used - lib\meal_planner.dart:283:11 - unused_local_variable
+warning - The value of the local variable 'kAccent4' isn't used - lib\meal_planner.dart:284:11 - unused_local_variable
+warning - The value of the local variable 'kAccent5' isn't used - lib\meal_planner.dart:285:11 - unused_local_variable
+warning - The value of the local variable 'kPhoneShell' isn't used - lib\meal_planner.dart:286:11 - unused_local_variable
+warning - The value of the local variable 'kSurface2' isn't used - lib\meal_planner.dart:287:11 - unused_local_variable
+warning - The value of the local variable 'kBorder' isn't used - lib\meal_planner.dart:288:11 - unused_local_variable
+warning - The value of the local variable 'kBreakfastBg' isn't used - lib\meal_planner.dart:290:11 - unused_local_variable
+warning - The value of the local variable 'kBreakfastBorder' isn't used - lib\meal_planner.dart:291:11 - unused_local_variable
+warning - The value of the local variable 'kLunchBg' isn't used - lib\meal_planner.dart:292:11 - unused_local_variable
+warning - The value of the local variable 'kLunchBorder' isn't used - lib\meal_planner.dart:293:11 - unused_local_variable
+warning - The value of the local variable 'kDinnerBg' isn't used - lib\meal_planner.dart:294:11 - unused_local_variable
+warning - The value of the local variable 'kDinnerBorder' isn't used - lib\meal_planner.dart:295:11 - unused_local_variable
+warning - The value of the local variable 'kSnackBg' isn't used - lib\meal_planner.dart:296:11 - unused_local_variable
+warning - The value of the local variable 'kSnackBorder' isn't used - lib\meal_planner.dart:297:11 - unused_local_variable
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:336:75 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:337:42 - curly_braces_in_flow_control_structures
+warning - The value of the local variable 'kBg2' isn't used - lib\meal_planner.dart:487:11 - unused_local_variable
+warning - The value of the local variable 'kText' isn't used - lib\meal_planner.dart:488:11 - unused_local_variable
+warning - The value of the local variable 'kMuted' isn't used - lib\meal_planner.dart:489:11 - unused_local_variable
+warning - The value of the local variable 'kTileText' isn't used - lib\meal_planner.dart:490:11 - unused_local_variable
+warning - The value of the local variable 'kSurface2' isn't used - lib\meal_planner.dart:491:11 - unused_local_variable
+warning - The value of the local variable 'kBorder' isn't used - lib\meal_planner.dart:492:11 - unused_local_variable
+warning - The value of the local variable 'kAccent' isn't used - lib\meal_planner.dart:493:11 - unused_local_variable
+warning - The value of the local variable 'kAccent3' isn't used - lib\meal_planner.dart:494:11 - unused_local_variable
+warning - A value for optional parameter 'isTextArea' isn't ever given - lib\meal_planner.dart:1378:85 - unused_element_parameter
+   info - Statements in a for should be enclosed in a block - lib\meal_planner.dart:1875:44 - curly_braces_in_flow_control_structures
+warning - A value for optional parameter 'duration' isn't ever given - lib\medi_tracker.dart:173:10 - unused_element_parameter
+   info - Unnecessary use of 'toList' in a spread - lib\medi_tracker.dart:2088:14 - unnecessary_to_list_in_spreads
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\medi_tracker.dart:3038:13 - deprecated_member_use
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\medi_tracker.dart:3052:17 - deprecated_member_use
+   info - Invalid use of a private type in a public API - lib\occasion.dart:29:9 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\occasion.dart:30:9 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\occasion.dart:39:19 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\occasion.dart:40:19 - library_private_types_in_public_api
+   info - The 'child' argument should be last in widget constructor invocations - lib\occasion.dart:367:25 - sort_child_properties_last
+   info - The 'child' argument should be last in widget constructor invocations - lib\occasion.dart:378:25 - sort_child_properties_last
+warning - Unused import: 'dart:math' - lib\office_fit.dart:6:8 - unused_import
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\office_fit.dart:263:63 - deprecated_member_use
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\office_fit.dart:410:65 - deprecated_member_use
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\office_fit.dart:638:63 - deprecated_member_use
+warning - The declaration '_panel' isn't referenced - lib\party_looks.dart:119:13 - unused_element
+warning - The declaration '_panel2' isn't referenced - lib\party_looks.dart:120:13 - unused_element
+warning - The declaration '_card' isn't referenced - lib\party_looks.dart:121:13 - unused_element
+warning - The declaration '_cardBorder' isn't referenced - lib\party_looks.dart:122:13 - unused_element
+warning - The declaration '_text' isn't referenced - lib\party_looks.dart:123:13 - unused_element
+warning - The declaration '_muted' isn't referenced - lib\party_looks.dart:124:13 - unused_element
+warning - The declaration '_accent' isn't referenced - lib\party_looks.dart:125:13 - unused_element
+warning - The declaration '_accent2' isn't referenced - lib\party_looks.dart:126:13 - unused_element
+warning - The declaration '_accent4' isn't referenced - lib\party_looks.dart:127:13 - unused_element
+warning - The declaration '_phoneShell' isn't referenced - lib\party_looks.dart:128:13 - unused_element
+warning - The declaration '_transparent' isn't referenced - lib\party_looks.dart:130:13 - unused_element
+   info - The private field _looks could be 'final' - lib\party_looks.dart:132:14 - prefer_final_fields
+warning - Unused import: 'package:myapp/theme/base_theme.dart' - lib\profile.dart:68:8 - unused_import
+warning - A value for optional parameter 'duration' isn't ever given - lib\profile.dart:103:10 - unused_element_parameter
+warning - The declaration '_tileText' isn't referenced - lib\profile.dart:347:13 - unused_element
+warning - The declaration '_accentDimLocal' isn't referenced - lib\profile.dart:353:13 - unused_element
+warning - The declaration '_accentBorderLocal' isn't referenced - lib\profile.dart:354:13 - unused_element
+   info - The imported package 'http' isn't a dependency of the importing package - lib\skincare.dart:3:8 - depend_on_referenced_packages
+   info - Statements in a for should be enclosed in a block - lib\skincare.dart:251:45 - curly_braces_in_flow_control_structures
+   info - Statements in a for should be enclosed in a block - lib\skincare.dart:281:37 - curly_braces_in_flow_control_structures
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\skincare.dart:377:21 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\theme\gradients.dart:21:22 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\theme\gradients.dart:31:23 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\theme\gradients.dart:41:24 - deprecated_member_use
+warning - This default clause is covered by the previous cases - lib\vacation.dart:94:5 - unreachable_switch_default
+   info - 'RawKeyboardListener' is deprecated and shouldn't be used. Use KeyboardListener instead. This feature was deprecated after v3.18.0-2.0.pre - lib\wardrobe.dart:277:12 - deprecated_member_use
+   info - 'RawKeyEvent' is deprecated and shouldn't be used. Use KeyEvent instead. This feature was deprecated after v3.18.0-2.0.pre - lib\wardrobe.dart:280:15 - deprecated_member_use
+   info - 'RawKeyDownEvent' is deprecated and shouldn't be used. Use KeyDownEvent instead. This feature was deprecated after v3.18.0-2.0.pre - lib\wardrobe.dart:281:22 - deprecated_member_use
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\wardrobe.dart:1524:38 - deprecated_member_use
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\wardrobe.dart:2033:38 - deprecated_member_use
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\wardrobe.dart:2807:36 - deprecated_member_use
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\wardrobe.dart:2876:59 - deprecated_member_use
+warning - The value of the local variable 'kBg2' isn't used - lib\workout.dart:107:11 - unused_local_variable
+warning - The value of the local variable 'kPanel' isn't used - lib\workout.dart:108:11 - unused_local_variable
+warning - The value of the local variable 'kPanel2' isn't used - lib\workout.dart:109:11 - unused_local_variable
+warning - The value of the local variable 'kCardBorder' isn't used - lib\workout.dart:110:11 - unused_local_variable
+warning - The value of the local variable 'kText' isn't used - lib\workout.dart:111:11 - unused_local_variable
+warning - The value of the local variable 'kMuted' isn't used - lib\workout.dart:112:11 - unused_local_variable
+warning - The value of the local variable 'kMutedLight' isn't used - lib\workout.dart:113:11 - unused_local_variable
+warning - The value of the local variable 'kPhoneShell' isn't used - lib\workout.dart:114:11 - unused_local_variable
+warning - The value of the local variable 'kAccent3' isn't used - lib\workout.dart:117:11 - unused_local_variable
+warning - The value of the local variable 'kAccent4' isn't used - lib\workout.dart:118:11 - unused_local_variable
+warning - The value of the local variable 'kAccent5' isn't used - lib\workout.dart:119:11 - unused_local_variable
+warning - The value of the local variable 'kPhoneShell2' isn't used - lib\workout.dart:120:11 - unused_local_variable
+warning - The value of the local variable 'kAccentGrad' isn't used - lib\workout.dart:121:11 - unused_local_variable
+   info - The private field _outfits could be 'final' - lib\workout.dart:342:30 - prefer_final_fields
+   info - Unnecessary use of multiple underscores - lib\workout.dart:474:95 - unnecessary_underscores
+   info - Statements in a for should be enclosed in a block - lib\workout.dart:1053:44 - curly_braces_in_flow_control_structures
+warning - The value of the local variable 'kPanel2' isn't used - lib\workout.dart:1397:11 - unused_local_variable
+warning - The declaration '_FormInput' isn't referenced - lib\workout.dart:1587:7 - unused_element
+
+flutter : 150 issues found. (ran in 3.4s)
+At line:1 char:1
++ flutter analyze lib/ 2>&1 | Out-File 
+'c:\Users\parim\myapp\analyze_ou ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: 
+    (150 issues found. (ran in 3.4s):Strin  
+  g) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommand 
+   Error
+ 

@@ -1,0 +1,26 @@
+﻿Analyzing myapp...                                              
+
+  error - Target of URI doesn't exist: 'package:myapp/bill's_page.dart' - lib\boards.dart:8:8 - uri_does_not_exist
+  error - Target of URI doesn't exist: 'package:myapp/home%20&%20utilities.dart' - lib\boards.dart:11:8 - uri_does_not_exist
+   info - The imported package 'http' isn't a dependency of the importing package - lib\daily_wear.dart:8:8 - depend_on_referenced_packages
+  error - Undefined name '_currentTemp' - lib\daily_wear.dart:395:7 - undefined_identifier
+  error - The method 'Announcement' isn't defined for the type '_Screen4State' - lib\daily_wear.dart:695:39 - undefined_method
+  error - 3 positional arguments expected by 'sendAnnouncement', but 1 found - lib\daily_wear.dart:695:124 - not_enough_positional_arguments
+  error - Invalid constant value - lib\home.dart:1:345 - invalid_constant
+  error - The function 'Screen4' isn't defined - lib\home.dart:1:345 - undefined_function
+  error - The name 'Screen4' isn't a class - lib\home_and_utilities.dart:67:30 - creation_with_non_type
+  error - The name 'Screen4' isn't a class - lib\main.dart:859:33 - creation_with_non_type
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:165:54 - curly_braces_in_flow_control_structures
+   info - The member 'build' overrides an inherited member but isn't annotated with '@override' - lib\meal_planner.dart:269:10 - annotate_overrides
+warning - The value of the local variable 't' isn't used - lib\meal_planner.dart:459:11 - unused_local_variable
+  error - Expected to find ']' - lib\medi_tracker.dart:1273:12 - expected_token
+  error - The named parameter 'badge' is required, but there's no corresponding argument - lib\occasion.dart:59:3 - missing_required_argument
+  error - The named parameter 'bg' is required, but there's no corresponding argument - lib\occasion.dart:59:3 - missing_required_argument
+  error - The named parameter 'category' is required, but there's no corresponding argument - lib\occasion.dart:59:3 - missing_required_argument
+  error - The named parameter 'description' is required, but there's no corresponding argument - lib\occasion.dart:59:3 - missing_required_argument
+  error - The named parameter 'emoji' is required, but there's no corresponding argument - lib\occasion.dart:59:3 - missing_required_argument
+  error - The named parameter 'id' is required, but there's no corresponding argument - lib\occasion.dart:59:3 - missing_required_argument
+  error - The named parameter 'title' is required, but there's no corresponding argument - lib\occasion.dart:59:3 - missing_required_argument
+  error - Too many positional arguments: 0 expected, but 5 found - lib\occasion.dart:60:3 - extra_positional_arguments_could_be_named
+  error - Expected to find ')' - lib\occasion.dart:90:1 - expected_token
+

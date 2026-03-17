@@ -1,0 +1,170 @@
+﻿Analyzing lib...                                                
+
+   info - The file name 'bill's_page.dart' isn't a lower_case_with_underscores identifier - lib\bill's_page.dart:1:1 - file_names
+   info - The imported package 'http' isn't a dependency of the importing package - lib\daily_wear.dart:8:8 - depend_on_referenced_packages
+warning - The value of the field '_currentTemp' isn't used - lib\daily_wear.dart:92:8 - unused_field
+   info - 'announce' is deprecated and shouldn't be used. Use sendAnnouncement instead. This API is incompatible with multiple windows. This feature was deprecated after v3.35.0-0.1.pre - lib\daily_wear.dart:696:22 - deprecated_member_use
+warning - The declaration '_accent4' isn't referenced - lib\everything_else.dart:115:13 - unused_element
+warning - The declaration '_accent5' isn't referenced - lib\everything_else.dart:116:13 - unused_element
+   info - The file name 'home & utilities.dart' isn't a lower_case_with_underscores identifier - lib\home & utilities.dart:1:1 - file_names
+warning - The declaration '_BackArrowPainter' isn't referenced - lib\home & utilities.dart:13:7 - unused_element
+warning - The declaration '_ChevronRightPainter' isn't referenced - lib\home & utilities.dart:46:7 - unused_element
+warning - The declaration '_MealIconPainter' isn't referenced - lib\home & utilities.dart:74:7 - unused_element
+warning - The declaration '_MediIconPainter' isn't referenced - lib\home & utilities.dart:119:7 - unused_element
+warning - The declaration '_BillIconPainter' isn't referenced - lib\home & utilities.dart:150:7 - unused_element
+  error - The name 'Screen4' isn't a class - lib\home & utilities.dart:240:30 - creation_with_non_type
+   info - The private field _likedState could be 'final' - lib\home.dart:86:12 - prefer_final_fields
+warning - The value of the field '_currentTime' isn't used - lib\home.dart:113:8 - unused_field
+warning - The value of the field '_activeQuery' isn't used - lib\home.dart:132:8 - unused_field
+   info - Statements in an if should be enclosed in a block - lib\home.dart:235:43 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\home.dart:236:43 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\home.dart:237:43 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\home.dart:238:44 - curly_braces_in_flow_control_structures
+   info - Statements in a for should be enclosed in a block - lib\home.dart:255:33 - curly_braces_in_flow_control_structures
+   info - Statements in a for should be enclosed in a block - lib\home.dart:260:32 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\home.dart:446:42 - curly_braces_in_flow_control_structures
+   info - Unnecessary use of multiple underscores - lib\home.dart:683:22 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\home.dart:916:22 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\home.dart:1283:22 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\home.dart:1865:22 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\home.dart:2178:22 - unnecessary_underscores
+warning - The declaration '_SignalIcon' isn't referenced - lib\home.dart:2750:7 - unused_element
+   info - The private field _plans could be 'final' - lib\meal_planner.dart:79:18 - prefer_final_fields
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:165:54 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:229:7 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:231:51 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:232:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:233:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:234:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:235:61 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:236:10 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:239:29 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:240:35 - curly_braces_in_flow_control_structures
+warning - The value of the local variable 'accent' isn't used - lib\meal_planner.dart:271:11 - unused_local_variable
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:311:75 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\meal_planner.dart:312:42 - curly_braces_in_flow_control_structures
+warning - The value of the local variable 'accent' isn't used - lib\meal_planner.dart:461:11 - unused_local_variable
+warning - A value for optional parameter 'isTextArea' isn't ever given - lib\meal_planner.dart:1345:85 - unused_element_parameter
+   info - Statements in a for should be enclosed in a block - lib\meal_planner.dart:1842:44 - curly_braces_in_flow_control_structures
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:293:61 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:432:62 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:497:46 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:499:46 - deprecated_member_use
+   info - Unnecessary use of multiple underscores - lib\medi_tracker.dart:548:31 - unnecessary_underscores
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:590:60 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:675:31 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:675:53 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:685:57 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:799:56 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:847:38 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:849:57 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:865:40 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:867:59 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:937:49 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:939:68 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1047:52 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1048:52 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1123:62 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1192:51 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1194:50 - deprecated_member_use
+   info - Unnecessary use of 'toList' in a spread - lib\medi_tracker.dart:1272:14 - unnecessary_to_list_in_spreads
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1322:68 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1371:64 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1390:47 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1520:55 - deprecated_member_use
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\medi_tracker.dart:1555:13 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1584:48 - deprecated_member_use
+   info - Statements in an if should be enclosed in a block - lib\medi_tracker.dart:1632:30 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\medi_tracker.dart:1633:30 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\medi_tracker.dart:1634:30 - curly_braces_in_flow_control_structures
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\medi_tracker.dart:1642:22 - deprecated_member_use
+   info - Invalid use of a private type in a public API - lib\occasion.dart:29:9 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\occasion.dart:30:9 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\occasion.dart:39:19 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\occasion.dart:40:19 - library_private_types_in_public_api
+   info - The 'child' argument should be last in widget constructor invocations - lib\occasion.dart:367:25 - sort_child_properties_last
+   info - The 'child' argument should be last in widget constructor invocations - lib\occasion.dart:378:25 - sort_child_properties_last
+warning - The value of the field 'bg2' isn't used - lib\onboarding1.dart:56:22 - unused_field
+   info - Unnecessary use of multiple underscores - lib\onboarding1.dart:262:34 - unnecessary_underscores
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\onboarding1.dart:512:37 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\onboarding1.dart:530:36 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\onboarding1.dart:606:33 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\onboarding1.dart:625:32 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\onboarding1.dart:847:29 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\onboarding2.dart:220:35 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\onboarding2.dart:312:38 - deprecated_member_use
+   info - Unnecessary use of multiple underscores - lib\onboarding2.dart:429:30 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\onboarding2.dart:963:41 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\onboarding2.dart:963:45 - unnecessary_underscores
+warning - The declaration '_accent' isn't referenced - lib\onboarding3.dart:20:13 - unused_element
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\onboarding3.dart:598:29 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\onboarding3.dart:616:29 - deprecated_member_use
+   info - The private field _looks could be 'final' - lib\party_looks.dart:120:14 - prefer_final_fields
+warning - A value for optional parameter 'duration' isn't ever given - lib\profile.dart:102:10 - unused_element_parameter
+warning - The declaration '_accentDimLocal' isn't referenced - lib\profile.dart:351:13 - unused_element
+warning - The declaration '_accentBorderLocal' isn't referenced - lib\profile.dart:352:13 - unused_element
+   info - The imported package 'http' isn't a dependency of the importing package - lib\skincare.dart:3:8 - depend_on_referenced_packages
+   info - Statements in a for should be enclosed in a block - lib\skincare.dart:251:45 - curly_braces_in_flow_control_structures
+   info - Statements in a for should be enclosed in a block - lib\skincare.dart:281:37 - curly_braces_in_flow_control_structures
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\skincare.dart:377:21 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\vector_1.dart:440:43 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\vector_2.dart:154:48 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\vector_2.dart:248:22 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\vector_2.dart:250:41 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\vector_2.dart:277:43 - deprecated_member_use
+   info - 'background' is deprecated and shouldn't be used. Use surface instead. This feature was deprecated after v3.18.0-0.1.pre - lib\vector_3.dart:31:7 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\vector_3.dart:124:38 - deprecated_member_use
+   info - Unnecessary use of multiple underscores - lib\vector_3.dart:135:29 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\vector_3.dart:135:33 - unnecessary_underscores
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\vector_3.dart:154:38 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\vector_3.dart:160:40 - deprecated_member_use
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\wardrobe.dart:1524:38 - deprecated_member_use
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\wardrobe.dart:2033:38 - deprecated_member_use
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\wardrobe.dart:2807:36 - deprecated_member_use
+warning - The value of the local variable 'kAccentGrad' isn't used - lib\workout.dart:109:13 - unused_local_variable
+   info - The private field _outfits could be 'final' - lib\workout.dart:330:30 - prefer_final_fields
+   info - Unnecessary use of multiple underscores - lib\workout.dart:462:95 - unnecessary_underscores
+  error - Undefined name 'kMutedLight' - lib\workout.dart:496:50 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:498:54 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:557:77 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:769:73 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:799:56 - undefined_identifier
+   info - Statements in a for should be enclosed in a block - lib\workout.dart:1037:44 - curly_braces_in_flow_control_structures
+  error - Undefined name 'kMutedLight' - lib\workout.dart:1306:117 - undefined_identifier
+  error - Undefined name 'kBg2' - lib\workout.dart:1390:44 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1391:41 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1397:86 - undefined_identifier
+  error - Undefined name 'kText' - lib\workout.dart:1399:64 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1402:62 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1402:137 - undefined_identifier
+  error - Undefined name 'kMuted' - lib\workout.dart:1403:70 - undefined_identifier
+  error - Undefined name 'kPhoneShell' - lib\workout.dart:1425:49 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1425:63 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1427:78 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1431:95 - undefined_identifier
+  error - Undefined name 'kText' - lib\workout.dart:1434:95 - undefined_identifier
+  error - Undefined name 'kMuted' - lib\workout.dart:1434:103 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1446:58 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1446:133 - undefined_identifier
+  error - Undefined name 'kText' - lib\workout.dart:1447:89 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:1448:124 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1461:60 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1461:135 - undefined_identifier
+  error - Undefined name 'kMuted' - lib\workout.dart:1463:64 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:1466:74 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1474:54 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1474:129 - undefined_identifier
+  error - Undefined name 'kText' - lib\workout.dart:1475:62 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:1476:143 - undefined_identifier
+  error - Undefined name 'kText' - lib\workout.dart:1487:74 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:1545:88 - undefined_identifier
+warning - The declaration '_FormInput' isn't referenced - lib\workout.dart:1561:7 - unused_element
+
+flutter : 159 issues found. (ran in 1.3s)
+At line:1 char:1
++ flutter analyze lib/ 2>&1 | Out-File -FilePath "C:\Users\parim\myapp\ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (159 issues found. (ran in 
+1.3s):Strin    g) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

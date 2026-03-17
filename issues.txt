@@ -1,0 +1,52 @@
+
+=== curly_braces_in_flow_control_structures (1) ===
+   info - Statements in a for should be enclosed in a block - lib\workout.dart:1037:44 - curly_braces_in_flow_control_structures
+
+=== prefer_final_fields (1) ===
+   info - The private field _outfits could be 'final' - lib\workout.dart:330:30 - prefer_final_fields
+
+=== undefined_identifier (33) ===
+  error - Undefined name 'kMutedLight' - lib\workout.dart:496:50 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:498:54 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:557:77 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:769:73 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:799:56 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:1306:117 - undefined_identifier
+  error - Undefined name 'kBg2' - lib\workout.dart:1390:44 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1391:41 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1397:86 - undefined_identifier
+  error - Undefined name 'kText' - lib\workout.dart:1399:64 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1402:62 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1402:137 - undefined_identifier
+  error - Undefined name 'kMuted' - lib\workout.dart:1403:70 - undefined_identifier
+  error - Undefined name 'kPhoneShell' - lib\workout.dart:1425:49 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1425:63 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1427:78 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1431:95 - undefined_identifier
+  error - Undefined name 'kText' - lib\workout.dart:1434:95 - undefined_identifier
+  error - Undefined name 'kMuted' - lib\workout.dart:1434:103 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1446:58 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1446:133 - undefined_identifier
+  error - Undefined name 'kText' - lib\workout.dart:1447:89 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:1448:124 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1461:60 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1461:135 - undefined_identifier
+  error - Undefined name 'kMuted' - lib\workout.dart:1463:64 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:1466:74 - undefined_identifier
+  error - Undefined name 'kPanel' - lib\workout.dart:1474:54 - undefined_identifier
+  error - Undefined name 'kCardBorder' - lib\workout.dart:1474:129 - undefined_identifier
+  error - Undefined name 'kText' - lib\workout.dart:1475:62 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:1476:143 - undefined_identifier
+  error - Undefined name 'kText' - lib\workout.dart:1487:74 - undefined_identifier
+  error - Undefined name 'kMutedLight' - lib\workout.dart:1545:88 - undefined_identifier
+
+=== unnecessary_underscores (1) ===
+   info - Unnecessary use of multiple underscores - lib\workout.dart:462:95 - unnecessary_underscores
+
+=== unused_element (1) ===
+warning - The declaration '_FormInput' isn't referenced - lib\workout.dart:1561:7 - unused_element
+
+=== unused_local_variable (1) ===
+warning - The value of the local variable 'kAccentGrad' isn't used - lib\workout.dart:109:13 - unused_local_variable
+
+Total: 38 issues
