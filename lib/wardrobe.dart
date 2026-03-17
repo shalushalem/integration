@@ -10,14 +10,14 @@
 //   • .item-like-btn hover → scale(1.12) + shadow               [MISSING in Flutter]
 //   • .item-like-btn active → scale(0.88) in 80ms               [MISSING in Flutter]
 //   • .item-like-btn.liked svg → scale(1.15) persistent         [PARTIAL – Flutter does 1.15 via TweenSequence end but no press-active shrink]
-//   • @keyframes heart-pop → 1→1.45→0.9→1.18→1.15              [PARTIAL – Flutter TweenSequence is close but misses cubic-bezier(0.34,1.2)]
+//   • @keyframes heart-pop → 1→1.45→0.9→1.18→1.15               [PARTIAL – Flutter TweenSequence is close but misses cubic-bezier(0.34,1.2)]
 //   • @keyframes fadeUp card → opacity 0→1, Y 12px→0            [IMPLEMENTED via _FadeUpItem]
 //   • @keyframes ai-glow-pulse → box-shadow pulse 3s            [IMPLEMENTED]
-//   • @keyframes ai-dot-blink → opacity 0.6→1, 2s              [IMPLEMENTED]
+//   • @keyframes ai-dot-blink → opacity 0.6→1, 2s               [IMPLEMENTED]
 //   • .filter-chip hover → translateY(-1px) + shadow            [IMPLEMENTED]
 //   • .stat-card hover → translateY(-2px) scale(1.01)           [IMPLEMENTED]
 //   • .detail-action-btn hover → background tint                [MISSING – no hover on action buttons inside detail panel]
-//   • .modal slideUp → opacity 0→1, Y 28px→0, scale 0.96→1     [PARTIAL – Flutter slide is Y only, no scale component]
+//   • .modal slideUp → opacity 0→1, Y 28px→0, scale 0.96→1      [PARTIAL – Flutter slide is Y only, no scale component]
 //   • .item-card hover → translateY(-4px) + shadow              [IMPLEMENTED]
 //   • .occ-chip active → gradient toggle                        [IMPLEMENTED]
 //   • .back-btn-wrap hover → scale(0.95) + bg darken            [IMPLEMENTED via _HoverScaleButton]
@@ -73,12 +73,15 @@
 // F11     | Wrap Scaffold with Focus + RawKeyboardListener in WardrobeScreen
 // ============================================================
 
+import 'dart:convert'; // <-- ADDED for Base64 encoding
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:myapp/theme/theme_tokens.dart';
+import 'package:provider/provider.dart'; // <-- ADDED for BackendService
+import 'package:myapp/services/backend_service.dart'; // <-- ADDED for AI API
 
 // ── COLORS ──
 
@@ -773,6 +776,10 @@ class _AddItemModalState extends State<_AddItemModal>
   // [F08] Scale component for modal entry animation
   late Animation<double> _scaleAnim;
 
+  // --- NEW: AI Processing State ---
+  bool _isProcessing = false;
+  String _processStatus = '';
+
   static const _cats = [
     'Tops',
     'Bottoms',
@@ -820,6 +827,7 @@ class _AddItemModalState extends State<_AddItemModal>
     super.dispose();
   }
 
+  // --- UPDATED: Automatically connects to Python Backend ---
   Future<void> _pickImage(ImageSource source) async {
     try {
       final file = await _picker.pickImage(
@@ -828,13 +836,63 @@ class _AddItemModalState extends State<_AddItemModal>
       );
       if (file == null) return;
       final bytes = await file.readAsBytes();
+
       if (!mounted) return;
-      setState(() => _itemImageBytes = bytes);
-    } catch (_) {
+      
+      // Show the original image immediately and start processing
+      setState(() {
+        _itemImageBytes = bytes;
+        _isProcessing = true;
+        _processStatus = 'Cutting out garment...';
+      });
+
+      final backend = Provider.of<BackendService>(context, listen: false);
+      String base64Image = base64Encode(bytes);
+
+      // STEP 1: Remove Background (RMBG-2.0)
+      final bgResult = await backend.removeBackground(base64Image);
+      if (bgResult != null && mounted) {
+        setState(() {
+          _itemImageBytes = base64Decode(bgResult); // Replace with transparent image!
+          _processStatus = 'Analyzing fabric & color...';
+        });
+        base64Image = bgResult; 
+      }
+
+      // STEP 2: Analyze Image (Llama 3.2 Vision + OpenCV)
+      final analysis = await backend.analyzeImage(base64Image);
+      if (analysis != null && mounted) {
+        setState(() {
+          // Auto-fill Name
+          _nameCtrl.text = analysis['item_name'] ?? analysis['name'] ?? 'New Item';
+          
+          // Auto-fill Category mapping
+          String aiCat = analysis['app_category'] ?? analysis['category'] ?? '';
+          if (_cats.contains(aiCat)) {
+            _selectedCat = aiCat;
+          }
+
+          // Auto-fill Colors & Tags into Notes
+          String color = analysis['dominant_color_hex'] ?? analysis['color_code'] ?? '';
+          String subCat = analysis['sub_category'] ?? '';
+          String pattern = analysis['pattern'] ?? '';
+          _notesCtrl.text = 'Color: $color\nStyle: $subCat\nPattern: $pattern';
+        });
+      }
+
+    } catch (e) {
+      print("Image Process Error: $e");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to access image source.')),
+        const SnackBar(content: Text('Unable to process image.')),
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _processStatus = '';
+        });
+      }
     }
   }
 
@@ -911,6 +969,102 @@ class _AddItemModalState extends State<_AddItemModal>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _ModalField(
+                            label: 'Add Items',
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: IgnorePointer(
+                                        ignoring: _isProcessing,
+                                        child: Opacity(
+                                          opacity: _isProcessing ? 0.5 : 1.0,
+                                          child: _UploadSourceButton(
+                                            label: 'Open Gallery',
+                                            icon: Icons.photo_library_outlined,
+                                            onTap: () => _pickImage(
+                                                ImageSource.gallery),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: IgnorePointer(
+                                        ignoring: _isProcessing,
+                                        child: Opacity(
+                                          opacity: _isProcessing ? 0.5 : 1.0,
+                                          child: _UploadSourceButton(
+                                            label: 'Open Camera',
+                                            icon: Icons.photo_camera_outlined,
+                                            onTap: () => _pickImage(
+                                                ImageSource.camera),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (_itemImageBytes != null) ...[
+                                  const SizedBox(height: 12),
+                                  Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      // The Image
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Image.memory(
+                                          _itemImageBytes!,
+                                          height: 140,
+                                          width: double.infinity,
+                                          fit: BoxFit.contain, // Fit well for transparent imgs
+                                          // Add a subtle checkered pattern background for transparent images
+                                          color: _isProcessing ? t.backgroundPrimary.withValues(alpha: 0.5) : null,
+                                          colorBlendMode: _isProcessing ? BlendMode.darken : null,
+                                        ),
+                                      ),
+                                      // Processing Overlay
+                                      if (_isProcessing)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                          decoration: BoxDecoration(
+                                            color: t.backgroundSecondary.withValues(alpha: 0.85),
+                                            borderRadius: BorderRadius.circular(20),
+                                            border: Border.all(color: t.accent.primary.withValues(alpha: 0.3)),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              SizedBox(
+                                                width: 14, 
+                                                height: 14, 
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2, 
+                                                  color: t.accent.primary
+                                                )
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                _processStatus, 
+                                                style: TextStyle(
+                                                  fontFamily: 'Inter',
+                                                  color: t.textPrimary, 
+                                                  fontSize: 12, 
+                                                  fontWeight: FontWeight.w500
+                                                )
+                                              ),
+                                            ],
+                                          ),
+                                        )
+                                    ],
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _ModalField(
                             label: 'Item name *',
                             child: _StyledInput(
                               controller: _nameCtrl,
@@ -925,48 +1079,6 @@ class _AddItemModalState extends State<_AddItemModal>
                               categories: _cats,
                               onChanged: (v) =>
                                   setState(() => _selectedCat = v ?? ''),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          _ModalField(
-                            label: 'Add Items',
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _UploadSourceButton(
-                                        label: 'Open Gallery',
-                                        icon: Icons.photo_library_outlined,
-                                        onTap: () => _pickImage(
-                                            ImageSource.gallery),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: _UploadSourceButton(
-                                        label: 'Open Camera',
-                                        icon: Icons.photo_camera_outlined,
-                                        onTap: () => _pickImage(
-                                            ImageSource.camera),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                if (_itemImageBytes != null) ...[
-                                  const SizedBox(height: 12),
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Image.memory(
-                                      _itemImageBytes!,
-                                      height: 140,
-                                      width: double.infinity,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
-                                ],
-                              ],
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -1065,27 +1177,33 @@ class _AddItemModalState extends State<_AddItemModal>
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: GestureDetector(
-                            onTap: _submit,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 13),
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(colors: [
-                                  t.accent.primary,
-                                  t.accent.tertiary
-                                ]),
-                                borderRadius:
-                                BorderRadius.circular(14),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                'Save to wardrobe',
-                                style: TextStyle(
-                                    fontFamily: 'Inter',
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                    color: t.textPrimary),
+                          child: IgnorePointer(
+                            ignoring: _isProcessing,
+                            child: Opacity(
+                              opacity: _isProcessing ? 0.5 : 1.0,
+                              child: GestureDetector(
+                                onTap: _submit,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 13),
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(colors: [
+                                      t.accent.primary,
+                                      t.accent.tertiary
+                                    ]),
+                                    borderRadius:
+                                    BorderRadius.circular(14),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    'Save to wardrobe',
+                                    style: TextStyle(
+                                        fontFamily: 'Inter',
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                        color: t.textPrimary),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -1783,7 +1901,7 @@ class _InlineInsightCardState extends State<_InlineInsightCard>
         vsync: this, duration: const Duration(seconds: 3))
       ..repeat(reverse: true);
     _glowAnim =
-        CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut);
+    CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut);
 
     _dotCtrl = AnimationController(
         vsync: this, duration: const Duration(seconds: 2))
@@ -1814,16 +1932,16 @@ class _InlineInsightCardState extends State<_InlineInsightCard>
 
     if (liked.isNotEmpty && mostWorn != null && mostWorn.worn > 0) {
       final likedStr =
-          '${liked.length} piece${liked.length != 1 ? 's' : ''}';
+      '${liked.length} piece${liked.length != 1 ? 's' : ''}';
       final wearStr =
-          '${mostWorn.worn} wear${mostWorn.worn != 1 ? 's' : ''}';
+      '${mostWorn.worn} wear${mostWorn.worn != 1 ? 's' : ''}';
       final rotateStr = unwornCount > 0
           ? ' — rotate your $unwornCount unworn piece${unwornCount != 1 ? 's' : ''}'
           : '';
       return 'You love $likedStr. Your ${mostWorn.name} leads with $wearStr$rotateStr.';
     } else if (mostWorn != null && mostWorn.worn > 0) {
       final wearStr =
-          '${mostWorn.worn} wear${mostWorn.worn != 1 ? 's' : ''}';
+      '${mostWorn.worn} wear${mostWorn.worn != 1 ? 's' : ''}';
       if (unwornCount > 0) {
         return 'Your ${mostWorn.name} leads with $wearStr. $unwornCount piece${unwornCount != 1 ? 's' : ''} still unworn — time to rotate!';
       } else {

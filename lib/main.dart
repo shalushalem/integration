@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; 
 import 'package:myapp/boards.dart';
 import 'package:myapp/home.dart' as home;
 import 'package:myapp/onboarding1.dart';
@@ -15,9 +16,17 @@ import 'package:myapp/theme/accent_palette.dart';
 import 'package:myapp/theme/base_theme.dart';
 import 'package:myapp/theme/theme_controller.dart';
 import 'package:myapp/theme/theme_tokens.dart';
+import 'package:myapp/services/appwrite_service.dart'; 
+import 'package:myapp/services/backend_service.dart'; // <-- Added Backend Service
 import 'package:provider/provider.dart';
 
-void main() {
+Future<void> main() async {
+  // Ensure Flutter bindings are initialized before calling async methods
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Load the .env file
+  await dotenv.load(fileName: ".env");
+
   runApp(const MyApp());
 }
 
@@ -60,6 +69,14 @@ class MyApp extends StatelessWidget {
           create: (context) => ThemeController()..loadTheme(),
         ),
         ChangeNotifierProvider(create: (context) => ProfileController()),
+        // Appwrite Database & Auth Service
+        Provider<AppwriteService>(
+          create: (_) => AppwriteService(),
+        ),
+        // Python AI Backend Service
+        Provider<BackendService>(
+          create: (_) => BackendService(),
+        ),
       ],
       child: Consumer<ThemeController>(
         builder: (context, controller, child) {
@@ -88,7 +105,10 @@ class MyApp extends StatelessWidget {
             darkTheme: darkTheme,
             themeMode:
             controller.isDarkMode ? ThemeMode.dark : ThemeMode.light,
-            initialRoute: AppRoutes.signin,
+            
+            // Uses AuthWrapper to check session on startup
+            home: const AuthWrapper(),
+            
             routes: {
               AppRoutes.intro: (_) => const SignInScreen(),
               AppRoutes.signin: (_) => const SignInScreen(),
@@ -357,9 +377,6 @@ class _MainNavigationShellState extends State<MainNavigationShell>
                       child: GestureDetector(
                         onTap: () => _handleNavTap(i),
                         behavior: HitTestBehavior.opaque,
-                        // Wrap both icon + label in a single translate
-                        // so they move as one unit (cleaner than two
-                        // separate Transform.translate widgets)
                         child: Transform.translate(
                           offset: Offset(0, rise),
                           child: Column(
@@ -535,7 +552,6 @@ class _MainNavigationShellState extends State<MainNavigationShell>
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  LENS SHEET CONTENT
-//  Extracted into its own StatelessWidget for clarity + reusability
 // ═════════════════════════════════════════════════════════════════════════════
 class _LensSheetContent extends StatelessWidget {
   final AppThemeTokens t;
@@ -623,7 +639,7 @@ class _LensSheetContent extends StatelessWidget {
                   ],
                 ),
 
-                // Close button with press feedback
+                // Close button
                 _PressButton(
                   onTap: onClose,
                   child: Container(
@@ -736,7 +752,6 @@ class _LensSheetContent extends StatelessWidget {
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  LENS OPTION ROW
-//  Interactive option row with press-scale micro-animation + haptic
 // ═════════════════════════════════════════════════════════════════════════════
 class _LensOption extends StatefulWidget {
   final IconData icon;
@@ -862,7 +877,7 @@ class _LensOptionState extends State<_LensOption> {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  PRESS BUTTON  — lightweight press-scale wrapper for icon buttons
+//  PRESS BUTTON
 // ═════════════════════════════════════════════════════════════════════════════
 class _PressButton extends StatefulWidget {
   final Widget child;
@@ -901,9 +916,6 @@ class _PressButtonState extends State<_PressButton> {
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  HOME PAGE HOST
-//  Renders the home screen and clips any overflowing bottom chrome (chat bar,
-//  bottom nav) that the nested Screen4 draws — the main shell provides its
-//  own nav bar so the home screen's copy should be hidden.
 // ═════════════════════════════════════════════════════════════════════════════
 class _HomePageHost extends StatelessWidget {
   const _HomePageHost();
@@ -918,7 +930,6 @@ class _HomePageHost extends StatelessWidget {
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  NAV PILL PAINTER
-//  Draws the morphing pill shape with a bulge under the active icon
 // ═════════════════════════════════════════════════════════════════════════════
 class _NavPillPainter extends CustomPainter {
   final int    activeIdx;
@@ -1011,4 +1022,58 @@ class _NavPillPainter extends CustomPainter {
       old.activeIdx  != activeIdx  ||
           old.bulgeT     != bulgeT     ||
           old.fillColor  != fillColor;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  AUTH WRAPPER (Checks if the user is already logged in)
+// ═════════════════════════════════════════════════════════════════════════════
+class AuthWrapper extends StatefulWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  bool _isLoading = true;
+  bool _isLoggedIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuth();
+  }
+
+  Future<void> _checkAuth() async {
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    
+    // Check if Appwrite has a saved session
+    final user = await appwrite.getCurrentUser();
+
+    if (mounted) {
+      setState(() {
+        _isLoggedIn = user != null; // True if user exists, False if null
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 1. Show a loading spinner while checking Appwrite
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        body: Center(
+          child: CircularProgressIndicator(
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+      );
+    }
+
+    // 2. If logged in, go straight to the Home Screen! 
+    //    Otherwise, show the Sign In Screen.
+    return _isLoggedIn ? const MainNavigationShell() : const SignInScreen();
+  }
 }
