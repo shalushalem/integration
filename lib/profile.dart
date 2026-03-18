@@ -1,75 +1,24 @@
 // ============================================================================
-// FIXES APPLIED
-//
-// FIX-1  RENDER CRASH — "blurRadius >= 0.0"
-//        Clamped all animated opacity / blur values with .clamp(0.0, 1.0)
-//        and max(0.0, ...) so they are always non-negative.
-//
-// FIX-2  PROFILE CHANGES NOT PERSISTING
-//        TextEditingControllers stored as late fields, initialised once in
-//        initState. Committed to _profile on save via _commitFieldsToProfile.
-//
-// FIX-2A CONFIRM BUTTON TIMER RACE
-//        Logout modal closes the overlay immediately on tap; the toast is
-//        shown from onConfirmed callback. No competing timers.
-//
-// FIX-2C AVATAR NOT REVERTED ON DISCARD
-//        _savedAvatarPath / _savedAvatarBytes track last committed avatar.
-//        Discard restores both.
-//
-// FIX-2D GENDER NOT REVERTED ON DISCARD
-//        Introduced _editingGender for in-progress edits; only committed to
-//        _profile.gender inside _commitFieldsToProfile(). Discard restores
-//        _editingGender from _profile.gender.
-//
-// FIX-2F TOAST STALE OVERLAY ENTRY
-//        onDismiss guarded so it is only invoked when entry is still active.
-//
-// FIX-3  WEB-SAFE IMAGE PICKER
-//        Removed dart:io (crashes Flutter Web at compile time).
-//        Uses XFile.readAsBytes() → Uint8List → Image.memory() on every
-//        platform (Web, Android, iOS, desktop) — no kIsWeb branch needed.
-//        _isDirty set to true when a photo is picked.
-//        _avatarBytes reverted to _savedAvatarBytes on discard.
-//
-// FIX-4  REMOVE MOCK STATUS BAR
-//        _buildStatusBar() removed entirely.
-//
-// FIX-4B TWEEN ANIMATION BUILDER MODAL RESET
-//        Modal entrance animation moved to _AnimatedModal StatefulWidget
-//        backed by a proper AnimationController so it does not reset on
-//        every parent setState.
-//
-// FIX-4D GESTUREDETECTOR HIT-TEST BEHAVIOUR
-//        Outer overlay GestureDetector uses HitTestBehavior.opaque.
-//
-// pubspec.yaml — add:
-//   dependencies:
-//     image_picker: ^1.1.2
-//
-// iOS Info.plist — add:
-//   <key>NSPhotoLibraryUsageDescription</key>
-//   <string>Used to update your profile picture.</string>
-//
-// Android (minSdk < 33) AndroidManifest.xml — add:
-//   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-//       android:maxSdkVersion="32"/>
+// PROFILE.DART - FULLY INTEGRATED WITH APPWRITE DB & CLOUDFLARE R2 S3
 // ============================================================================
 
-import 'dart:typed_data';
-
+import 'dart:typed_data'; 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+
+// 🚀 Backend Integrations
+import 'package:appwrite/appwrite.dart';
+import 'package:minio/minio.dart';
+import 'package:myapp/config/env.dart';
+
+// 🎨 Theme
 import 'package:myapp/theme/accent_palette.dart';
 import 'package:myapp/theme/gradients.dart';
 import 'package:myapp/theme/profile_theme.dart';
 import 'package:myapp/theme/theme_controller.dart';
 import 'package:myapp/theme/theme_tokens.dart';
-
-// --- NEW: Added AppwriteService Import ---
-import 'package:myapp/services/appwrite_service.dart'; 
 
 class ProfileController extends ChangeNotifier {
   String name;
@@ -131,9 +80,21 @@ class ProfileController extends ChangeNotifier {
   }
 }
 
-
-
 // ── Palette now sourced from theme tokens ─────────────────────────────────────
+
+Color _accent4(AppThemeTokens t) =>
+    Color.lerp(t.accent.primary, t.accent.secondary, 0.55)!;
+Color _accent5(AppThemeTokens t) =>
+    Color.lerp(t.accent.secondary, t.accent.tertiary, 0.55)!;
+
+Color _bagsChip(AppThemeTokens t) =>
+    Color.lerp(t.accent.primary, t.accent.secondary, 0.35)!;
+Color _jewelryChip(AppThemeTokens t) =>
+    Color.lerp(t.accent.secondary, t.accent.tertiary, 0.35)!;
+Color _makeupChip(AppThemeTokens t) =>
+    Color.lerp(t.accent.primary, t.accent.tertiary, 0.35)!;
+Color _skincareChip(AppThemeTokens t) =>
+    Color.lerp(t.accent.tertiary, t.accent.secondary, 0.55)!;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // _FadeSlide — Staggered fadeUp entrance widget
@@ -186,7 +147,6 @@ class _FadeSlideState extends State<_FadeSlide>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Toast system
-// FIX-2F: onDismiss is guarded; stale entry.remove() calls are prevented.
 // ─────────────────────────────────────────────────────────────────────────────
 OverlayEntry? _activeToast;
 
@@ -199,7 +159,6 @@ void _showToast(BuildContext context, String message) {
     builder: (_) => _ToastWidget(
       message: message,
       onDismiss: () {
-        // FIX-2F: only remove if this entry is still the active one
         if (_activeToast == entry) {
           entry.remove();
           _activeToast = null;
@@ -241,7 +200,6 @@ class _ToastWidgetState extends State<_ToastWidget>
     Future.delayed(const Duration(milliseconds: 2200), () {
       if (mounted) {
         _ctrl.reverse().then((_) {
-          // FIX-2F: mounted check before invoking dismiss
           if (mounted) widget.onDismiss();
         });
       }
@@ -291,7 +249,7 @@ class _ToastWidgetState extends State<_ToastWidget>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Profile state model — single source of truth for persisted fields
+// Profile state model
 // ─────────────────────────────────────────────────────────────────────────────
 class _ProfileData {
   String name;
@@ -300,14 +258,20 @@ class _ProfileData {
   String phone;
   String dob;
   String gender;
+  int skinTone;
+  String bodyShape;
+  String? avatarUrl;
 
   _ProfileData({
-    this.name = 'Charlotte King',
-    this.username = '@johnkinggraphics',
-    this.email = 'charlotte@johnkinggraphics.com',
-    this.phone = '6895312',
+    this.name = 'New User',
+    this.username = '@username',
+    this.email = '',
+    this.phone = '',
     this.dob = '',
     this.gender = 'Female',
+    this.skinTone = 3,
+    this.bodyShape = 'Rectangle',
+    this.avatarUrl,
   });
 
   _ProfileData copyWith({
@@ -317,6 +281,9 @@ class _ProfileData {
     String? phone,
     String? dob,
     String? gender,
+    int? skinTone,
+    String? bodyShape,
+    String? avatarUrl,
   }) =>
       _ProfileData(
         name: name ?? this.name,
@@ -325,14 +292,12 @@ class _ProfileData {
         phone: phone ?? this.phone,
         dob: dob ?? this.dob,
         gender: gender ?? this.gender,
+        skinTone: skinTone ?? this.skinTone,
+        bodyShape: bodyShape ?? this.bodyShape,
+        avatarUrl: avatarUrl ?? this.avatarUrl,
       );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FIX-4B: _AnimatedModal — proper StatefulWidget modal wrapper so the
-// entrance animation is backed by a real AnimationController and does NOT
-// restart on every parent setState.
-// ─────────────────────────────────────────────────────────────────────────────
 class _AnimatedModal extends StatefulWidget {
   final Widget child;
   const _AnimatedModal({required this.child});
@@ -371,16 +336,16 @@ class _AnimatedModalState extends State<_AnimatedModal>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Screen4
+// ProfileScreen 
 // ─────────────────────────────────────────────────────────────────────────────
-class Screen4 extends StatefulWidget {
-  const Screen4({super.key});
+class ProfileScreen extends StatefulWidget {
+  const ProfileScreen({super.key});
 
   @override
-  State<Screen4> createState() => _Screen4State();
+  State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
+class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateMixin {
   AppThemeTokens get _t => context.themeTokens;
   Color get _bg => _t.backgroundPrimary;
   Color get _bg2 => _t.backgroundSecondary;
@@ -401,31 +366,24 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   Color get _textPrimary => _t.textPrimary;
   Color get _textMuted => _t.mutedText;
   
-  // ── View / modal visibility ──
   bool _showEditView = false;
   bool _showLogoutModal = false;
   bool _showLanguageModal = false;
   bool _showDiscardModal = false;
 
-  // --- NEW: Loading state for database fetch ---
-  bool _isLoadingProfile = true;
-
-  // ── Preferences ──
   String _selectedLanguage = 'English';
 
-  // ── Edit form ──
   String _selectedEditTab = 'basics';
   bool _isDirty = false;
   bool _isSaving = false;
   final Set<String> _selectedStyles = {'Casual', 'Minimalist'};
 
-  // FIX-2: Persisted profile data — single source of truth.
   _ProfileData _profile = _ProfileData();
 
-  // FIX-2D: In-progress gender value; only written to _profile on save.
   late String _editingGender;
+  late int _selectedSkinTone;
+  late String _selectedBodyShape;
 
-  // FIX-2: TextEditingControllers live here, initialised once in initState.
   late final TextEditingController _nameCtrl;
   late final TextEditingController _usernameCtrl;
   late final TextEditingController _emailCtrl;
@@ -433,13 +391,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   late final TextEditingController _dobCtrl;
   final ScrollController _editScrollCtrl = ScrollController();
 
-  // FIX-3: Avatar state — stored as raw bytes so Image.memory() works on
-  // every platform (Web, Android, iOS, desktop) without dart:io.
-  Uint8List? _avatarBytes;        // current session (may be unsaved)
-  Uint8List? _savedAvatarBytes;   // last committed — restored on discard
+  Uint8List? _avatarBytes;        
+  Uint8List? _savedAvatarBytes;   
   final _imagePicker = ImagePicker();
 
-  // ── Animation controllers ──
   late final AnimationController _breatheCtrl;
   late final Animation<double> _breatheAnim;
   late final AnimationController _ambTLCtrl;
@@ -454,36 +409,21 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   void initState() {
     super.initState();
 
-    final sharedProfile = context.read<ProfileController>();
-    _profile = _profile.copyWith(
-      name: sharedProfile.name.isNotEmpty ? sharedProfile.name : _profile.name,
-      phone: sharedProfile.phone.isNotEmpty ? sharedProfile.phone : _profile.phone,
-      dob: sharedProfile.dob.isNotEmpty ? sharedProfile.dob : _profile.dob,
-      gender: sharedProfile.gender.isNotEmpty ? sharedProfile.gender : _profile.gender,
-    );
-
-    // FIX-2: Initialise controllers once from _profile.
     _nameCtrl = TextEditingController(text: _profile.name);
     _usernameCtrl = TextEditingController(text: _profile.username);
     _emailCtrl = TextEditingController(text: _profile.email);
     _phoneCtrl = TextEditingController(text: _profile.phone);
     _dobCtrl = TextEditingController(text: _profile.dob);
 
-    // FIX-2D: Initialise editing gender from profile.
     _editingGender = _profile.gender;
+    _selectedSkinTone = _profile.skinTone;
+    _selectedBodyShape = _profile.bodyShape;
 
-    // Sync avatar from shared profile state.
-    _avatarBytes = sharedProfile.avatarBytes;
-    _savedAvatarBytes = _avatarBytes;
-
-    // Breathe / glow
     _breatheCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 4500));
     _breatheAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
         CurvedAnimation(parent: _breatheCtrl, curve: Curves.easeInOut));
 
-    // Ambient corners — all started immediately (FIX-2E: stagger via delays
-    // but begin animating from frame 1 via forward() before repeat).
     _ambTLCtrl =
     AnimationController(vsync: this, duration: const Duration(seconds: 6));
     _ambTL = Tween<double>(begin: 0.18, end: 0.30)
@@ -494,6 +434,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       ..forward();
     _ambBL = Tween<double>(begin: 0.18, end: 0.30)
         .animate(CurvedAnimation(parent: _ambBLCtrl, curve: Curves.easeInOut));
+    
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _breatheCtrl.repeat(reverse: true);
@@ -501,52 +442,61 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       Future.delayed(const Duration(milliseconds: 1500), () {
         if (mounted) _ambBLCtrl.repeat(reverse: true);
       });
-    });
 
-    // --- NEW: Trigger real database fetch ---
-    _fetchUserProfile();
+      // 🚀 1. Load Data from Appwrite Backend
+      _fetchProfileFromAppwrite();
+    });
   }
 
-  // --- NEW: Fetch Database Method ---
-  Future<void> _fetchUserProfile() async {
+  // ── APPWRITE: Fetch Data ────────────────────────────────────────────────
+  Future<void> _fetchProfileFromAppwrite() async {
     try {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      final user = await appwrite.getCurrentUser();
+      final client = Client()
+          .setEndpoint(Env.appwriteEndpoint)
+          .setProject(Env.appwriteProjectId);
+      final account = Account(client);
+      final databases = Databases(client);
 
-      if (user != null && mounted) {
+      final user = await account.get();
+      
+      final doc = await databases.getDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.usersCollection,
+        documentId: user.$id,
+      );
+
+      if (mounted) {
         setState(() {
-          // Update profile object with real Appwrite data
-          _profile = _profile.copyWith(
-            name: user.name.isNotEmpty ? user.name : _profile.name,
-            email: user.email.isNotEmpty ? user.email : _profile.email,
-            phone: user.phone.isNotEmpty ? user.phone : _profile.phone,
+          _profile = _ProfileData(
+            name: doc.data['name'] ?? _profile.name,
+            username: doc.data['username'] ?? _profile.username,
+            email: doc.data['email'] ?? _profile.email,
+            phone: doc.data['phone'] ?? _profile.phone,
+            dob: doc.data['dob'] ?? _profile.dob,
+            gender: doc.data['gender'] ?? _profile.gender,
+            skinTone: doc.data['skinTone'] ?? _profile.skinTone,
+            bodyShape: doc.data['bodyShape'] ?? _profile.bodyShape,
+            avatarUrl: doc.data['avatar_url'],
           );
 
-          // Update text controllers
+          if (doc.data['stylePreferences'] != null) {
+            _selectedStyles.clear();
+            _selectedStyles.addAll(List<String>.from(doc.data['stylePreferences']));
+          }
+
+          // Update Controllers 
           _nameCtrl.text = _profile.name;
+          _usernameCtrl.text = _profile.username;
           _emailCtrl.text = _profile.email;
           _phoneCtrl.text = _profile.phone;
-
-          _isLoadingProfile = false;
+          _dobCtrl.text = _profile.dob;
+          _editingGender = _profile.gender; 
+          _selectedSkinTone = _profile.skinTone;
+          _selectedBodyShape = _profile.bodyShape;
         });
-
-        // Fetch custom generated avatar
-        if (_avatarBytes == null) {
-          final avatar = await appwrite.getUserAvatar(_profile.name);
-          if (avatar != null && mounted) {
-            setState(() {
-              _avatarBytes = avatar;
-              _savedAvatarBytes = avatar;
-            });
-            context.read<ProfileController>().setAvatarBytes(avatar);
-          }
-        }
-      } else {
-        if (mounted) setState(() => _isLoadingProfile = false);
       }
     } catch (e) {
-      print("Error fetching profile: $e");
-      if (mounted) setState(() => _isLoadingProfile = false);
+      debugPrint("❌ Appwrite Fetch Profile Error (Normal if first login): $e");
     }
   }
 
@@ -564,10 +514,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // ── FIX-3: Web-safe image picker ────────────────────────────────────────
-  // Uses XFile.readAsBytes() on every platform — no dart:io, no kIsWeb branch.
-  // Image.memory() renders the bytes on both Web and mobile.
-  // ImageSource.camera is excluded: not supported on Flutter Web.
   Future<void> _pickImage() async {
     try {
       final XFile? picked = await _imagePicker.pickImage(
@@ -592,56 +538,118 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     }
   }
 
-  // ── FIX-2: Sync controllers + editing state back to _profile on save ─────
-  void _commitFieldsToProfile() {
-    _profile = _profile.copyWith(
-      name: _nameCtrl.text.trim(),
-      username: _usernameCtrl.text.trim(),
-      email: _emailCtrl.text.trim(),
-      phone: _phoneCtrl.text.trim(),
-      dob: _dobCtrl.text.trim(),
-      gender: _editingGender, // FIX-2D: commit editing gender
-    );
-    // FIX-3: commit avatar bytes (same field on all platforms)
-    _savedAvatarBytes = _avatarBytes;
-    context.read<ProfileController>().updateBasics(
-      name: _profile.name,
-      phone: _profile.phone,
-      gender: _profile.gender,
-      dob: _profile.dob,
-    );
-  }
-
-  // --- UPDATED: Save back to Database if changed ---
-  void _saveProfile() async {
+  // ── APPWRITE + R2: Save Data ────────────────────────────────────────────
+  Future<void> _saveProfile() async {
     if (!_canSave || _isSaving) return;
     HapticFeedback.lightImpact();
     setState(() => _isSaving = true);
-    
+
     try {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      // Attempt to update name in Appwrite if it was modified
-      if (_nameCtrl.text.trim() != _profile.name) {
-         await appwrite.account.updateName(name: _nameCtrl.text.trim());
+      final client = Client()
+          .setEndpoint(Env.appwriteEndpoint)
+          .setProject(Env.appwriteProjectId);
+      final account = Account(client);
+      final databases = Databases(client);
+
+      final user = await account.get();
+      final userId = user.$id;
+
+      String? newAvatarUrl = _profile.avatarUrl;
+
+      // 1. Upload to Cloudflare R2 if a new image was picked
+      if (_avatarBytes != null && _avatarBytes != _savedAvatarBytes) {
+        final r2Host = Env.r2S3ApiUrl.replaceAll('https://', '').replaceAll('http://', '');
+        final minio = Minio(
+          endPoint: r2Host,
+          accessKey: Env.r2AccessKeyId,
+          secretKey: Env.r2SecretAccessKey,
+          region: 'auto',
+        );
+
+        final fileName = 'avatar_${userId}_${DateTime.now().millisecondsSinceEpoch}.png';
+        
+        await minio.putObject(
+          Env.rawBucketId, // Saving avatars to raw bucket
+          fileName,
+          Stream.fromIterable([_avatarBytes!]),
+          size: _avatarBytes!.length,
+          metadata: {'content-type': 'image/png'},
+        );
+
+        newAvatarUrl = '${Env.r2UrlRaw}/$fileName';
+      }
+
+      // 2. Prepare Database Payload
+      final Map<String, dynamic> docData = {
+        'name': _nameCtrl.text.trim(),
+        'username': _usernameCtrl.text.trim(),
+        'email': _emailCtrl.text.trim(),
+        'phone': _phoneCtrl.text.trim(),
+        'dob': _dobCtrl.text.trim(),
+        'gender': _editingGender,
+        'skinTone': _selectedSkinTone,
+        'bodyShape': _selectedBodyShape,
+        'stylePreferences': _selectedStyles.toList(),
+      };
+
+      if (newAvatarUrl != null) {
+        docData['avatar_url'] = newAvatarUrl;
+      }
+
+      // 3. Upsert to Appwrite Users Collection
+      try {
+        await databases.updateDocument(
+          databaseId: Env.appwriteDatabaseId,
+          collectionId: Env.usersCollection,
+          documentId: userId,
+          data: docData,
+        );
+      } on AppwriteException catch (e) {
+        if (e.code == 404) {
+          // If document doesn't exist yet, create it
+          await databases.createDocument(
+            databaseId: Env.appwriteDatabaseId,
+            collectionId: Env.usersCollection,
+            documentId: userId,
+            data: docData,
+          );
+        } else {
+          rethrow;
+        }
+      }
+
+      // 4. Update Local State
+      _profile = _profile.copyWith(
+        name: _nameCtrl.text.trim(),
+        username: _usernameCtrl.text.trim(),
+        email: _emailCtrl.text.trim(),
+        phone: _phoneCtrl.text.trim(),
+        dob: _dobCtrl.text.trim(),
+        gender: _editingGender,
+        skinTone: _selectedSkinTone,
+        bodyShape: _selectedBodyShape,
+        avatarUrl: newAvatarUrl,
+      );
+
+      _savedAvatarBytes = _avatarBytes;
+
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _isDirty = false;
+          _showEditView = false;
+        });
+        _showToast(context, '✓ Profile updated');
       }
     } catch (e) {
-      print("Error saving to Appwrite: $e");
-    }
-
-    await Future.delayed(const Duration(milliseconds: 300));
-
-    if (mounted) {
-      _commitFieldsToProfile();
-      setState(() {
-        _isSaving = false;
-        _isDirty = false;
-        _showEditView = false;
-      });
-      _showToast(context, '✓ Profile updated');
+      debugPrint("❌ Profile Save Error: $e");
+      if (mounted) {
+        setState(() => _isSaving = false);
+        _showToast(context, '⚠ Failed to save profile');
+      }
     }
   }
 
-  // ── Open edit view — sync controllers from current profile ───────────────
   void _openEditView() {
     HapticFeedback.lightImpact();
     _nameCtrl.text = _profile.name;
@@ -650,8 +658,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _phoneCtrl.text = _profile.phone;
     _dobCtrl.text = _profile.dob;
     setState(() {
-      _editingGender = _profile.gender; // FIX-2D
-      _avatarBytes   = _savedAvatarBytes; // FIX-3: restore last saved avatar
+      _editingGender = _profile.gender; 
+      _selectedSkinTone = _profile.skinTone;
+      _selectedBodyShape = _profile.bodyShape;
+      _avatarBytes   = _savedAvatarBytes; 
       context.read<ProfileController>().setAvatarBytes(_avatarBytes);
       _isDirty = false;
       _selectedEditTab = 'basics';
@@ -713,9 +723,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     Navigator.of(context).maybePop();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // BUILD
-  // ─────────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<ThemeController>();
@@ -750,12 +757,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               enabled: !_isThemeTransitioning,
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 280),
-                child: _isLoadingProfile 
-                    ? Center(child: CircularProgressIndicator(color: _accentPrimary))
-                    : (_showEditView ? _buildEditView() : _buildProfileView()),
+                child: _showEditView ? _buildEditView() : _buildProfileView(),
               ),
             ),
-            // FIX-4B: modals wrapped in _AnimatedModal (proper AnimationController)
             if (_showLogoutModal)
               _AnimatedModal(child: _buildLogoutModal()),
             if (_showLanguageModal)
@@ -901,7 +905,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     required Widget trailing,
   }) {
     return Padding(
-      // FIX-4: increased top padding since mock status bar is gone
       padding: const EdgeInsets.fromLTRB(22, 56, 22, 10),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -974,7 +977,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               AnimatedBuilder(
                 animation: _breatheAnim,
                 builder: (_, _) {
-                  final v = _breatheAnim.value.clamp(0.0, 1.0); // FIX-1
+                  final v = _breatheAnim.value.clamp(0.0, 1.0); 
                   final opacity = 0.18 + (v * 0.12);
                   final scale = 1.0 + (v * 0.08);
                   return Transform.scale(
@@ -1001,7 +1004,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             ],
           ),
           const SizedBox(height: 16),
-          // FIX-2: Display persisted name and username.
           Text(
             _profile.name,
             style: TextStyle(
@@ -1069,11 +1071,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  // ── FIX-3: Web-safe avatar image renderer ────────────────────────────────
-  // Both platforms store the picked image as Uint8List (_avatarBytes).
-  // On Web:    image_picker already provides bytes via readAsBytes().
-  // On Mobile: _pickImage also reads bytes and stores them in _avatarBytes.
-  // This avoids dart:io File entirely so the file compiles on Flutter Web.
   Widget _buildAvatarImage() {
     if (_avatarBytes != null) {
       return Image.memory(
@@ -1083,6 +1080,14 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         height: 87,
         cacheWidth: 128,
         cacheHeight: 128,
+      );
+    } else if (_profile.avatarUrl != null) {
+      // ✅ Fallback to R2 Network Image
+      return Image.network(
+        _profile.avatarUrl!,
+        fit: BoxFit.cover,
+        width: 87,
+        height: 87,
       );
     }
     return _avatarPlaceholder();
@@ -1100,7 +1105,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     ),
   );
 
-  // ── Avatar ring ───────────────────────────────────────────────────────────
   Widget _buildAvatarRing({bool editable = true}) {
     return Stack(
       clipBehavior: Clip.none,
@@ -1108,7 +1112,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         AnimatedBuilder(
           animation: _breatheAnim,
           builder: (_, child) {
-            // FIX-1: clamp so blurRadius / spreadRadius are never negative.
             final v = _breatheAnim.value.clamp(0.0, 1.0);
             final glowOpacity = v * 0.28;
             final blur = (v * 28).clamp(0.0, 28.0);
@@ -1131,9 +1134,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                 boxShadow: [
                   BoxShadow(
                     color: _accentPrimary
-                        .withValues(alpha: glowOpacity.clamp(0.0, 1.0)), // FIX-1
-                    blurRadius: blur, // FIX-1: guaranteed ≥ 0
-                    spreadRadius: spread, // FIX-1: guaranteed ≥ 0
+                        .withValues(alpha: glowOpacity.clamp(0.0, 1.0)), 
+                    blurRadius: blur, 
+                    spreadRadius: spread, 
                     offset: const Offset(0, 8),
                   ),
                 ],
@@ -1160,7 +1163,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                 ),
               ],
             ),
-            // FIX-3: Web-safe avatar renderer — see _buildAvatarImage()
             child: ClipOval(child: _buildAvatarImage()),
           ),
         ),
@@ -1769,13 +1771,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   Widget _buildGenderOption(String value, String label) {
-    // FIX-2D: Compare against _editingGender, not _profile.gender.
     final isSelected = value == _editingGender;
     return Expanded(
       child: GestureDetector(
         onTap: () {
           setState(() {
-            // FIX-2D: Write to editing buffer, not directly to _profile.
             _editingGender = value;
             _isDirty = true;
           });
@@ -1836,6 +1836,16 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         Text('Choose your fashion style preferences.',
             style: TextStyle(color: _textMuted, fontSize: 12.5, height: 1.6)),
         const SizedBox(height: 18),
+        _buildStyleSubLabel('SKIN TONE'),
+        const SizedBox(height: 10),
+        _buildSkinToneSelector(),
+        const SizedBox(height: 18),
+        _buildStyleSubLabel('BODY SHAPE'),
+        const SizedBox(height: 10),
+        _buildBodyShapeSelector(),
+        const SizedBox(height: 18),
+        _buildStyleSubLabel('STYLE PREFERENCES'),
+        const SizedBox(height: 10),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -1851,6 +1861,129 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           ].map(_buildStyleChip).toList(),
         ),
       ],
+    );
+  }
+
+  Widget _buildStyleSubLabel(String text) {
+    return Text(
+      text,
+      style: TextStyle(
+        color: _textMuted,
+        fontSize: 10.5,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.08,
+      ),
+    );
+  }
+
+  Widget _buildSkinToneSelector() {
+    const skinToneColors = <Color>[
+      Color(0xFF4B2E21),
+      Color(0xFF6A4230),
+      Color(0xFF8A5B3E),
+      Color(0xFFAD7A58),
+      Color(0xFFC79A75),
+      Color(0xFFE1BC97),
+    ];
+
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: List<Widget>.generate(skinToneColors.length, (index) {
+        final level = index + 1;
+        final isSelected = _selectedSkinTone == level;
+        return GestureDetector(
+          onTap: () {
+            setState(() {
+              _selectedSkinTone = level;
+              _isDirty = true;
+            });
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: 62,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: _panel,
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(
+                color: isSelected ? _accentBorder : _cardBorder,
+                width: isSelected ? 1.6 : 1.3,
+              ),
+            ),
+            child: Column(
+              children: [
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: skinToneColors[index],
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isSelected ? _accentPrimary : _cardBorder,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '$level',
+                  style: TextStyle(
+                    color: isSelected ? _textPrimary : _textMuted,
+                    fontSize: 11.5,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _buildBodyShapeSelector() {
+    const bodyShapes = <String>[
+      'Rectangle',
+      'Triangle',
+      'Oval',
+      'Pear',
+      'Hourglass',
+      'Inverted Triangle',
+    ];
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: bodyShapes.map(_buildBodyShapeOption).toList(),
+    );
+  }
+
+  Widget _buildBodyShapeOption(String shape) {
+    final isSelected = _selectedBodyShape == shape;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedBodyShape = shape;
+          _isDirty = true;
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? _accentDim : _panel,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isSelected ? _accentBorder : _cardBorder),
+        ),
+        child: Text(
+          shape,
+          style: TextStyle(
+            color: isSelected ? _textPrimary : _textMuted,
+            fontSize: 12.5,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
+      ),
     );
   }
 
@@ -1906,7 +2039,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                   style: TextStyle(fontSize: 42)),
               const SizedBox(height: 14),
               _PressScaleWidget(
-                onTap: _pickImage,
+                onTap: _pickImage, 
                 pressedScale: 0.97,
                 child: Text(
                   'Tap to upload a full-body photo\nto try on outfits virtually.',
@@ -1926,7 +2059,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   // MODALS
   // ─────────────────────────────────────────────────────────────────────────
 
-  // FIX-2A: Logout modal closes immediately; no competing timer.
   Widget _buildLogoutModal() {
     return _buildModalOverlay(
       onDismiss: () => setState(() => _showLogoutModal = false),
@@ -1956,7 +2088,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             label: 'Log Out',
             loadingLabel: 'Please wait…',
             danger: true,
-            // FIX-2A: Close modal first, then show toast. No competing timers.
             onConfirmed: () {
               setState(() => _showLogoutModal = false);
               _showToast(context, 'Signed out successfully');
@@ -2137,17 +2268,15 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             loadingLabel: 'Discarding…',
             danger: true,
             onConfirmed: () {
-              // FIX-2C: Revert avatar to last saved state.
-              // FIX-2D: Revert editing gender to persisted value.
               setState(() {
                 _showDiscardModal = false;
                 _isDirty = false;
                 _showEditView = false;
-                // FIX-2C / FIX-3: revert avatar bytes to last saved state
                 _avatarBytes = _savedAvatarBytes;
                 context.read<ProfileController>().setAvatarBytes(_avatarBytes);
-                _editingGender = _profile.gender; // FIX-2D
-                // Restore text controllers to last saved values.
+                _editingGender = _profile.gender; 
+                _selectedSkinTone = _profile.skinTone;
+                _selectedBodyShape = _profile.bodyShape;
                 _nameCtrl.text = _profile.name;
                 _usernameCtrl.text = _profile.username;
                 _emailCtrl.text = _profile.email;
@@ -2168,7 +2297,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   Widget _buildModalOverlay(
       {required Widget child, required VoidCallback onDismiss}) {
     return GestureDetector(
-      // FIX-4D: opaque hit-testing so the overlay always receives taps.
       behavior: HitTestBehavior.opaque,
       onTap: onDismiss,
       child: Container(
@@ -2176,7 +2304,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         child: Align(
           alignment: Alignment.bottomCenter,
           child: GestureDetector(
-            // Absorb taps on the sheet itself to prevent dismiss.
             behavior: HitTestBehavior.opaque,
             onTap: () {},
             child: TweenAnimationBuilder<Offset>(
@@ -2298,7 +2425,6 @@ class _PressScaleWidgetState extends State<_PressScaleWidget> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // _FocusTextField — animated focus ring
-// FIX-2: Accepts an external TextEditingController so values survive rebuilds.
 // ─────────────────────────────────────────────────────────────────────────────
 class _FocusTextField extends StatefulWidget {
   final TextEditingController controller;
@@ -2348,7 +2474,6 @@ class _FocusTextFieldState extends State<_FocusTextField> {
                 : t.cardBorder),
         boxShadow: _isFocused
             ? [
-          // FIX-1: Constant blurRadius — never goes negative.
           BoxShadow(
               color: accentPrimary.withValues(alpha: 0.10),
               blurRadius: 4,
@@ -2380,14 +2505,11 @@ class _FocusTextFieldState extends State<_FocusTextField> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // _ConfirmButton — loading state on confirm actions
-// FIX-2A: Uses onConfirmed callback called after the loading delay, so the
-// parent decides when to close the modal without a competing timer.
 // ─────────────────────────────────────────────────────────────────────────────
 class _ConfirmButton extends StatefulWidget {
   final String label;
   final String loadingLabel;
   final bool danger;
-  // FIX-2A: renamed from onTap → onConfirmed; called after loading delay.
   final VoidCallback onConfirmed;
 
   const _ConfirmButton({
@@ -2415,7 +2537,6 @@ class _ConfirmButtonState extends State<_ConfirmButton> {
           : () async {
         setState(() => _loading = true);
         await Future.delayed(const Duration(milliseconds: 800));
-        // FIX-2A: invoke onConfirmed once, after delay; parent handles state.
         if (mounted) widget.onConfirmed();
         if (mounted) setState(() => _loading = false);
       },

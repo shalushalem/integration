@@ -1,87 +1,25 @@
 // ============================================================
-// BEHAVIORAL DIFF ANALYSIS REPORT
-// ============================================================
-//
-// PHASE 1 — STRUCTURAL SCAN SUMMARY
-// ----------------------------------
-// CSS transitions found:
-//   • .item-delete-btn hover → scale(1.1) + red tint + shadow   [MISSING in Flutter]
-//   • .item-delete-btn active → scale(0.88) in 80ms             [MISSING in Flutter]
-//   • .item-like-btn hover → scale(1.12) + shadow               [MISSING in Flutter]
-//   • .item-like-btn active → scale(0.88) in 80ms               [MISSING in Flutter]
-//   • .item-like-btn.liked svg → scale(1.15) persistent         [PARTIAL – Flutter does 1.15 via TweenSequence end but no press-active shrink]
-//   • @keyframes heart-pop → 1→1.45→0.9→1.18→1.15               [PARTIAL – Flutter TweenSequence is close but misses cubic-bezier(0.34,1.2)]
-//   • @keyframes fadeUp card → opacity 0→1, Y 12px→0            [IMPLEMENTED via _FadeUpItem]
-//   • @keyframes ai-glow-pulse → box-shadow pulse 3s            [IMPLEMENTED]
-//   • @keyframes ai-dot-blink → opacity 0.6→1, 2s               [IMPLEMENTED]
-//   • .filter-chip hover → translateY(-1px) + shadow            [IMPLEMENTED]
-//   • .stat-card hover → translateY(-2px) scale(1.01)           [IMPLEMENTED]
-//   • .detail-action-btn hover → background tint                [MISSING – no hover on action buttons inside detail panel]
-//   • .modal slideUp → opacity 0→1, Y 28px→0, scale 0.96→1      [PARTIAL – Flutter slide is Y only, no scale component]
-//   • .item-card hover → translateY(-4px) + shadow              [IMPLEMENTED]
-//   • .occ-chip active → gradient toggle                        [IMPLEMENTED]
-//   • .back-btn-wrap hover → scale(0.95) + bg darken            [IMPLEMENTED via _HoverScaleButton]
-//   • .add-btn hover → scale(1.02) + bg darken                  [IMPLEMENTED via _HoverScaleButton]
-//   • .most-worn-card hover → translateY(-2px)                  [MISSING in Flutter]
-//   • bar-fill width transition .6s ease                        [IMPLEMENTED via _BarSection AnimationController]
-//   • .tab-btn active underline → animated width                [IMPLEMENTED]
-//   • Like toast on toggle → "♥ Added … to favourites"          [MISSING – Flutter shows no like toast on card toggle]
-//   • Inline insight text updates dynamically on data change    [MISSING – Flutter _InlineInsightCard has static text]
-//   • Keyboard Escape closes all overlays                       [MISSING – no keyboard handler in Flutter]
-//   • Tab navigation in HTML uses showTab() + filterBar toggle  [IMPLEMENTED – Flutter _activeTab + filter bar conditional]
-//
-// PHASE 2 — FEATURE EXTRACTION
-// ──────────────────────────────
-// F01 | .item-delete-btn:hover | hover | CSS | scale(1.1) + red color + box-shadow | Scale | 150ms | Button enlarges red on hover
-// F02 | .item-delete-btn:active | press | CSS | scale(0.88) fast | Scale | 80ms | Snappy press-down feedback
-// F03 | .item-like-btn:hover | hover | CSS | scale(1.12) + shadow | Scale | 150ms | Like button grows on hover
-// F04 | .item-like-btn:active | press | CSS | scale(0.88) | Scale | 80ms | Snappy press-down on like
-// F05 | .item-like-btn.pop svg | toggle-on | CSS @keyframes | heart-pop 1→1.45→0.9→1.18→1.15 | TweenSequence | 380ms | Heart bounce on like
-// F06 | toggleLike() toast | click | JS | shows "♥ Added / ♡ Removed" toast | SnackBar | instant | Toast on like/unlike from card
-// F07 | updateInlineInsight() | data change | JS | dynamic insight text based on wardrobe state | Text rebuild | instant | AI insight text updates
-// F08 | .modal slideUp scale | open | CSS @keyframes | opacity + Y + scale(0.96→1) | AnimationController | 380ms | Modal entry has scale component
-// F09 | .most-worn-card:hover | hover | CSS | translateY(-2px) | AnimatedContainer | 220ms | Most-worn card lifts on hover
-// F10 | detail-action-btn hover | hover | CSS | background tint change | AnimatedContainer | 180ms | Action buttons show bg tint on hover
-// F11 | Keyboard Escape | keydown | JS | closes all overlays | RawKeyboardListener | instant | Esc closes modals
-// F12 | item worn badge label | data | JS | "Unworn" vs "Xˣ worn" | Text rebuild | instant | Badge says "Unworn" not "New" when worn==0
-//
-// PHASE 3 — FLUTTER COMPARISON
-// ──────────────────────────────
-// F01 | MISSING – delete button uses plain GestureDetector, no hover scale/red-tint
-// F02 | MISSING – no active/press scale-down on delete button
-// F03 | MISSING – like button uses AnimatedBuilder(_likeScale) only on toggle, not hover
-// F04 | MISSING – no press-scale-down on like button
-// F05 | PARTIAL – TweenSequence present but cubic-bezier differs slightly; functionally OK
-// F06 | MISSING – _handleLike() calls onToggleLike() which does NOT call _showToast in _ItemCard context
-// F07 | MISSING – _InlineInsightCard always shows static string; no dynamic update
-// F08 | PARTIAL – SlideTransition present but no scale component in modal open
-// F09 | MISSING – _HoverStatCard has hover but most-worn mini cards in _StatsPanel._buildMostWorn have none
-// F10 | MISSING – _DetailActionButton has no hover effect
-// F11 | MISSING – no keyboard/shortcut handler for Escape
-// F12 | PARTIAL – Flutter uses "New" instead of HTML "Unworn" (minor label diff, keeping "New" as it is)
-//
-// PHASE 4 — FLUTTER IMPLEMENTATION PLAN
-// ──────────────────────────────────────
-// F01/F02 | _HoverPressScaleButton (new) | StatefulWidget with MouseRegion + GestureDetector, AnimatedScale for hover AND onTapDown/onTapUp for press
-// F03/F04 | _HoverPressScaleButton wraps like button too
-// F05     | Keep existing TweenSequence, improve cubic (already good enough)
-// F06     | Pass onLikeToast callback or inline toast call inside _ItemCardState._handleLike
-// F07     | Convert _InlineInsightCard to receive wardrobe data and rebuild text
-// F08     | Add scale component to modal SlideTransition via Transform.scale inside AnimatedBuilder
-// F09     | Wrap most-worn mini cards with _MostWornHoverCard StatefulWidget
-// F10     | Wrap _DetailActionButton content with _HoverTintButton
-// F11     | Wrap Scaffold with Focus + RawKeyboardListener in WardrobeScreen
+// WARDROBE.DART - DUAL R2 UPLOAD + APPWRITE FETCH/SAVE
 // ============================================================
 
-import 'dart:convert'; // <-- ADDED for Base64 encoding
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:myapp/theme/theme_tokens.dart';
-import 'package:provider/provider.dart'; // <-- ADDED for BackendService
-import 'package:myapp/services/backend_service.dart'; // <-- ADDED for AI API
+
+// 🚀 Backend & Providers
+import 'package:provider/provider.dart';
+import 'package:myapp/services/backend_service.dart';
+
+// 🚀 Appwrite & Minio S3
+import 'package:appwrite/appwrite.dart';
+import 'package:minio/minio.dart';
+
+// 🚀 Environment Variables
+import 'package:myapp/config/env.dart'; 
 
 // ── COLORS ──
 
@@ -99,9 +37,11 @@ Color _makeupChip(AppThemeTokens t) =>
 Color _skincareChip(AppThemeTokens t) =>
     Color.lerp(t.accent.tertiary, t.accent.secondary, 0.55)!;
 
+const Color kTransparent = Colors.transparent;
+
 // ── DATA MODEL ──
 class WardrobeItem {
-  final int id;
+  final String id; 
   String name;
   String cat;
   List<String> occasions;
@@ -109,6 +49,10 @@ class WardrobeItem {
   int worn;
   bool liked;
   Uint8List? imageBytes;
+  
+  // Dual URLs to match your Database
+  String? imageUrl; // Raw image URL
+  String? maskedUrl; // Processed PNG URL
 
   WardrobeItem({
     required this.id,
@@ -119,7 +63,12 @@ class WardrobeItem {
     this.worn = 0,
     this.liked = false,
     this.imageBytes,
+    this.imageUrl,
+    this.maskedUrl,
   });
+
+  // Helper to always show the processed image first, falling back to raw
+  String? get displayUrl => maskedUrl ?? imageUrl;
 }
 
 // ── WARDROBE SCREEN ──
@@ -135,11 +84,67 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   int _activeTab = 0;
   String _searchQuery = '';
   final List<WardrobeItem> _wardrobe = [];
-  int _nextId = 1;
+  
+  bool _isLoading = true; // ✅ Loader state for initial fetch
+  
   AppThemeTokens get t => context.themeTokens;
-
-  // [F11] FocusNode used by RawKeyboardListener to capture Escape key
   final FocusNode _keyboardFocusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchWardrobeItems(); // ✅ Fetch from Appwrite on load
+  }
+
+  // 🚀 Fetch from Appwrite
+  Future<void> _fetchWardrobeItems() async {
+    try {
+      final client = Client()
+          .setEndpoint(Env.appwriteEndpoint)
+          .setProject(Env.appwriteProjectId);
+      final databases = Databases(client);
+      final account = Account(client);
+
+      final user = await account.get();
+
+      final response = await databases.listDocuments(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.outfitsCollection,
+        queries: [
+          Query.equal('user_id', user.$id),
+          Query.orderDesc('\$createdAt'), 
+          Query.limit(100), 
+        ],
+      );
+
+      final fetchedItems = response.documents.map((doc) {
+        return WardrobeItem(
+          id: doc.$id,
+          name: doc.data['name'],
+          cat: doc.data['category'],
+          occasions: doc.data['occasions'] != null ? List<String>.from(doc.data['occasions']) : [],
+          notes: doc.data['notes'] ?? '',
+          worn: doc.data['worn'] ?? 0,
+          liked: doc.data['liked'] ?? false,
+          imageUrl: doc.data['image_url'],
+          maskedUrl: doc.data['masked_url'], 
+        );
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          _wardrobe.clear();
+          _wardrobe.addAll(fetchedItems);
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("❌ Failed to fetch wardrobe: $e");
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -164,13 +169,17 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       builder: (_) => _AddItemModal(
         onSave: (item) {
           setState(() {
-            _wardrobe.add(WardrobeItem(
-              id: _nextId++,
+            _wardrobe.insert(0, WardrobeItem(
+              id: item['id'] as String,
               name: item['name'] as String,
               cat: item['cat'] as String,
               occasions: List<String>.from(item['occasions'] as List),
               notes: item['notes'] as String,
               imageBytes: item['imageBytes'] as Uint8List?,
+              imageUrl: item['imageUrl'] as String?,
+              maskedUrl: item['maskedUrl'] as String?,
+              worn: item['worn'] as int? ?? 0,
+              liked: item['liked'] as bool? ?? false,
             ));
           });
         },
@@ -189,7 +198,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     }).toList();
   }
 
-  void _openItemDetail(int id) {
+  void _openItemDetail(String id) {
     final t = context.themeTokens;
     final item = _wardrobe.firstWhere((i) => i.id == id);
     showDialog(
@@ -205,7 +214,6 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         },
         onToggleLike: () {
           setState(() => item.liked = !item.liked);
-          // [F06] Like toast fired from detail panel action too
           _showToast(item.liked
               ? '♥ Added "${item.name}" to favourites'
               : '♡ Removed from favourites');
@@ -242,7 +250,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     _showToast('📋 Copied to clipboard!');
   }
 
-  void _showDeleteConfirm(int id) {
+  void _showDeleteConfirm(String id) {
     final t = context.themeTokens;
     final accent4 = _accent4(t);
     final item = _wardrobe.firstWhere((i) => i.id == id);
@@ -266,8 +274,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 style: TextStyle(fontFamily: 'Inter', color: t.mutedText)),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(context).pop();
+              // Optionally: Add Appwrite DB Delete Logic here
               setState(() => _wardrobe.removeWhere((i) => i.id == id));
               _showToast('🗑 "${item.name}" removed');
             },
@@ -282,14 +291,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
-    // [F11] RawKeyboardListener wraps the whole screen to capture Escape key
     return KeyboardListener(
       focusNode: _keyboardFocusNode,
       autofocus: true,
       onKeyEvent: (KeyEvent event) {
         if (event is KeyDownEvent &&
             event.logicalKey == LogicalKeyboardKey.escape) {
-          // [F11] Pop the topmost route (dialog/overlay) if one is open
           final nav = Navigator.of(context, rootNavigator: true);
           if (nav.canPop()) nav.pop();
         }
@@ -308,19 +315,19 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
             if (_activeTab == 0)
               _FilterBar(activeCat: _activeCat, onCatTap: _setCat),
             Expanded(
-              child: _activeTab == 0
+              child: _isLoading
+                  ? Center(child: CircularProgressIndicator(color: t.accent.primary)) // ✅ Loader 
+                  : _activeTab == 0
                   ? _WardrobePanel(
                 items: _filtered,
                 allEmpty: _wardrobe.isEmpty,
                 onAddTap: _openAddModal,
-                // [F07] Pass wardrobe list so insight card can compute dynamic text
                 wardrobe: _wardrobe,
                 onDelete: (id) => _showDeleteConfirm(id),
                 onToggleLike: (id) {
                   HapticFeedback.selectionClick();
                   final i = _wardrobe.firstWhere((e) => e.id == id);
                   setState(() => i.liked = !i.liked);
-                  // [F06] Toast is now shown here at the panel level
                   _showToast(i.liked
                       ? '♥ Added "${i.name}" to favourites'
                       : '♡ Removed from favourites');
@@ -373,7 +380,6 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
   late AnimationController _slideCtrl;
   late Animation<Offset> _slideAnim;
   late Animation<double> _fadeAnim;
-  // [F08] Scale animation for modal entry — HTML uses scale(0.96→1)
   late Animation<double> _scaleAnim;
 
   @override
@@ -388,7 +394,6 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
         parent: _slideCtrl, curve: const Cubic(0.2, 0.8, 0.3, 1.0)));
     _fadeAnim = Tween<double>(begin: 0, end: 1)
         .animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut));
-    // [F08] scale 0.96 → 1.0 matching CSS slideUp keyframe
     _scaleAnim = Tween<double>(begin: 0.96, end: 1.0).animate(
         CurvedAnimation(
             parent: _slideCtrl, curve: const Cubic(0.2, 0.8, 0.3, 1.0)));
@@ -429,7 +434,6 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
         const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
         child: SlideTransition(
           position: _slideAnim,
-          // [F08] Added ScaleTransition to match CSS slideUp scale(0.96 → 1)
           child: ScaleTransition(
             scale: _scaleAnim,
             child: Container(
@@ -541,12 +545,17 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                                       ],
                                     ),
                                     borderRadius: BorderRadius.circular(16),
+                                    image: item.displayUrl != null 
+                                      ? DecorationImage(image: NetworkImage(item.displayUrl!), fit: BoxFit.cover)
+                                      : (item.imageBytes != null ? DecorationImage(image: MemoryImage(item.imageBytes!), fit: BoxFit.cover) : null),
                                   ),
-                                  child: Center(
+                                  child: (item.displayUrl == null && item.imageBytes == null)
+                                      ? Center(
                                     child: Text(_catEmoji(item.cat),
                                         style:
                                         const TextStyle(fontSize: 56)),
-                                  ),
+                                  )
+                                      : null,
                                 ),
                               ),
                               const SizedBox(width: 14),
@@ -621,7 +630,6 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        // [F10] Each action button now uses _HoverTintButton
                         _HoverTintButton(
                           label: '+ Wore it today',
                           bgColor: t.accent.tertiary.withValues(alpha: 0.12),
@@ -674,7 +682,6 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
   }
 }
 
-// [F10] NEW: Hover-tint action button — replaces _DetailActionButton
 class _HoverTintButton extends StatefulWidget {
   final String label;
   final Color bgColor;
@@ -766,19 +773,24 @@ class _AddItemModalState extends State<_AddItemModal>
     with SingleTickerProviderStateMixin {
   final _nameCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
+  final _subCategoryCtrl = TextEditingController();
   String _selectedCat = '';
   final List<String> _selectedOccs = [];
   final ImagePicker _picker = ImagePicker();
-  Uint8List? _itemImageBytes;
+  
+  // Dual Images loaded in memory
+  Uint8List? _rawImageBytes;
+  Uint8List? _itemImageBytes; 
+
   late AnimationController _slideCtrl;
   late Animation<Offset> _slideAnim;
   late Animation<double> _fadeAnim;
-  // [F08] Scale component for modal entry animation
   late Animation<double> _scaleAnim;
 
-  // --- NEW: AI Processing State ---
+  // AI & Processing State
   bool _isProcessing = false;
   String _processStatus = '';
+  Map<String, dynamic>? _aiData;
 
   static const _cats = [
     'Tops',
@@ -811,7 +823,6 @@ class _AddItemModalState extends State<_AddItemModal>
     _fadeAnim = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut),
     );
-    // [F08] CSS slideUp: scale(0.96) → scale(1)
     _scaleAnim = Tween<double>(begin: 0.96, end: 1.0).animate(
       CurvedAnimation(
           parent: _slideCtrl, curve: const Cubic(0.22, 1, 0.36, 1)),
@@ -824,10 +835,11 @@ class _AddItemModalState extends State<_AddItemModal>
     _slideCtrl.dispose();
     _nameCtrl.dispose();
     _notesCtrl.dispose();
+    _subCategoryCtrl.dispose();
     super.dispose();
   }
 
-  // --- UPDATED: Automatically connects to Python Backend ---
+  // 🚀 Step 1: Pick Image & Process via BackendService
   Future<void> _pickImage(ImageSource source) async {
     try {
       final file = await _picker.pickImage(
@@ -839,49 +851,48 @@ class _AddItemModalState extends State<_AddItemModal>
 
       if (!mounted) return;
       
-      // Show the original image immediately and start processing
       setState(() {
-        _itemImageBytes = bytes;
+        _rawImageBytes = bytes; 
+        _itemImageBytes = bytes; 
         _isProcessing = true;
         _processStatus = 'Cutting out garment...';
+        _aiData = null; 
       });
 
       final backend = Provider.of<BackendService>(context, listen: false);
       String base64Image = base64Encode(bytes);
 
-      // STEP 1: Remove Background (RMBG-2.0)
       final bgResult = await backend.removeBackground(base64Image);
       if (bgResult != null && mounted) {
         setState(() {
-          _itemImageBytes = base64Decode(bgResult); // Replace with transparent image!
+          _itemImageBytes = base64Decode(bgResult); 
           _processStatus = 'Analyzing fabric & color...';
         });
         base64Image = bgResult; 
       }
 
-      // STEP 2: Analyze Image (Llama 3.2 Vision + OpenCV)
       final analysis = await backend.analyzeImage(base64Image);
       if (analysis != null && mounted) {
         setState(() {
-          // Auto-fill Name
+          _aiData = analysis;
+
           _nameCtrl.text = analysis['item_name'] ?? analysis['name'] ?? 'New Item';
-          
-          // Auto-fill Category mapping
           String aiCat = analysis['app_category'] ?? analysis['category'] ?? '';
           if (_cats.contains(aiCat)) {
             _selectedCat = aiCat;
           }
+          
+          if (analysis['sub_category'] != null) {
+             _subCategoryCtrl.text = analysis['sub_category'];
+          }
 
-          // Auto-fill Colors & Tags into Notes
-          String color = analysis['dominant_color_hex'] ?? analysis['color_code'] ?? '';
-          String subCat = analysis['sub_category'] ?? '';
-          String pattern = analysis['pattern'] ?? '';
-          _notesCtrl.text = 'Color: $color\nStyle: $subCat\nPattern: $pattern';
+          String color = analysis['dominant_color_hex'] ?? analysis['color_code'] ?? 'Unknown';
+          String pattern = analysis['pattern'] ?? 'Solid';
+          _notesCtrl.text = 'Color: $color\nPattern: $pattern';
         });
       }
-
     } catch (e) {
-      print("Image Process Error: $e");
+      debugPrint("Image Process Error: $e");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Unable to process image.')),
@@ -896,22 +907,156 @@ class _AddItemModalState extends State<_AddItemModal>
     }
   }
 
-  void _submit() {
+  // 🚀 Step 2: Upload RAW + MASKED to Cloudflare R2 & Save to Appwrite DB
+  Future<void> _saveAndUpload() async {
     if (_nameCtrl.text.trim().isEmpty || _selectedCat.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Name and category are required')),
+        const SnackBar(content: Text('Name and category are required')),
       );
       return;
     }
-    widget.onSave({
-      'name': _nameCtrl.text.trim(),
-      'cat': _selectedCat,
-      'occasions': List<String>.from(_selectedOccs),
-      'notes': _notesCtrl.text.trim(),
-      'imageBytes': _itemImageBytes,
+
+    setState(() {
+      _isProcessing = true;
+      _processStatus = 'Uploading to R2...';
     });
-    Navigator.of(context).pop();
+
+    try {
+      final client = Client()
+          .setEndpoint(Env.appwriteEndpoint)
+          .setProject(Env.appwriteProjectId);
+      final databases = Databases(client);
+      final account = Account(client);
+
+      final user = await account.get();
+      final userId = user.$id;
+
+      String fileId = ID.unique(); 
+      
+      String rawImageUrl = '';
+      String maskedImageUrl = '';
+      String rawFileName = '';
+      String maskedFileName = '';
+
+      if (_rawImageBytes != null && _itemImageBytes != null) {
+        final r2Host = Env.r2S3ApiUrl.replaceAll('https://', '').replaceAll('http://', '');
+        
+        final minio = Minio(
+          endPoint: r2Host,
+          accessKey: Env.r2AccessKeyId,
+          secretKey: Env.r2SecretAccessKey,
+          region: 'auto',
+        );
+
+        // A. Upload RAW Image
+        setState(() => _processStatus = 'Uploading original photo...');
+        rawFileName = 'raw_$fileId.png';
+        await minio.putObject(
+          Env.rawBucketId, 
+          rawFileName,
+          Stream.fromIterable([_rawImageBytes!]),
+          size: _rawImageBytes!.length,
+          metadata: {'content-type': 'image/png'},
+        );
+        rawImageUrl = '${Env.r2UrlRaw}/$rawFileName';
+
+        // B. Upload PROCESSED/MASKED Image
+        setState(() => _processStatus = 'Uploading processed cutout...');
+        maskedFileName = 'wardrobe_$fileId.png';
+        await minio.putObject(
+          Env.wardrobeBucketId, 
+          maskedFileName,
+          Stream.fromIterable([_itemImageBytes!]),
+          size: _itemImageBytes!.length,
+          metadata: {'content-type': 'image/png'},
+        );
+        maskedImageUrl = '${Env.r2UrlWardrobe}/$maskedFileName';
+      }
+
+      setState(() => _processStatus = 'Saving to database...');
+
+      final Map<String, dynamic> documentData = {
+        'name': _nameCtrl.text.trim(),             
+        'category': _selectedCat,                  
+        'image_url': rawImageUrl,                  
+        'image_id': fileId,                      
+        'masked_url': maskedImageUrl,
+        'masked_id': maskedFileName,
+        'user_id': userId,                         
+        'status': 'ready',
+        'worn': 0,          
+        'liked': false,     
+      };
+
+      List<String> combinedOccasions = List.from(_selectedOccs);
+      if (_subCategoryCtrl.text.trim().isNotEmpty) {
+          combinedOccasions.add(_subCategoryCtrl.text.trim());
+      }
+      if (combinedOccasions.isNotEmpty) {
+        documentData['occasions'] = combinedOccasions;
+      }
+      
+      if (_notesCtrl.text.trim().isNotEmpty) {
+        documentData['notes'] = _notesCtrl.text.trim();
+      }
+
+      // Stealth Metadata Injection
+      if (_aiData != null) {
+        if (_aiData!['sub_category'] != null) {
+          documentData['sub_category'] = _aiData!['sub_category'];
+        }
+        if (_aiData!['color_code'] != null || _aiData!['dominant_color_hex'] != null) {
+          documentData['color_code'] = _aiData!['color_code'] ?? _aiData!['dominant_color_hex'];
+        }
+        if (_aiData!['pattern'] != null) {
+          documentData['pattern'] = _aiData!['pattern'];
+        }
+      }
+
+      final newDoc = await databases.createDocument(
+        databaseId: Env.appwriteDatabaseId, 
+        collectionId: Env.outfitsCollection, 
+        documentId: ID.unique(),
+        data: documentData,
+      );
+
+      widget.onSave({
+        'id': newDoc.$id,
+        'name': newDoc.data['name'],
+        'cat': newDoc.data['category'],
+        'occasions': newDoc.data['occasions'] != null ? List<String>.from(newDoc.data['occasions']) : [],
+        'notes': newDoc.data['notes'] ?? '',
+        'worn': newDoc.data['worn'] ?? 0,
+        'liked': newDoc.data['liked'] ?? false,
+        'imageBytes': _itemImageBytes, 
+        'imageUrl': newDoc.data['image_url'], 
+        'maskedUrl': newDoc.data['masked_url'], 
+      });
+
+      if (mounted) Navigator.of(context).pop();
+
+    } on AppwriteException catch (e) {
+      debugPrint("❌ Appwrite DB Error [${e.code}]: ${e.message}");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Database Error: ${e.message}')),
+        );
+      }
+    } catch (e) {
+      debugPrint("❌ R2/Upload Error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed. Please check your R2 credentials.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _processStatus = '';
+        });
+      }
+    }
   }
 
   @override
@@ -925,7 +1070,6 @@ class _AddItemModalState extends State<_AddItemModal>
         const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
         child: SlideTransition(
           position: _slideAnim,
-          // [F08] ScaleTransition now applied to Add modal too
           child: ScaleTransition(
             scale: _scaleAnim,
             child: Container(
@@ -969,6 +1113,24 @@ class _AddItemModalState extends State<_AddItemModal>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _ModalField(
+                            label: 'Item name *',
+                            child: _StyledInput(
+                              controller: _nameCtrl,
+                              hint: 'e.g. White linen shirt',
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _ModalField(
+                            label: 'Category *',
+                            child: _CategoryDropdown(
+                              value: _selectedCat,
+                              categories: _cats,
+                              onChanged: (v) =>
+                                  setState(() => _selectedCat = v ?? ''),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _ModalField(
                             label: 'Add Items',
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1011,20 +1173,17 @@ class _AddItemModalState extends State<_AddItemModal>
                                   Stack(
                                     alignment: Alignment.center,
                                     children: [
-                                      // The Image
                                       ClipRRect(
                                         borderRadius: BorderRadius.circular(12),
                                         child: Image.memory(
                                           _itemImageBytes!,
                                           height: 140,
                                           width: double.infinity,
-                                          fit: BoxFit.contain, // Fit well for transparent imgs
-                                          // Add a subtle checkered pattern background for transparent images
+                                          fit: BoxFit.contain, 
                                           color: _isProcessing ? t.backgroundPrimary.withValues(alpha: 0.5) : null,
                                           colorBlendMode: _isProcessing ? BlendMode.darken : null,
                                         ),
                                       ),
-                                      // Processing Overlay
                                       if (_isProcessing)
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1065,20 +1224,10 @@ class _AddItemModalState extends State<_AddItemModal>
                           ),
                           const SizedBox(height: 16),
                           _ModalField(
-                            label: 'Item name *',
+                            label: 'Sub-category',
                             child: _StyledInput(
-                              controller: _nameCtrl,
-                              hint: 'e.g. White linen shirt',
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          _ModalField(
-                            label: 'Category *',
-                            child: _CategoryDropdown(
-                              value: _selectedCat,
-                              categories: _cats,
-                              onChanged: (v) =>
-                                  setState(() => _selectedCat = v ?? ''),
+                              controller: _subCategoryCtrl,
+                              hint: 'Enter sub-category',
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -1182,7 +1331,7 @@ class _AddItemModalState extends State<_AddItemModal>
                             child: Opacity(
                               opacity: _isProcessing ? 0.5 : 1.0,
                               child: GestureDetector(
-                                onTap: _submit,
+                                onTap: _saveAndUpload,
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
                                       vertical: 13),
@@ -1827,13 +1976,12 @@ class _WardrobePanel extends StatelessWidget {
   final List<WardrobeItem> items;
   final bool allEmpty;
   final VoidCallback onAddTap;
-  // [F07] wardrobe list passed to compute dynamic insight text
   final List<WardrobeItem> wardrobe;
-  final ValueChanged<int> onDelete;
-  final ValueChanged<int> onToggleLike;
-  final ValueChanged<int> onWore;
-  final ValueChanged<int> onShare;
-  final ValueChanged<int> onTapCard;
+  final ValueChanged<String> onDelete;
+  final ValueChanged<String> onToggleLike;
+  final ValueChanged<String> onWore;
+  final ValueChanged<String> onShare;
+  final ValueChanged<String> onTapCard;
 
   const _WardrobePanel({
     required this.items,
@@ -1855,7 +2003,6 @@ class _WardrobePanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 14),
-          // [F07] Pass wardrobe data to insight card so it can show dynamic text
           _InlineInsightCard(wardrobe: wardrobe),
           const SizedBox(height: 20),
           if (allEmpty)
@@ -1878,7 +2025,6 @@ class _WardrobePanel extends StatelessWidget {
 }
 
 // ── INLINE AI INSIGHT CARD ──
-// [F07] Now receives wardrobe list and computes dynamic insight text
 class _InlineInsightCard extends StatefulWidget {
   final List<WardrobeItem> wardrobe;
   const _InlineInsightCard({required this.wardrobe});
@@ -1901,7 +2047,7 @@ class _InlineInsightCardState extends State<_InlineInsightCard>
         vsync: this, duration: const Duration(seconds: 3))
       ..repeat(reverse: true);
     _glowAnim =
-    CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut);
+        CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut);
 
     _dotCtrl = AnimationController(
         vsync: this, duration: const Duration(seconds: 2))
@@ -1917,7 +2063,6 @@ class _InlineInsightCardState extends State<_InlineInsightCard>
     super.dispose();
   }
 
-  // [F07] Computes insight text exactly matching JS updateInlineInsight()
   String _computeInsightText() {
     final total = widget.wardrobe.length;
     if (total == 0) {
@@ -1932,16 +2077,16 @@ class _InlineInsightCardState extends State<_InlineInsightCard>
 
     if (liked.isNotEmpty && mostWorn != null && mostWorn.worn > 0) {
       final likedStr =
-      '${liked.length} piece${liked.length != 1 ? 's' : ''}';
+          '${liked.length} piece${liked.length != 1 ? 's' : ''}';
       final wearStr =
-      '${mostWorn.worn} wear${mostWorn.worn != 1 ? 's' : ''}';
+          '${mostWorn.worn} wear${mostWorn.worn != 1 ? 's' : ''}';
       final rotateStr = unwornCount > 0
           ? ' — rotate your $unwornCount unworn piece${unwornCount != 1 ? 's' : ''}'
           : '';
       return 'You love $likedStr. Your ${mostWorn.name} leads with $wearStr$rotateStr.';
     } else if (mostWorn != null && mostWorn.worn > 0) {
       final wearStr =
-      '${mostWorn.worn} wear${mostWorn.worn != 1 ? 's' : ''}';
+          '${mostWorn.worn} wear${mostWorn.worn != 1 ? 's' : ''}';
       if (unwornCount > 0) {
         return 'Your ${mostWorn.name} leads with $wearStr. $unwornCount piece${unwornCount != 1 ? 's' : ''} still unworn — time to rotate!';
       } else {
@@ -2046,7 +2191,6 @@ class _InlineInsightCardState extends State<_InlineInsightCard>
                   ],
                 ),
                 const SizedBox(height: 3),
-                // [F07] Dynamic text computed from wardrobe state
                 Text(
                   _computeInsightText(),
                   style: TextStyle(
@@ -2067,11 +2211,11 @@ class _InlineInsightCardState extends State<_InlineInsightCard>
 // ── ITEM GRID ──
 class _ItemGrid extends StatelessWidget {
   final List<WardrobeItem> items;
-  final ValueChanged<int> onDelete;
-  final ValueChanged<int> onToggleLike;
-  final ValueChanged<int> onWore;
-  final ValueChanged<int> onShare;
-  final ValueChanged<int> onTapCard;
+  final ValueChanged<String> onDelete;
+  final ValueChanged<String> onToggleLike;
+  final ValueChanged<String> onWore;
+  final ValueChanged<String> onShare;
+  final ValueChanged<String> onTapCard;
 
   const _ItemGrid({
     required this.items,
@@ -2180,15 +2324,9 @@ class _ItemCard extends StatefulWidget {
 class _ItemCardState extends State<_ItemCard>
     with SingleTickerProviderStateMixin {
   bool _hovered = false;
-
-  // Like pop animation controller
   late AnimationController _likeCtrl;
   late Animation<double> _likeScale;
-
-  // [F01/F02] Delete button press state
   bool _deletePressed = false;
-
-  // [F03/F04] Like button hover + press state
   bool _likeHovered = false;
   bool _likePressed = false;
 
@@ -2197,7 +2335,6 @@ class _ItemCardState extends State<_ItemCard>
     super.initState();
     _likeCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 380));
-    // [F05] heart-pop keyframes: 1→1.45→0.9→1.18→1.15
     _likeScale = TweenSequence([
       TweenSequenceItem(
           tween: Tween(begin: 1.0, end: 1.45).chain(
@@ -2240,7 +2377,7 @@ class _ItemCardState extends State<_ItemCard>
           '✨';
 
   void _handleLike() {
-    widget.onToggleLike(); // triggers F06 toast in parent
+    widget.onToggleLike();
     _likeCtrl.forward(from: 0);
   }
 
@@ -2299,14 +2436,12 @@ class _ItemCardState extends State<_ItemCard>
                             t.accent.secondary.withValues(alpha: 0.12)
                           ],
                         ),
-                        image: item.imageBytes == null
-                            ? null
-                            : DecorationImage(
-                          image: MemoryImage(item.imageBytes!),
-                          fit: BoxFit.cover,
-                        ),
+                        // ✅ Prioritize Masked URL over Raw URL
+                        image: item.displayUrl != null
+                            ? DecorationImage(image: NetworkImage(item.displayUrl!), fit: BoxFit.cover)
+                            : (item.imageBytes != null ? DecorationImage(image: MemoryImage(item.imageBytes!), fit: BoxFit.cover) : null),
                       ),
-                      child: item.imageBytes == null
+                      child: (item.displayUrl == null && item.imageBytes == null)
                           ? Center(
                         child: Text(_catEmoji(item.cat),
                             style: const TextStyle(fontSize: 40)),
@@ -2365,9 +2500,7 @@ class _ItemCardState extends State<_ItemCard>
                 ],
               ),
 
-              // ── Delete button (top-left) ──
-              // [F01] hover → scale(1.1) red tint + shadow
-              // [F02] active/press → scale(0.88) in 80ms
+              // ── Delete button ──
               Positioned(
                 top: 8,
                 left: 8,
@@ -2389,10 +2522,7 @@ class _ItemCardState extends State<_ItemCard>
                 ),
               ),
 
-              // ── Like button (top-right) ──
-              // [F03] hover → scale(1.12) + shadow
-              // [F04] active/press → scale(0.88) in 80ms
-              // [F05] on like → heart-pop animation
+              // ── Like button ──
               Positioned(
                 top: 8,
                 right: 8,
@@ -2556,7 +2686,6 @@ class _ItemCardState extends State<_ItemCard>
   }
 }
 
-// [F01/F02] Delete button with hover (red tint + scale) and press (shrink) states
 class _DeleteHoverButton extends StatefulWidget {
   @override
   State<_DeleteHoverButton> createState() => _DeleteHoverButtonState();
@@ -2674,7 +2803,7 @@ class _EmptySearch extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 60),
       child: Column(children: [
-        Opacity(
+        const Opacity(
             opacity: 0.4,
             child: Text('🔍', style: TextStyle(fontSize: 40))),
         const SizedBox(height: 12),
@@ -3009,7 +3138,6 @@ class _StatsPanel extends StatelessWidget {
   }
 }
 
-// [F09] Most-worn card with hover lift animation
 class _MostWornHoverCard extends StatefulWidget {
   final WardrobeItem item;
   const _MostWornHoverCard({required this.item});

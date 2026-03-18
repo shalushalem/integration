@@ -20,6 +20,7 @@ dependencies:
   # Backend Integration
   appwrite: any
   flutter_dotenv: any
+  minio: ^3.5.8
 
 dev_dependencies:
   flutter_test:

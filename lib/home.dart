@@ -822,7 +822,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             transitionDuration: const Duration(milliseconds: 350),
             reverseTransitionDuration: const Duration(milliseconds: 350),
             pageBuilder: (context, animation, secondary) =>
-                const profile.Screen4(),
+                const profile.ProfileScreen(),
             transitionsBuilder: (context, animation, secondary, child) {
               final curved = CurvedAnimation(
                 parent: animation,
