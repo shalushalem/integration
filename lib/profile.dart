@@ -56,9 +56,6 @@
 //       android:maxSdkVersion="32"/>
 // ============================================================================
 
-// FIX-3: dart:io is NOT available on Flutter Web — removed.
-// Uint8List (dart:typed_data) used to store avatar bytes on all platforms.
-// XFile.readAsBytes() works on Web, Android, iOS, desktop — no dart:io needed.
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -70,6 +67,9 @@ import 'package:myapp/theme/gradients.dart';
 import 'package:myapp/theme/profile_theme.dart';
 import 'package:myapp/theme/theme_controller.dart';
 import 'package:myapp/theme/theme_tokens.dart';
+
+// --- NEW: Added AppwriteService Import ---
+import 'package:myapp/services/appwrite_service.dart'; 
 
 class ProfileController extends ChangeNotifier {
   String name;
@@ -400,11 +400,15 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   Color get _accentBorder => _accentPrimary.withValues(alpha: 0.28);
   Color get _textPrimary => _t.textPrimary;
   Color get _textMuted => _t.mutedText;
+  
   // ── View / modal visibility ──
   bool _showEditView = false;
   bool _showLogoutModal = false;
   bool _showLanguageModal = false;
   bool _showDiscardModal = false;
+
+  // --- NEW: Loading state for database fetch ---
+  bool _isLoadingProfile = true;
 
   // ── Preferences ──
   String _selectedLanguage = 'English';
@@ -499,6 +503,51 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       });
     });
 
+    // --- NEW: Trigger real database fetch ---
+    _fetchUserProfile();
+  }
+
+  // --- NEW: Fetch Database Method ---
+  Future<void> _fetchUserProfile() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final user = await appwrite.getCurrentUser();
+
+      if (user != null && mounted) {
+        setState(() {
+          // Update profile object with real Appwrite data
+          _profile = _profile.copyWith(
+            name: user.name.isNotEmpty ? user.name : _profile.name,
+            email: user.email.isNotEmpty ? user.email : _profile.email,
+            phone: user.phone.isNotEmpty ? user.phone : _profile.phone,
+          );
+
+          // Update text controllers
+          _nameCtrl.text = _profile.name;
+          _emailCtrl.text = _profile.email;
+          _phoneCtrl.text = _profile.phone;
+
+          _isLoadingProfile = false;
+        });
+
+        // Fetch custom generated avatar
+        if (_avatarBytes == null) {
+          final avatar = await appwrite.getUserAvatar(_profile.name);
+          if (avatar != null && mounted) {
+            setState(() {
+              _avatarBytes = avatar;
+              _savedAvatarBytes = avatar;
+            });
+            context.read<ProfileController>().setAvatarBytes(avatar);
+          }
+        }
+      } else {
+        if (mounted) setState(() => _isLoadingProfile = false);
+      }
+    } catch (e) {
+      print("Error fetching profile: $e");
+      if (mounted) setState(() => _isLoadingProfile = false);
+    }
   }
 
   @override
@@ -563,21 +612,33 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  void _saveProfile() {
+  // --- UPDATED: Save back to Database if changed ---
+  void _saveProfile() async {
     if (!_canSave || _isSaving) return;
     HapticFeedback.lightImpact();
     setState(() => _isSaving = true);
-    Future.delayed(const Duration(milliseconds: 700), () {
-      if (mounted) {
-        _commitFieldsToProfile();
-        setState(() {
-          _isSaving = false;
-          _isDirty = false;
-          _showEditView = false;
-        });
-        _showToast(context, '✓ Profile updated');
+    
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      // Attempt to update name in Appwrite if it was modified
+      if (_nameCtrl.text.trim() != _profile.name) {
+         await appwrite.account.updateName(name: _nameCtrl.text.trim());
       }
-    });
+    } catch (e) {
+      print("Error saving to Appwrite: $e");
+    }
+
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    if (mounted) {
+      _commitFieldsToProfile();
+      setState(() {
+        _isSaving = false;
+        _isDirty = false;
+        _showEditView = false;
+      });
+      _showToast(context, '✓ Profile updated');
+    }
   }
 
   // ── Open edit view — sync controllers from current profile ───────────────
@@ -689,7 +750,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               enabled: !_isThemeTransitioning,
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 280),
-                child: _showEditView ? _buildEditView() : _buildProfileView(),
+                child: _isLoadingProfile 
+                    ? Center(child: CircularProgressIndicator(color: _accentPrimary))
+                    : (_showEditView ? _buildEditView() : _buildProfileView()),
               ),
             ),
             // FIX-4B: modals wrapped in _AnimatedModal (proper AnimationController)
