@@ -1,110 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-// ignore: depend_on_referenced_packages
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  BEHAVIORAL DIFF ANALYSIS REPORT
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// PHASE 1 — STRUCTURAL SCAN SUMMARY
-//
-// CSS Transitions / Animations found:
-//   • .back-btn:hover              → scale(1.06) translateX(-1px), 0.2s
-//   • .step                        → @keyframes slideUp (opacity 0→1, translateY 16px→0), 0.35s, staggered delay i*0.06s
-//   • .step:hover                  → translateY(-3px), 0.28s
-//   • .progress-fill               → width transition, 0.5s cubic-bezier(.25,.8,.25,1)
-//   • .chat-btn:hover              → translateY(-2px), 0.25s cubic-bezier(0.34,1.56,0.64,1)
-//   • .chat-btn-pulse              → @keyframes pulse (scale 1→1.04, opacity 0.6→0), 2.5s infinite
-//   • .chat-overlay                → opacity 0→1, 0.3s  +  .chat-modal translateY(100%)→0, 0.42s
-//   • .qpill:active                → gradient fill flash
-//   • .send-btn:active             → scale(0.9), 0.2s
-//   • .send-btn:disabled           → opacity 0.28
-//   • .mic-btn.listening           → gradient bg + @keyframes micPulse scale 1→1.08, 1.2s infinite
-//   • .typing-dot                  → @keyframes typBounce translateY(0→-5px→0) + color change, 1.2s staggered
-//   • .msg-row                     → @keyframes slideUp on each new message
-//   • .chat-input-wrap:focus-within → border-color accent blue
-//
-// JS Behaviors found:
-//   • openChat()        → on chat-btn click, adds .open to overlay (opacity + slide modal up), auto-sends welcome AI msg
-//   • closeChat()       → removes .open (fade + slide down)
-//   • sendMsg()         → real Anthropic API call with conversation history + skin context, disables send-btn while busy
-//   • sendQ(btn)        → quick-pill click fills input and calls sendMsg(), hides quick-pills after first send
-//   • chatKey(e)        → Enter key (no shift) submits message
-//   • autoResize(el)    → textarea auto-resizes up to 120px height
-//   • toggleVoice()     → SpeechRecognition toggle; mic-btn gets .listening class (gradient + micPulse animation)
-//   • renderSteps()     → re-renders step cards with slideUp animation and staggered delay on routine change
-//   • markStep(el)      → one-way toggle done state, increments counter
-//   • getCtx()          → builds system prompt context from current skin/concern/routine state
-//
-// PHASE 2 — INTERACTION EXTRACTION
-//
-// F01 | .back-btn        | hover      | CSS  | scale(1.06) + translateX(-1px) | transform | 0.2s
-// F02 | .step (each)     | render     | CSS  | slideUp (opacity+translateY)   | keyframe  | 0.35s + stagger i*0.06s
-// F03 | .step            | hover      | CSS  | translateY(-3px)              | transform | 0.28s
-// F04 | .progress-fill   | state change| CSS | width 0→pct%                  | layout    | 0.5s cubic
-// F05 | .chat-btn        | hover      | CSS  | translateY(-2px) + shadow     | transform | 0.25s spring
-// F06 | .chat-btn-pulse  | always     | CSS  | scale + opacity loop          | keyframe  | 2.5s infinite
-// F07 | .chat-overlay    | openChat() | JS   | opacity 0→1 + modal slide up  | combined  | 0.3s / 0.42s
-// F08 | .send-btn        | tap        | CSS  | scale(0.9)                    | transform | 0.2s
-// F09 | .send-btn        | busy       | CSS  | opacity 0.28                  | opacity   | instant
-// F10 | .mic-btn         | listening  | CSS  | gradient + scale pulse 1.08   | keyframe  | 1.2s infinite
-// F11 | .typing-dot      | visible    | CSS  | bounce Y-5px + color accent   | keyframe  | 1.2s staggered
-// F12 | .msg-row         | added      | CSS  | slideUp per message           | keyframe  | 0.32s
-// F13 | sendMsg()        | tap send   | JS   | real Anthropic API, history   | network   | async
-// F14 | sendQ()          | pill tap   | JS   | fill input + sendMsg()        | state     | instant
-// F15 | chatKey()        | keyboard   | JS   | Enter submits                 | event     | instant
-// F16 | toggleVoice()    | mic tap    | JS   | SpeechRecognition + listening | state     | instant
-// F17 | quick-pills hide | first send | JS   | pills disappear               | state     | instant
-// F18 | welcome AI msg   | openChat() | JS   | AI sends greeting 400ms delay | async     | 400ms delay
-// F19 | chat-input focus | tap input  | CSS  | border-color accent 0.45      | border    | instant
-// F20 | renderSteps      | toggle     | JS   | re-render + slideUp stagger   | combined  | on switch
-//
-// PHASE 3 — FLUTTER COMPARISON
-//
-// F01 back-btn hover          → MISSING   (MouseRegion not used; no scale/translate effect)
-// F02 step slideUp on render  → MISSING   (AnimationController per step with stagger not present)
-// F03 step hover lift         → MISSING   (No MouseRegion/hover on step cards)
-// F04 progress width anim     → PARTIAL   (FractionallySizedBox used but no explicit curve/duration)
-// F05 chat-btn hover lift     → MISSING   (No MouseRegion on chat button)
-// F06 chat-btn pulse ring     → MISSING   (Pulse animation widget absent)
-// F07 chat overlay slide+fade → PARTIAL   (SlideTransition present; backdrop opacity fade MISSING)
-// F08 send-btn tap scale      → MISSING   (GestureDetector present but no scale feedback)
-// F09 send-btn disabled opacity→ MISSING  (No opacity change when _isBusy)
-// F10 mic listening pulse     → MISSING   (No animation when listening; no state change in Flutter)
-// F11 typing dot color change → PARTIAL   (Bounce present; color transition at peak MISSING)
-// F12 msg-row slideUp         → MISSING   (New messages appear without slideUp animation)
-// F13 real Anthropic API call → MISSING   (Fallback tips only; no real HTTP call, no history, no context)
-// F14 quick-pill sends text   → IMPLEMENTED
-// F15 Enter key submit        → IMPLEMENTED (onSubmitted)
-// F16 voice / mic toggle      → MISSING   (mic button is static; no speech recognition)
-// F17 quick-pills hide        → IMPLEMENTED
-// F18 welcome AI greeting     → MISSING   (static welcome widget; no AI-generated greeting on open)
-// F19 input focus border      → MISSING   (no FocusNode border change)
-// F20 step re-render stagger  → MISSING   (steps re-render but no slideUp stagger on routine switch)
-//
-// PHASE 4 — FLUTTER IMPLEMENTATION PLAN
-//
-// F01 → MouseRegion + AnimatedContainer (scale + translateX)
-// F02 → Per-step AnimationController list rebuilt on routine change, staggered forward()
-// F03 → MouseRegion(_hovering) + AnimatedContainer translateY on each step card
-// F04 → AnimatedFractionallySizedBox or TweenAnimationBuilder with cubic curve 0.5s
-// F05 → MouseRegion + AnimatedContainer translateY on chat button
-// F06 → AnimationController.repeat() + ScaleTransition + FadeTransition pulse ring
-// F07 → AnimatedOpacity for backdrop + existing SlideTransition (already present)
-// F08 → GestureDetector onTapDown/onTapUp + AnimatedScale
-// F09 → AnimatedOpacity wrapping send button, opacity driven by _isBusy
-// F10 → AnimationController.repeat() in _ChatOverlayState, driven by _isListening
-// F11 → Tween color at peak via ColorTween in _TypingDotState
-// F12 → Wrap each new message row in a _SlideUpMessage widget with its own controller
-// F13 → http.post to Anthropic API, maintain List<Map> _chatHistory, use getCtx() system prompt
-// F16 → speech_to_text package stub (graceful no-op if unavailable; visual state only)
-// F18 → openChat triggers Future.delayed(400ms) → sendMessage with empty trigger → AI greeting
-// F19 → FocusNode + AnimatedContainer border color
-// F20 → _rebuildStepAnimations() called in _setRoutine()
-//
-// ─────────────────────────────────────────────────────────────────────────────
+import 'package:myapp/services/appwrite_service.dart';
 
 void main() {
   runApp(const MyApp());
@@ -144,7 +43,6 @@ Color get _accent4 => Color.lerp(_accent, _accent2, 0.55)!;
 Color get _accent5 => Color.lerp(_accent2, _accent3, 0.55)!;
 Color get _phoneShell => _t.phoneShell;
 Color get _phoneShell2 => _t.phoneShellInner;
-// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Data
@@ -152,13 +50,7 @@ Color get _phoneShell2 => _t.phoneShellInner;
 const _dayRoutine = ['Cleanser', 'Toner', 'Vitamin C Serum', 'Moisturizer', 'Sunscreen'];
 const _nightRoutine = ['Cleanser', 'Toner', 'Retinol Serum', 'Night Cream', 'Lip Care'];
 
-List<Color> get _stepColors => [
-  _accent,
-  _accent4,
-  _accent2,
-  _accent3,
-  _accent5,
-];
+List<Color> get _stepColors => [_accent, _accent4, _accent2, _accent3, _accent5];
 List<Color> get _stepBgColors => [
   _accent.withValues(alpha: 0.15),
   _accent4.withValues(alpha: 0.15),
@@ -183,27 +75,26 @@ class SkincareScreen extends StatefulWidget {
   State<SkincareScreen> createState() => _SkincareScreenState();
 }
 
-class _SkincareScreenState extends State<SkincareScreen>
-    with TickerProviderStateMixin {
+class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStateMixin {
 
   bool _isNight = false;
   String _skinType = '';
   List<String> _concerns = [];
-  Set<int> _completedSteps = {};
   bool _chatOpen = false;
 
-  // ── F01: back-btn hover state ──────────────────────────────────────────────
-  bool _backBtnHovered = false;
+  // DB Sync State
+  String? _documentId;
+  bool _isLoading = true;
+  
+  Set<int> _completedDaySteps = {};
+  Set<int> _completedNightSteps = {};
+  Set<int> _completedSteps = {}; // Pointer to current active routine
 
-  // ── F06: chat-btn pulse animation controller ───────────────────────────────
+  bool _backBtnHovered = false;
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseScale;
   late Animation<double> _pulseOpacity;
-
-  // ── F05: chat-btn hover state ──────────────────────────────────────────────
   bool _chatBtnHovered = false;
-
-  // ── F02/F20: per-step slide-up controllers (rebuilt on routine toggle) ─────
   late List<AnimationController> _stepAnimCtrls;
   late List<Animation<double>> _stepSlideAnims;
   late List<Animation<double>> _stepFadeAnims;
@@ -227,12 +118,7 @@ class _SkincareScreenState extends State<SkincareScreen>
   @override
   void initState() {
     super.initState();
-
-    // ── F06: Init pulse animation (2.5s infinite) ──────────────────────────
-    _pulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2500),
-    )..repeat();
+    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 2500))..repeat();
     _pulseScale = Tween<double>(begin: 1.0, end: 1.04).animate(
       CurvedAnimation(parent: _pulseCtrl, curve: const Interval(0.0, 0.7, curve: Curves.easeOut)),
     );
@@ -240,14 +126,51 @@ class _SkincareScreenState extends State<SkincareScreen>
       CurvedAnimation(parent: _pulseCtrl, curve: const Interval(0.0, 0.7, curve: Curves.easeOut)),
     );
 
-    // ── F02: Init step animations ──────────────────────────────────────────
+    _loadSkincareData();
     _buildStepAnimations();
-    _playStepAnimations();
   }
 
-  // ── F02/F20: Build and stagger step slide-up animations ───────────────────
+  // ── 1. Fetch data from DB ──
+  Future<void> _loadSkincareData() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final doc = await appwrite.getSkincareProfile();
+      
+      if (doc != null && mounted) {
+        setState(() {
+          _documentId = doc.$id;
+          _skinType = doc.data['skinType'] ?? '';
+          _concerns = List<String>.from(doc.data['concerns'] ?? []);
+          
+          _completedDaySteps = Set<int>.from(doc.data['daySteps']?.map((e) => e as int) ?? []);
+          _completedNightSteps = Set<int>.from(doc.data['nightSteps']?.map((e) => e as int) ?? []);
+          
+          _completedSteps = _isNight ? _completedNightSteps : _completedDaySteps;
+          _isLoading = false;
+        });
+        _playStepAnimations();
+      }
+    } catch (e) {
+      debugPrint("Error loading skincare: $e");
+      if(mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ── 2. Sync updates to DB ──
+  void _syncToDB() {
+    if (_documentId == null) return;
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    
+    appwrite.updateSkincareProfile(
+      documentId: _documentId!,
+      skinType: _skinType,
+      concerns: _concerns,
+      daySteps: _completedDaySteps.toList(),
+      nightSteps: _completedNightSteps.toList(),
+    );
+  }
+
   void _buildStepAnimations() {
-    // Dispose old controllers if rebuilding
     if (mounted) {
       try { for (final c in _stepAnimCtrls) { c.dispose(); } } catch (_) {}
     }
@@ -268,7 +191,6 @@ class _SkincareScreenState extends State<SkincareScreen>
   }
 
   void _playStepAnimations() {
-    // Stagger: each step fires 60ms after the previous (matches HTML i*0.06s)
     for (int i = 0; i < _stepAnimCtrls.length; i++) {
       Future.delayed(Duration(milliseconds: i * 60), () {
         if (mounted) _stepAnimCtrls[i].forward(from: 0);
@@ -286,19 +208,17 @@ class _SkincareScreenState extends State<SkincareScreen>
   void _setRoutine(bool night) {
     setState(() {
       _isNight = night;
-      _completedSteps = {};
+      _completedSteps = _isNight ? _completedNightSteps : _completedDaySteps;
     });
-    // ── F20: Re-trigger step slideUp animations on routine switch ─────────
     _buildStepAnimations();
-    setState(() {}); // Rebuild with new controllers
+    setState(() {}); 
     _playStepAnimations();
   }
 
   void _setSkin(String type) {
     setState(() {
       _skinType = type;
-      _completedSteps = {};
-      _concerns = [];
+      _syncToDB();
     });
   }
 
@@ -309,12 +229,21 @@ class _SkincareScreenState extends State<SkincareScreen>
       } else {
         _concerns.add(concern);
       }
+      _syncToDB();
     });
   }
 
   void _markStep(int index) {
     if (_completedSteps.contains(index)) return;
-    setState(() => _completedSteps.add(index));
+    setState(() {
+      _completedSteps.add(index);
+      if (_isNight) {
+        _completedNightSteps.add(index);
+      } else {
+        _completedDaySteps.add(index);
+      }
+      _syncToDB();
+    });
   }
 
   @override
@@ -329,7 +258,9 @@ class _SkincareScreenState extends State<SkincareScreen>
       },
       child: Scaffold(
         backgroundColor: _bg,
-        body: Stack(
+        body: _isLoading 
+            ? Center(child: CircularProgressIndicator(color: _accent))
+            : Stack(
           children: [
             Center(
               child: SizedBox(
@@ -345,7 +276,6 @@ class _SkincareScreenState extends State<SkincareScreen>
                 ),
               ),
             ),
-            // ── F07: Chat overlay – AnimatedOpacity for backdrop fade ──────────
             AnimatedOpacity(
               duration: const Duration(milliseconds: 300),
               opacity: _chatOpen ? 1.0 : 0.0,
@@ -366,13 +296,11 @@ class _SkincareScreenState extends State<SkincareScreen>
     );
   }
 
-  // ── Header ──────────────────────────────────────────────────────────────────
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 54, 20, 16),
       child: Row(
         children: [
-          // ── F01: MouseRegion + AnimatedContainer for back-btn hover ──
           MouseRegion(
             onEnter: (_) => setState(() => _backBtnHovered = true),
             onExit: (_) => setState(() => _backBtnHovered = false),
@@ -398,7 +326,6 @@ class _SkincareScreenState extends State<SkincareScreen>
                     BoxShadow(color: _accent.withValues(alpha: 0.10), blurRadius: 14, offset: Offset(0, 2))
                   ],
                 ),
-                // FIX: removed `const` — Icon uses runtime color getter _muted
                 child: Center(
                   child: Icon(Icons.chevron_left_rounded, color: _muted, size: 20),
                 ),
@@ -433,7 +360,6 @@ class _SkincareScreenState extends State<SkincareScreen>
     );
   }
 
-  // ── Content ─────────────────────────────────────────────────────────────────
   Widget _buildContent() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 40),
@@ -483,7 +409,6 @@ class _SkincareScreenState extends State<SkincareScreen>
     );
   }
 
-  // ── Routine Toggle ──────────────────────────────────────────────────────────
   Widget _buildRoutineToggle() {
     return Container(
       decoration: BoxDecoration(
@@ -539,7 +464,6 @@ class _SkincareScreenState extends State<SkincareScreen>
     );
   }
 
-  // ── Skin Bar ────────────────────────────────────────────────────────────────
   Widget _buildSkinBar() {
     final List<_SkinData> skins = [
       _SkinData('Oily', Icons.water_drop_outlined, _accent, _accent.withValues(alpha: 0.40)),
@@ -589,7 +513,6 @@ class _SkincareScreenState extends State<SkincareScreen>
     );
   }
 
-  // ── Concern Pills ───────────────────────────────────────────────────────────
   Widget _buildConcernPills() {
     final List<_ConcernData> concerns = [
       _ConcernData('Acne', Icons.shield_outlined, _accent4,
@@ -638,7 +561,6 @@ class _SkincareScreenState extends State<SkincareScreen>
     );
   }
 
-  // ── Info Bar ────────────────────────────────────────────────────────────────
   Widget _buildInfoBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
@@ -656,7 +578,6 @@ class _SkincareScreenState extends State<SkincareScreen>
     );
   }
 
-  // ── Progress Track ──────────────────────────────────────────────────────────
   Widget _buildProgressTrack() {
     return Container(
       height: 7,
@@ -687,7 +608,6 @@ class _SkincareScreenState extends State<SkincareScreen>
     );
   }
 
-  // ── Steps Grid ──────────────────────────────────────────────────────────────
   Widget _buildStepsGrid() {
     final steps = _currentRoutine;
     final List<Widget> rows = [];
@@ -739,7 +659,6 @@ class _SkincareScreenState extends State<SkincareScreen>
     }
   }
 
-  // ── Tip Card ────────────────────────────────────────────────────────────────
   Widget _buildTipCard() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -763,7 +682,6 @@ class _SkincareScreenState extends State<SkincareScreen>
         ),
         const SizedBox(width: 10),
         Expanded(
-          // FIX: removed `const` — RichText uses runtime color getters _muted and _accent5
           child: RichText(
             text: TextSpan(
               style: TextStyle(fontSize: 12, color: _muted, height: 1.5),
@@ -780,7 +698,6 @@ class _SkincareScreenState extends State<SkincareScreen>
     );
   }
 
-  // ── Chat Button ─────────────────────────────────────────────────────────────
   Widget _buildChatButton() {
     return MouseRegion(
       onEnter: (_) => setState(() => _chatBtnHovered = true),
@@ -790,7 +707,6 @@ class _SkincareScreenState extends State<SkincareScreen>
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // Pulse ring (F06)
             Positioned.fill(
               child: AnimatedBuilder(
                 animation: _pulseCtrl,
@@ -811,7 +727,6 @@ class _SkincareScreenState extends State<SkincareScreen>
                 },
               ),
             ),
-            // Main button (F05)
             AnimatedContainer(
               duration: const Duration(milliseconds: 250),
               curve: const Cubic(0.34, 1.56, 0.64, 1),
@@ -845,7 +760,6 @@ class _SkincareScreenState extends State<SkincareScreen>
                         BoxShadow(color: _bg.withValues(alpha: 0.35), blurRadius: 14, offset: Offset(0, 4))
                       ],
                     ),
-                    // FIX: removed `const` — Text style uses runtime color getter _accent
                     child: Center(
                       child: Text('✦', style: TextStyle(fontSize: 17, color: _accent)),
                     ),
@@ -918,9 +832,6 @@ class _SkincareScreenState extends State<SkincareScreen>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  F02 + F03: Step Card — SlideUp on render + Hover lift (-3px)
-// ─────────────────────────────────────────────────────────────────────────────
 class _StepCard extends StatefulWidget {
   final int index;
   final String name;
@@ -1023,9 +934,6 @@ class _StepCardState extends State<_StepCard> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Chat Overlay
-// ─────────────────────────────────────────────────────────────────────────────
 class _ChatMessage {
   final bool isUser;
   final String text;
@@ -1323,7 +1231,6 @@ class _ChatOverlayState extends State<_ChatOverlay>
               BoxShadow(color: _bg.withValues(alpha: 0.30), blurRadius: 16, offset: Offset(0, 4))
             ],
           ),
-          // FIX: removed `const` — Text style uses runtime color getter _accent
           child: Center(
             child: Text('✦', style: TextStyle(fontSize: 18, color: _accent)),
           ),
@@ -1356,7 +1263,6 @@ class _ChatOverlayState extends State<_ChatOverlay>
               color: _panel, shape: BoxShape.circle,
               border: Border.all(color: _cardBorder),
             ),
-            // FIX: removed `const` — Text style uses runtime color getter _muted
             child: Center(
               child: Text('✕', style: TextStyle(fontSize: 14, color: _muted)),
             ),
@@ -1388,7 +1294,6 @@ class _ChatOverlayState extends State<_ChatOverlay>
             BoxShadow(color: _accent.withValues(alpha: 0.20), blurRadius: 24, offset: Offset(0, 6))
           ],
         ),
-        // FIX: removed `const` — Text style uses runtime color getter _accent
         child: Center(
           child: Text('✦', style: TextStyle(fontSize: 24, color: _accent)),
         ),
@@ -1427,7 +1332,6 @@ class _ChatOverlayState extends State<_ChatOverlay>
                     topLeft: Radius.circular(18), topRight: Radius.circular(4),
                     bottomLeft: Radius.circular(18), bottomRight: Radius.circular(18),
                   ),
-                  // FIX: removed `const` from BoxShadow list — uses runtime getter _bg
                   boxShadow: [
                     BoxShadow(color: _bg.withValues(alpha: 0.15), blurRadius: 10, offset: Offset(0, 2))
                   ],
@@ -1458,7 +1362,6 @@ class _ChatOverlayState extends State<_ChatOverlay>
           Container(
             width: 28, height: 28,
             decoration: BoxDecoration(color: _phoneShell2, shape: BoxShape.circle),
-            // FIX: removed `const` — Text style uses runtime getter _accent
             child: Center(
               child: Text('✦', style: TextStyle(fontSize: 12, color: _accent)),
             ),
@@ -1476,7 +1379,6 @@ class _ChatOverlayState extends State<_ChatOverlay>
                     topLeft: Radius.circular(4), topRight: Radius.circular(18),
                     bottomLeft: Radius.circular(18), bottomRight: Radius.circular(18),
                   ),
-                  // FIX: removed `const` from BoxShadow list — uses runtime getter _bg
                   boxShadow: [
                     BoxShadow(color: _bg.withValues(alpha: 0.15), blurRadius: 8, offset: Offset(0, 2))
                   ],
@@ -1501,7 +1403,6 @@ class _ChatOverlayState extends State<_ChatOverlay>
       Container(
         width: 28, height: 28,
         decoration: BoxDecoration(color: _phoneShell2, shape: BoxShape.circle),
-        // FIX: removed `const` — Text style uses runtime getter _accent
         child: Center(
           child: Text('✦', style: TextStyle(fontSize: 12, color: _accent)),
         ),
@@ -1644,9 +1545,6 @@ class _ChatOverlayState extends State<_ChatOverlay>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  F12: SlideUp wrapper for each new chat message
-// ─────────────────────────────────────────────────────────────────────────────
 class _SlideUpMessage extends StatefulWidget {
   final Widget child;
   const _SlideUpMessage({required this.child});
@@ -1692,9 +1590,6 @@ class _SlideUpMessageState extends State<_SlideUpMessage>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  F08: Scale-on-tap button
-// ─────────────────────────────────────────────────────────────────────────────
 class _ScaleOnTapButton extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -1724,9 +1619,6 @@ class _ScaleOnTapButtonState extends State<_ScaleOnTapButton> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  F14: Quick pill button
-// ─────────────────────────────────────────────────────────────────────────────
 class _QuickPillButton extends StatefulWidget {
   final String label;
   final VoidCallback onTap;
@@ -1777,9 +1669,6 @@ class _QuickPillButtonState extends State<_QuickPillButton> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  F11: Typing dot — bounce + color change at peak
-// ─────────────────────────────────────────────────────────────────────────────
 class _TypingDot extends StatefulWidget {
   final Duration delay;
   const _TypingDot({required this.delay});
@@ -1849,9 +1738,6 @@ class _TypingDotState extends State<_TypingDot>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Helper data classes
-// ─────────────────────────────────────────────────────────────────────────────
 class _SkinData {
   final String label;
   final IconData icon;

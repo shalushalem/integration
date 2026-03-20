@@ -12,6 +12,13 @@ import 'package:myapp/profile.dart';
 import 'package:myapp/signin.dart';
 import 'package:myapp/app_routes.dart';
 import 'package:myapp/wardrobe.dart';
+
+// ─── NEW FEATURE IMPORTS ───
+import 'package:myapp/workout.dart';
+import 'package:myapp/skincare.dart';
+import 'package:myapp/bills_page.dart';
+import 'package:myapp/calendar.dart';
+
 import 'package:myapp/theme/accent_palette.dart';
 import 'package:myapp/theme/base_theme.dart';
 import 'package:myapp/theme/theme_controller.dart';
@@ -117,6 +124,14 @@ class MyApp extends StatelessWidget {
               AppRoutes.onboarding1: (_) => const Screen1(),
               AppRoutes.onboarding2: (_) => const Screen2(),
               AppRoutes.onboarding3: (_) => const Screen3(),
+              
+              // ─── NEW FEATURE ROUTES REGISTERED HERE ───
+              AppRoutes.workout: (_) => const WorkoutScreen(),
+              AppRoutes.skincare: (_) => const SkincareScreen(),
+              AppRoutes.bills: (_) => const BillsScreen(),
+              AppRoutes.wardrobe: (_) => const WardrobeScreen(),
+              AppRoutes.calendar: (_) => CalendarScreen(),
+              AppRoutes.boards: (_) => const BoardsScreen(),
             },
           );
         },

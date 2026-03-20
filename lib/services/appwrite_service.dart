@@ -2,7 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:appwrite/appwrite.dart';
 import 'package:appwrite/models.dart';
-import 'package:appwrite/enums.dart'; // Needed for OAuthProvider enum
+import 'package:appwrite/enums.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class AppwriteService extends ChangeNotifier {
@@ -17,6 +17,10 @@ class AppwriteService extends ChangeNotifier {
   String get _databaseId => dotenv.env['EXPO_PUBLIC_APPWRITE_DATABASE_ID'] ?? '';
   String get _plansCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_PLANS'] ?? 'plans';
   String get _savedBoardsCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_SAVED_BOARDS'] ?? 'saved_boards';
+  String get _skincareCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_SKINCARE'] ?? 'skincare';
+  
+  // New distinct collection for the workout screen
+  String get _workoutOutfitsCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_WORKOUT_OUTFITS'] ?? 'workout_outfits';
 
   AppwriteService() {
     client = Client()
@@ -32,7 +36,6 @@ class AppwriteService extends ChangeNotifier {
   // AUTHENTICATION METHODS
   // =========================================================================
 
-  /// Gets the currently logged-in user
   Future<User?> getCurrentUser() async {
     try {
       return await account.get();
@@ -42,7 +45,6 @@ class AppwriteService extends ChangeNotifier {
     }
   }
   
-  /// Logs the user in with Email/Password
   Future<Session?> loginEmailPassword(String email, String password) async {
      try {
        final session = await account.createEmailPasswordSession(email: email, password: password);
@@ -54,20 +56,17 @@ class AppwriteService extends ChangeNotifier {
      }
   }
 
-  /// Logs the user in with Google OAuth
   Future<bool> loginWithGoogle() async {
     try {
-      // Use the enum OAuthProvider.google instead of the string 'google'
       await account.createOAuth2Session(provider: OAuthProvider.google);
       notifyListeners();
-      return true; // Returns true on success for signin.dart
+      return true; 
     } catch (e) {
       debugPrint("Google login error: $e");
-      return false; // Returns false on failure
+      return false; 
     }
   }
 
-  /// Registers a new user
   Future<User> registerEmailPassword(String email, String password, String name) async {
      try {
        final user = await account.create(
@@ -83,7 +82,6 @@ class AppwriteService extends ChangeNotifier {
      }
   }
 
-  /// Logs the user out
   Future<void> logout() async {
      try {
        await account.deleteSession(sessionId: 'current');
@@ -93,7 +91,6 @@ class AppwriteService extends ChangeNotifier {
      }
   }
 
-  /// Gets the user's avatar (initials based on their name)
   Future<Uint8List?> getUserAvatar(String name) async {
     try {
       return await avatars.getInitials(name: name);
@@ -107,13 +104,11 @@ class AppwriteService extends ChangeNotifier {
   // CALENDAR PLANS DB METHODS
   // =========================================================================
 
-  /// Creates a new outfit plan for the calendar
   Future<Document> createPlan(Map<String, dynamic> data) async {
     try {
       final user = await getCurrentUser();
       if (user == null) throw Exception("User not authenticated");
 
-      // Automatically attach the logged-in user's ID for security
       data['userId'] = user.$id; 
 
       return await databases.createDocument(
@@ -128,7 +123,6 @@ class AppwriteService extends ChangeNotifier {
     }
   }
 
-  /// Gets all plans for the currently logged-in user
   Future<List<Document>> getUserPlans() async {
     try {
       final user = await getCurrentUser();
@@ -148,7 +142,6 @@ class AppwriteService extends ChangeNotifier {
     }
   }
 
-  /// Deletes a specific plan from the calendar
   Future<void> deletePlan(String documentId) async {
     try {
       await databases.deleteDocument(
@@ -162,7 +155,6 @@ class AppwriteService extends ChangeNotifier {
     }
   }
 
-  /// Updates the reminder status (bell icon) for a plan
   Future<void> updatePlanReminder(String documentId, bool reminder) async {
     try {
       await databases.updateDocument(
@@ -181,7 +173,6 @@ class AppwriteService extends ChangeNotifier {
   // SAVED BOARDS DB METHODS
   // =========================================================================
 
-  /// Fetches saved style boards filtered by occasion (e.g., 'Party', 'Office')
   Future<List<Document>> getSavedBoardsByOccasion(String occasion) async {
     try {
       final user = await getCurrentUser();
@@ -193,7 +184,7 @@ class AppwriteService extends ChangeNotifier {
         queries: [
           Query.equal('userId', user.$id),
           Query.equal('occasion', occasion),
-          Query.orderDesc('\$createdAt'), // Shows newest boards first
+          Query.orderDesc('\$createdAt'), 
         ],
       );
       return result.documents;
@@ -203,7 +194,6 @@ class AppwriteService extends ChangeNotifier {
     }
   }
 
-  /// Fetches ALL saved style boards (Used for the "Everything Else" screen)
   Future<List<Document>> getAllSavedBoards() async {
     try {
       final user = await getCurrentUser();
@@ -214,7 +204,7 @@ class AppwriteService extends ChangeNotifier {
         collectionId: _savedBoardsCollection,
         queries: [
           Query.equal('userId', user.$id),
-          Query.orderDesc('\$createdAt'), // Shows newest boards first
+          Query.orderDesc('\$createdAt'), 
         ],
       );
       return result.documents;
@@ -224,7 +214,6 @@ class AppwriteService extends ChangeNotifier {
     }
   }
 
-  /// Deletes a specific saved board
   Future<void> deleteSavedBoard(String documentId) async {
     try {
       await databases.deleteDocument(
@@ -235,6 +224,125 @@ class AppwriteService extends ChangeNotifier {
     } catch (e) {
       debugPrint("Error deleting board: $e");
       throw Exception("Failed to delete board");
+    }
+  }
+
+  // =========================================================================
+  // SKINCARE DB METHODS
+  // =========================================================================
+
+  Future<Document?> getSkincareProfile() async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) return null;
+
+      final result = await databases.listDocuments(
+        databaseId: _databaseId,
+        collectionId: _skincareCollection,
+        queries: [Query.equal('userId', user.$id)],
+      );
+
+      if (result.documents.isEmpty) {
+        return await databases.createDocument(
+          databaseId: _databaseId,
+          collectionId: _skincareCollection,
+          documentId: ID.unique(),
+          data: {
+            'userId': user.$id,
+            'skinType': '',
+            'concerns': [],
+            'daySteps': [],
+            'nightSteps': [],
+            'lastUpdated': DateTime.now().toIso8601String(),
+          },
+        );
+      }
+      return result.documents.first;
+    } catch (e) {
+      debugPrint("Error fetching skincare profile: $e");
+      return null;
+    }
+  }
+
+  Future<void> updateSkincareProfile({
+    required String documentId,
+    String? skinType,
+    List<String>? concerns,
+    List<int>? daySteps,
+    List<int>? nightSteps,
+  }) async {
+    try {
+      Map<String, dynamic> updateData = {};
+      if (skinType != null) updateData['skinType'] = skinType;
+      if (concerns != null) updateData['concerns'] = concerns;
+      if (daySteps != null) updateData['daySteps'] = daySteps;
+      if (nightSteps != null) updateData['nightSteps'] = nightSteps;
+      updateData['lastUpdated'] = DateTime.now().toIso8601String();
+
+      await databases.updateDocument(
+        databaseId: _databaseId,
+        collectionId: _skincareCollection,
+        documentId: documentId,
+        data: updateData,
+      );
+    } catch (e) {
+      debugPrint("Error updating skincare profile: $e");
+    }
+  }
+
+  // =========================================================================
+  // WORKOUT OUTFITS DB METHODS
+  // =========================================================================
+
+  Future<List<Document>> getWorkoutOutfits() async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      final result = await databases.listDocuments(
+        databaseId: _databaseId,
+        collectionId: _workoutOutfitsCollection,
+        queries: [
+          Query.equal('userId', user.$id),
+          Query.orderDesc('\$createdAt'),
+        ],
+      );
+      return result.documents;
+    } catch (e) {
+      debugPrint("Error fetching workout outfits: $e");
+      return [];
+    }
+  }
+
+  Future<Document> createWorkoutOutfit(Map<String, dynamic> data) async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      data['userId'] = user.$id;
+
+      return await databases.createDocument(
+        databaseId: _databaseId,
+        collectionId: _workoutOutfitsCollection,
+        documentId: ID.unique(),
+        data: data,
+      );
+    } catch (e) {
+      debugPrint("Error creating workout outfit: $e");
+      rethrow;
+    }
+  }
+
+  Future<void> deleteWorkoutOutfit(String documentId) async {
+    try {
+      await databases.deleteDocument(
+        databaseId: _databaseId,
+        collectionId: _workoutOutfitsCollection,
+        documentId: documentId,
+      );
+    } catch (e) {
+      debugPrint("Error deleting workout outfit: $e");
+      rethrow;
     }
   }
 }

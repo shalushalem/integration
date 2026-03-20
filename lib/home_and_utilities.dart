@@ -32,8 +32,8 @@ class _BackArrowPainter extends CustomPainter {
       paint,
     );
     final path = Path()
-      ..moveTo(w * 12 / 24, h *  5 / 24)
-      ..lineTo(w *  5 / 24, h / 2)
+      ..moveTo(w * 12 / 24, h * 5 / 24)
+      ..lineTo(w * 5 / 24, h / 2)
       ..lineTo(w * 12 / 24, h * 19 / 24);
     canvas.drawPath(path, paint);
   }
@@ -169,7 +169,8 @@ class _HomeUtilitiesScreenState extends State<HomeUtilitiesScreen>
               children: const [
                 RepaintBoundary(child: meal_planner.Screen4()),
                 RepaintBoundary(child: medi_tracker.MediTrackScreen()),
-                RepaintBoundary(child: bills.Screen4()),
+                // Corrected to call BillsScreen
+                RepaintBoundary(child: bills.BillsScreen()),
               ],
             ),
           ),

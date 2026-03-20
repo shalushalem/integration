@@ -1,2042 +1,2392 @@
-import 'dart:async';
-import 'dart:ui';
+// ════════════════════════════════════════════════════════════════════
+//  bills_page.dart  –  AHVI My Bills Screen
+//  Includes: slide-in bill cards, animated filter tabs, bottom-sheet
+//  modals with slide-up animation, coupon manager, detail sheet,
+//  dynamic totals that react to filter, add-bill form, delete bills,
+//  FAB chat button, animated chat panel, toast notifications, and
+//  pulsing dot animation.
+// ════════════════════════════════════════════════════════════════════
 
+import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:myapp/theme/theme_tokens.dart';
+import 'package:flutter/services.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+// ── PALETTE (1:1 from CSS :root) ────────────────────────────────────
+const Color kBg        = Color(0xFF08111F);
+const Color kBg2       = Color(0xFF0F1A2D);
+const Color kShell     = Color(0xFF192131);
+const Color kShell2    = Color(0xFF111723);
+const Color kText      = Color(0xFFF5F7FF);
+const Color kMuted     = Color(0xB8E6EBFF);
+const Color kAccent    = Color(0xFF6B91FF);
+const Color kAccent2   = Color(0xFF8D7DFF);
+const Color kAccent3   = Color(0xFF04D7C8);
+const Color kAccent4   = Color(0xFFFF8EC7);
+const Color kAccent5   = Color(0xFFFFD86E);
+const Color kRed       = Color(0xFFFF6B7A);
+const Color kPanel     = Color(0x14FFFFFF);
+const Color kPanel2    = Color(0x1FFFFFFF);
+const Color kBorder    = Color(0x1FFFFFFF);
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
+// ════════════════════════════════════════════════════════════════════
+//  ROOT WIDGET - RENAMED TO BillsScreen to avoid conflict with home.dart
+// ════════════════════════════════════════════════════════════════════
+class BillsScreen extends StatefulWidget {
+  const BillsScreen({super.key});
   @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Screen4(),
-    );
-  }
+  State<BillsScreen> createState() => _BillsScreenState();
 }
 
-class Screen4 extends StatefulWidget {
-  const Screen4({super.key});
-  static const List<String> _days = <String>[
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
-    'Sunday',
+class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin {
+
+  // ── STATE ──────────────────────────────────────────────────────────
+  String _activeFilter = 'all';
+  bool   _chatOpen     = false;
+
+  // Active add-bill mode: 'ai' or 'manual'
+  String _addMode = 'ai';
+
+  // Dropdown selections inside Add Bill form
+  String _selCategory = 'Shopping';
+  String _selPayment  = 'UPI';
+  String _couponTypeVal = 'Percent';
+
+  // Toast state
+  String  _toastMsg    = '';
+  bool    _toastVisible = false;
+  late AnimationController _toastAnim;
+
+  // FAB pulse animation for the chat dot
+  late AnimationController _pulseCtrl;
+  late Animation<double>   _pulseAnim;
+
+  // Chat panel slide animation
+  late AnimationController _chatCtrl;
+  late Animation<double>   _chatSlide;
+
+  // Overlay slide animation (used for both Add Bill & Coupon sheets)
+  late AnimationController _sheetCtrl;
+  late Animation<double>   _sheetSlide;
+
+  // Overlay type: 'add' | 'coupon' | ''
+  String _overlayType = '';
+
+  // Chat messages
+  final List<Map<String, String>> _chatMessages = [
+    {'from': 'ahvi', 'text': 'Hi! ✦ I\'m AHVI. Upload a bill photo for AI autofill, or enter details manually — I\'ve got you covered!'},
+  ];
+  final TextEditingController _chatInputCtrl = TextEditingController();
+
+  // ── BILLS DATA ─────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _bills = [
+    {
+      'id': 'b1',
+      'store': 'Swiggy',
+      'amount': 485.0,
+      'date': 'Mar 15, 2025',
+      'category': 'food',
+      'payment': 'UPI',
+      'note': 'Dinner order - Burger & Fries',
+      'catColor': kAccent5,
+      'catBg': const Color(0x26FFD86E),
+      'icon': '🍔',
+    },
+    {
+      'id': 'b2',
+      'store': 'Apollo Pharmacy',
+      'amount': 1250.0,
+      'date': 'Mar 12, 2025',
+      'category': 'medical',
+      'payment': 'Credit Card',
+      'note': 'Monthly medicines',
+      'catColor': kAccent4,
+      'catBg': const Color(0x26FF8EC7),
+      'icon': '💊',
+    },
+    {
+      'id': 'b3',
+      'store': 'Zara',
+      'amount': 3499.0,
+      'date': 'Mar 10, 2025',
+      'category': 'shopping',
+      'payment': 'Debit Card',
+      'note': 'Summer collection',
+      'catColor': kAccent2,
+      'catBg': const Color(0x268D7DFF),
+      'icon': '👗',
+    },
+    {
+      'id': 'b4',
+      'store': 'BESCOM',
+      'amount': 890.0,
+      'date': 'Mar 5, 2025',
+      'category': 'utility',
+      'payment': 'Net Banking',
+      'note': 'Electricity bill - March',
+      'catColor': kAccent3,
+      'catBg': const Color(0x2604D7C8),
+      'icon': '⚡',
+    },
   ];
 
-  static const List<_FilterChipData> _filters = <_FilterChipData>[
-    _FilterChipData('All', Icons.grid_view_rounded),
-    _FilterChipData('Health', Icons.monitor_heart_outlined),
-    _FilterChipData('Relationships', Icons.people_outline_rounded),
-    _FilterChipData('Career', Icons.work_outline_rounded),
-    _FilterChipData('Learning', Icons.book_outlined),
-    _FilterChipData('Finance', Icons.account_balance_outlined),
-    _FilterChipData('Creativity', Icons.palette_outlined),
-    _FilterChipData('Mindfulness', Icons.auto_awesome_outlined),
+  // ── COUPONS DATA ───────────────────────────────────────────────────
+  List<Map<String, dynamic>> _coupons = [
+    {'id': 'c1', 'code': 'SAVE10',   'type': 'percent', 'value': 10,  'note': '10% off anything',        'bigNum': '10%', 'unitTxt': 'OFF',      'gradient': [const Color(0xFF8D7DFF), const Color(0xFF6B91FF)]},
+    {'id': 'c2', 'code': 'FLAT50',   'type': 'flat',    'value': 50,  'note': '₹50 flat discount',       'bigNum': '₹50', 'unitTxt': 'FLAT OFF', 'gradient': [const Color(0xFFFF8EC7), const Color(0xFFFFD86E)]},
+    {'id': 'c3', 'code': 'AHVI15',   'type': 'percent', 'value': 15,  'note': 'AHVI exclusive 15% off',  'bigNum': '15%', 'unitTxt': 'OFF',      'gradient': [const Color(0xFF04D7C8), const Color(0xFF6B91FF)]},
+    {'id': 'c4', 'code': 'FESTIVE25','type': 'percent', 'value': 25,  'note': 'Festive season deal',     'bigNum': '25%', 'unitTxt': 'OFF',      'gradient': [const Color(0xFF6B91FF), const Color(0xFF04D7C8)]},
   ];
 
-  static const List<_DropdownOptionData> _dropdownOptions = <_DropdownOptionData>[
-    _DropdownOptionData('Health & Wellness', 'Health', Icons.fitness_center_rounded),
-    _DropdownOptionData('Relationships', 'Relationships', Icons.people_outline_rounded),
-    _DropdownOptionData('Career', 'Career', Icons.work_outline_rounded),
-    _DropdownOptionData('Learning', 'Learning', Icons.book_outlined),
-    _DropdownOptionData('Finance', 'Finance', Icons.attach_money_rounded),
-    _DropdownOptionData('Creativity', 'Creativity', Icons.palette_outlined),
-    _DropdownOptionData('Mindfulness', 'Mindfulness', Icons.self_improvement_outlined),
-    _DropdownOptionData('Purpose', 'Purpose', Icons.public_outlined),
-  ];
-
-
-  @override
-  State<Screen4> createState() => _Screen4State();
-}
-
-class _Screen4State extends State<Screen4> {
-  AppThemeTokens get _t => context.themeTokens;
-  Color get _bg => _t.backgroundPrimary;
-  Color get _bg2 => _t.backgroundSecondary;
-  Color get _text => _t.textPrimary;
-  Color get _tileText => _t.tileText;
-  Color get _accent => _t.accent.primary;
-  Color get _accent2 => _t.accent.secondary;
-  Color get _accent3 => _t.accent.tertiary;
-  Color get _accent4 => _t.accent.primary;
-  Color get _accent5 => _t.accent.secondary;
-  Color get _muted => _t.mutedText;
-  Color get _cardBorder => _t.cardBorder;
-  Color get _panelSolid2 => _t.panel;
-  Color get _borderStrong => _t.cardBorder.withValues(alpha: 0.75);
-  Color get _accentSoft => _t.accent.primary.withValues(alpha: 0.12);
-  Color get _accentSoft2 => _t.accent.secondary.withValues(alpha: 0.14);
-  Color get _accentSoft3 => _t.accent.tertiary.withValues(alpha: 0.14);
-  Color get _accentSoft4 => _t.accent.primary.withValues(alpha: 0.14);
-  Color get _accentSoft5 => _t.accent.secondary.withValues(alpha: 0.18);
-  Color get _accentBorder => _t.accent.primary.withValues(alpha: 0.44);
-  Color get _accentBorder2 => _t.accent.secondary.withValues(alpha: 0.48);
-  Color get _accentBorder3 => _t.accent.tertiary.withValues(alpha: 0.48);
-  Color get _accentBorder4 => _t.accent.primary.withValues(alpha: 0.48);
-  Color get _accentBorder5 => _t.accent.secondary.withValues(alpha: 0.54);
-  Color get _accentGlow => _t.accent.primary.withValues(alpha: 0.30);
-  Color get _accentGlow2 => _t.accent.secondary.withValues(alpha: 0.34);
-  Color get _accentGlow3 => _t.accent.tertiary.withValues(alpha: 0.34);
-  Color get _scrim => _t.backgroundPrimary.withValues(alpha: 0.68);
-  Color get _scrimStrong => _t.backgroundPrimary.withValues(alpha: 0.82);
-  LinearGradient get _uiGradient => LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight, colors: <Color>[_accent, _accent3]);
-
-  List<_SuggestionData> get _suggestions => <_SuggestionData>[
-    _SuggestionData(
-      title: 'Gratitude Journal',
-      description: "Write 3 things you're grateful for each evening.",
-      tag: 'Mindfulness',
-      icon: Icons.menu_book_rounded,
-      stripe: _accentBorder2,
-      tagBg: _accentSoft2,
-      cardBg: _bg,
-      cardBorder: _cardBorder,
-    ),
-    _SuggestionData(
-      title: 'Learn Cooking',
-      description: 'Master 10 simple healthy recipes at home.',
-      tag: 'Health',
-      icon: Icons.restaurant_menu_rounded,
-      stripe: _accentBorder3,
-      tagBg: _accentSoft3,
-      cardBg: _bg,
-      cardBorder: _cardBorder,
-    ),
-    _SuggestionData(
-      title: 'Reconnect Monthly',
-      description: 'Call or meet an old friend every month.',
-      tag: 'Relationships',
-      icon: Icons.phone_in_talk_outlined,
-      stripe: _accentBorder4,
-      tagBg: _accentSoft4,
-      cardBg: _bg,
-      cardBorder: _cardBorder,
-    ),
-    _SuggestionData(
-      title: 'Digital Detox',
-      description: 'Spend Sunday mornings fully offline.',
-      tag: 'Mindfulness',
-      icon: Icons.wifi_off_rounded,
-      stripe: _accentBorder,
-      tagBg: _accentSoft,
-      cardBg: _bg,
-      cardBorder: _cardBorder,
-    ),
-    _SuggestionData(
-      title: 'Online Course',
-      description: 'Finish a structured course within 3 months.',
-      tag: 'Learning',
-      icon: Icons.bookmarks_outlined,
-      stripe: _accentBorder2,
-      tagBg: _accentSoft2,
-      cardBg: _bg,
-      cardBorder: _cardBorder,
-    ),
-    _SuggestionData(
-      title: 'Run a 5K',
-      description: 'Build up to running 5km without stopping.',
-      tag: 'Health',
-      icon: Icons.fitness_center_rounded,
-      stripe: _accentBorder4,
-      tagBg: _accentSoft5,
-      cardBg: _bg,
-      cardBorder: _cardBorder,
-    ),
-    _SuggestionData(
-      title: 'Emergency Fund',
-      description: 'Save 3 months of expenses as a safety net.',
-      tag: 'Finance',
-      icon: Icons.account_balance_outlined,
-      stripe: _accentBorder5,
-      tagBg: _accentSoft5,
-      cardBg: _bg,
-      cardBorder: _cardBorder,
-    ),
-    _SuggestionData(
-      title: 'Volunteer Monthly',
-      description: 'Give 2+ hours a month to a cause you care about.',
-      tag: 'Purpose',
-      icon: Icons.volunteer_activism_outlined,
-      stripe: _accentBorder3,
-      tagBg: _accentSoft3,
-      cardBg: _bg,
-      cardBorder: _cardBorder,
-    ),
-  ];
-  final TextEditingController _titleController = TextEditingController();
-  final TextEditingController _descriptionController = TextEditingController();
-  final TextEditingController _formReminderTimeController = TextEditingController(text: '08:00');
-  final TextEditingController _formReminderNoteController = TextEditingController();
-  final TextEditingController _modalReminderTimeController = TextEditingController(text: '08:00');
-  final TextEditingController _modalReminderNoteController = TextEditingController();
-  final TextEditingController _chatController = TextEditingController();
-  final FocusNode _titleFocusNode = FocusNode();
-  final FocusNode _chatFocusNode = FocusNode();
-  final ScrollController _chatScrollController = ScrollController();
-
-  final List<_GoalItem> _goals = <_GoalItem>[];
-  final List<_ChatMessage> _messages = <_ChatMessage>[
-    const _ChatMessage(
-      text: "Hey! I'm AHVI, your AI life coach. Ask me about goals, motivation, or what to focus on next.",
-      isUser: false,
-    ),
-  ];
-
-  Timer? _toastTimer;
-  Timer? _typingTimer;
-
-  String _selectedFilter = 'All';
-  String _selectedCategory = 'Health';
-  bool _dropdownOpen = false;
-  bool _formReminderOn = false;
-  String _formFrequency = 'Daily';
-  String _formReminderDay = 'Monday';
-  bool _modalOpen = false;
-  int? _editingGoalId;
-  String _modalFrequency = 'Daily';
-  String _modalReminderDay = 'Monday';
-  bool _showToast = false;
-  String _toastText = '';
-  bool _chatOpen = false;
-  bool _typing = false;
-  bool _titleError = false;
-  int _aiResponseIndex = 0;
-  int? _hoveredSuggestionId;
-  int? _pressedSuggestionId;
-  int? _hoveredGoalId;
-  String? _hoveredFilter;
-  bool _hoveringBack = false;
-  bool _pressingBack = false;
-  bool _hoveringCategory = false;
-  bool _flashingSuggestion = false;
-  int _flashSuggestionId = -1;
-
-  static const List<String> _aiResponses = <String>[
-    'Start with a goal so small it feels almost impossible to skip.',
-    'Pair that goal with a habit you already have. Habit stacking is incredibly effective!',
-    "People who write goals down are more likely to achieve them. You're on the right track!",
-    "Understanding your why keeps you going when motivation dips. What's driving this one?",
-    'Consistency beats intensity every time. Small daily actions compound into massive change.',
-    'Break it into smaller milestones and celebrate each one to keep momentum alive.',
-    'Goals with deadlines are much more likely to be achieved. Have you set a target date?',
-    'A mindfulness practice could complement your other goals beautifully.',
-  ];
-
-  TextStyle _sf({
-    double size = 14,
-    FontWeight weight = FontWeight.w400,
-    Color? color,
-    double? letterSpacing,
-    double? height,
-  }) {
-    return TextStyle(
-      color: color ?? _text,
-      fontSize: size,
-      fontWeight: weight,
-      letterSpacing: letterSpacing,
-      height: height,
-      fontFamilyFallback: const <String>[
-        'SF Pro Display',
-        'SF Pro Text',
-        'Helvetica Neue',
-        'Arial',
-      ],
-    );
+  // ── COMPUTED ───────────────────────────────────────────────────────
+  List<Map<String, dynamic>> get _filteredBills {
+    if (_activeFilter == 'all') return _bills;
+    return _bills.where((b) => b['category'] == _activeFilter).toList();
   }
 
-  InputDecoration _fieldDecoration(String hint, {bool error = false}) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: _sf(size: 16, color: _muted),
-      filled: true,
-      fillColor: _panelSolid2,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: error ? _accent4 : _borderStrong),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: error ? _accent4 : _accent2),
-      ),
-    );
+  double get _totalAmount =>
+      _filteredBills.fold(0.0, (sum, b) => sum + (b['amount'] as double));
+
+  String get _avgBill {
+    final list = _filteredBills;
+    if (list.isEmpty) return '–';
+    final avg = _totalAmount / list.length;
+    return '₹${avg.toStringAsFixed(0)}';
   }
 
-  _DropdownOptionData get _selectedCategoryOption {
-    return Screen4._dropdownOptions.firstWhere(
-          (_DropdownOptionData option) => option.value == _selectedCategory,
-      orElse: () => Screen4._dropdownOptions.first,
-    );
-  }
-
-  List<_GoalItem> get _filteredGoals {
-    if (_selectedFilter == 'All') {
-      return _goals;
+  String get _topCategory {
+    if (_bills.isEmpty) return '–';
+    final Map<String, double> totals = {};
+    for (final b in _bills) {
+      final cat = b['category'] as String;
+      totals[cat] = (totals[cat] ?? 0) + (b['amount'] as double);
     }
-    return _goals.where((_GoalItem goal) => goal.category == _selectedFilter).toList();
+    final top = totals.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+    const icons = {'food':'🍔','shopping':'🛍️','medical':'💊','utility':'⚡','other':'📄'};
+    return icons[top] ?? '–';
+  }
+
+  String _formatAmount(double v) {
+    if (v >= 1000) {
+      final s = v.toStringAsFixed(0);
+      final parts = <String>[];
+      var rem = s;
+      while (rem.length > 3) {
+        parts.insert(0, rem.substring(rem.length - 3));
+        rem = rem.substring(0, rem.length - 3);
+      }
+      parts.insert(0, rem);
+      return parts.join(',');
+    }
+    return v.toStringAsFixed(0);
+  }
+
+  // ── LIFECYCLE ─────────────────────────────────────────────────────
+  @override
+  void initState() {
+    super.initState();
+
+    // Pulse animation for chat dot
+    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 2))
+      ..repeat(reverse: true);
+    _pulseAnim = Tween<double>(begin: 1.0, end: 1.35).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    );
+
+    // Chat panel slide/scale animation
+    _chatCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 350));
+    _chatSlide = CurvedAnimation(parent: _chatCtrl, curve: Curves.easeOutBack);
+
+    // Sheet slide-up animation
+    _sheetCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 450));
+    _sheetSlide = CurvedAnimation(parent: _sheetCtrl, curve: const Cubic(0.34, 1.2, 0.64, 1));
+
+    // Toast animation
+    _toastAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
   }
 
   @override
   void dispose() {
-    _toastTimer?.cancel();
-    _typingTimer?.cancel();
-    _titleController.dispose();
-    _descriptionController.dispose();
-    _formReminderTimeController.dispose();
-    _formReminderNoteController.dispose();
-    _modalReminderTimeController.dispose();
-    _modalReminderNoteController.dispose();
-    _chatController.dispose();
-    _titleFocusNode.dispose();
-    _chatFocusNode.dispose();
-    _chatScrollController.dispose();
+    _pulseCtrl.dispose();
+    _chatCtrl.dispose();
+    _sheetCtrl.dispose();
+    _toastAnim.dispose();
+    _chatInputCtrl.dispose();
     super.dispose();
   }
 
-  void _addGoal() {
-    final String title = _titleController.text.trim();
-    if (title.isEmpty) {
-      setState(() {
-        _titleError = true;
-      });
-      _titleFocusNode.requestFocus();
-      Future<void>.delayed(const Duration(milliseconds: 1500), () {
-        if (!mounted) {
-          return;
-        }
-        setState(() {
-          _titleError = false;
-        });
-      });
-      return;
-    }
-
-    final _GoalReminder? reminder = _formReminderOn
-        ? _GoalReminder(
-      frequency: _formFrequency,
-      time: _formReminderTimeController.text,
-      day: _formReminderDay,
-      note: _formReminderNoteController.text.trim(),
-    )
-        : null;
-
-    setState(() {
-      _goals.add(
-        _GoalItem(
-          id: DateTime.now().microsecondsSinceEpoch,
-          title: title,
-          description: _descriptionController.text.trim(),
-          category: _selectedCategory,
-          icon: _selectedCategoryOption.icon,
-          accent: _goalAccent(_selectedCategory),
-          cardBackground: _goalCardBackground(_selectedCategory),
-          cardBorder: _goalCardBorder(_selectedCategory),
-          progress: 0,
-          reminder: reminder,
-        ),
-      );
-      _selectedFilter = 'All';
-    });
-    _clearForm(showToast: false);
-    _showToastMessage(reminder != null ? 'Goal + Reminder added!' : 'Goal added!');
-  }
-
-  void _quickAdd(_SuggestionData suggestion, int index) {
-    setState(() {
-      _goals.add(
-        _GoalItem(
-          id: DateTime.now().microsecondsSinceEpoch,
-          title: suggestion.title,
-          description: suggestion.description,
-          category: suggestion.tag,
-          icon: suggestion.icon,
-          accent: _goalAccent(suggestion.tag),
-          cardBackground: _goalCardBackground(suggestion.tag),
-          cardBorder: _goalCardBorder(suggestion.tag),
-          progress: 0,
-          reminder: null,
-        ),
-      );
-      _selectedFilter = 'All';
-      _flashSuggestionId = index;
-      _flashingSuggestion = true;
-    });
-
-    Future<void>.delayed(const Duration(milliseconds: 700), () {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _flashingSuggestion = false;
-      });
-    });
-
-    _showToastMessage('Goal added!');
-  }
-
-  void _clearForm({bool showToast = false}) {
-    setState(() {
-      _titleController.clear();
-      _descriptionController.clear();
-      _selectedCategory = 'Health';
-      _formReminderOn = false;
-      _formFrequency = 'Daily';
-      _formReminderDay = 'Monday';
-      _formReminderTimeController.text = '08:00';
-      _formReminderNoteController.clear();
-      _dropdownOpen = false;
-      _titleError = false;
-    });
-    if (showToast) {
-      _showToastMessage('Form cleared');
-    }
-  }
-
-  void _toggleFormReminder() {
-    setState(() {
-      _formReminderOn = !_formReminderOn;
-    });
-  }
-
-  void _pickFormFrequency(String frequency) {
-    setState(() {
-      _formFrequency = frequency;
-    });
-  }
-
-  void _pickModalFrequency(String frequency) {
-    setState(() {
-      _modalFrequency = frequency;
-    });
-  }
-
-  void _toggleDropdown() {
-    setState(() {
-      _dropdownOpen = !_dropdownOpen;
-    });
-  }
-
-  void _selectCategory(_DropdownOptionData option) {
-    setState(() {
-      _selectedCategory = option.value;
-      _dropdownOpen = false;
-    });
-  }
-
-  void _deleteGoal(int id) {
-    setState(() {
-      _goals.removeWhere((_GoalItem goal) => goal.id == id);
-    });
-  }
-
-  void _setProgress(_GoalItem goal, String value) {
-    final int parsed = int.tryParse(value) ?? goal.progress;
-    setState(() {
-      goal.progress = parsed.clamp(0, 100);
-    });
-  }
-
-  void _openReminderModal(_GoalItem goal) {
-    final _GoalReminder? reminder = goal.reminder;
-    setState(() {
-      _editingGoalId = goal.id;
-      _modalFrequency = reminder?.frequency ?? 'Daily';
-      _modalReminderDay = reminder?.day ?? 'Monday';
-      _modalReminderTimeController.text = reminder?.time ?? '08:00';
-      _modalReminderNoteController.text = reminder?.note ?? '';
-      _modalOpen = true;
-    });
-  }
-
-  void _closeReminderModal() {
-    setState(() {
-      _modalOpen = false;
-      _editingGoalId = null;
-    });
-  }
-
-  void _saveReminder() {
-    if (_editingGoalId == null) {
-      return;
-    }
-    final _GoalItem goal = _goals.firstWhere((_GoalItem item) => item.id == _editingGoalId);
-    setState(() {
-      goal.reminder = _GoalReminder(
-        frequency: _modalFrequency,
-        time: _modalReminderTimeController.text,
-        day: _modalReminderDay,
-        note: _modalReminderNoteController.text.trim(),
-      );
-      _modalOpen = false;
-      _editingGoalId = null;
-    });
-    _showToastMessage('Reminder saved!');
-  }
-
-  void _clearReminder() {
-    if (_editingGoalId == null) {
-      return;
-    }
-    final _GoalItem goal = _goals.firstWhere((_GoalItem item) => item.id == _editingGoalId);
-    setState(() {
-      goal.reminder = null;
-      _modalOpen = false;
-      _editingGoalId = null;
-    });
-    _showToastMessage('Reminder cleared');
-  }
-
-  void _showToastMessage(String message) {
-    _toastTimer?.cancel();
-    setState(() {
-      _toastText = message;
-      _showToast = true;
-    });
-    _toastTimer = Timer(const Duration(milliseconds: 2400), () {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _showToast = false;
-      });
-    });
-  }
-
+  // ── ACTIONS ───────────────────────────────────────────────────────
   void _toggleChat() {
-    setState(() {
-      _chatOpen = !_chatOpen;
-    });
+    setState(() => _chatOpen = !_chatOpen);
     if (_chatOpen) {
-      Future<void>.delayed(const Duration(milliseconds: 360), () {
-        if (!mounted) {
-          return;
-        }
-        _chatFocusNode.requestFocus();
-        _scrollChatToBottom();
-      });
+      _chatCtrl.forward();
+    } else {
+      _chatCtrl.reverse();
     }
   }
 
-  void _sendMessage() {
-    final String text = _chatController.text.trim();
-    if (text.isEmpty) {
+  void _openOverlay(String type) {
+    setState(() => _overlayType = type);
+    _sheetCtrl.forward(from: 0);
+  }
+
+  void _closeOverlay() {
+    _sheetCtrl.reverse().then((_) {
+      setState(() => _overlayType = '');
+    });
+  }
+
+  void _showToast(String msg) async {
+    setState(() {
+      _toastMsg = msg;
+      _toastVisible = true;
+    });
+    await _toastAnim.forward(from: 0);
+    await Future.delayed(const Duration(milliseconds: 2200));
+    await _toastAnim.reverse();
+    if (mounted) setState(() => _toastVisible = false);
+  }
+
+  void _deleteBill(String id) {
+    setState(() => _bills.removeWhere((b) => b['id'] == id));
+    _showToast('Bill removed');
+  }
+
+  void _deleteCoupon(String id) {
+    setState(() => _coupons.removeWhere((c) => c['id'] == id));
+    _showToast('Coupon removed');
+  }
+
+  void _addBill({
+    required String store,
+    required String amount,
+    required String category,
+    required String payment,
+    required String note,
+  }) {
+    final amt = double.tryParse(amount) ?? 0;
+    if (store.trim().isEmpty || amt <= 0) {
+      _showToast('Please fill Store and Amount');
       return;
     }
+    const catMeta = {
+      'Shopping': {'cat': 'shopping', 'icon': '🛍️', 'color': kAccent2, 'bg': Color(0x268D7DFF)},
+      'Food':     {'cat': 'food',     'icon': '🍽️', 'color': kAccent5, 'bg': Color(0x26FFD86E)},
+      'Utility':  {'cat': 'utility',  'icon': '⚡', 'color': kAccent3, 'bg': Color(0x2604D7C8)},
+      'Medical':  {'cat': 'medical',  'icon': '💊', 'color': kAccent4, 'bg': Color(0x26FF8EC7)},
+      'Other':    {'cat': 'other',    'icon': '📄', 'color': kText,    'bg': Color(0x1AFFFFFF)},
+    };
+    final meta = catMeta[category] ?? catMeta['Other']!;
     setState(() {
-      _messages.add(_ChatMessage(text: text, isUser: true));
-      _chatController.clear();
-      _typing = true;
-    });
-    _scrollChatToBottom();
-    _typingTimer?.cancel();
-    _typingTimer = Timer(const Duration(seconds: 1), () {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _typing = false;
-        _messages.add(_ChatMessage(text: _aiResponses[_aiResponseIndex % _aiResponses.length], isUser: false));
-        _aiResponseIndex++;
+      _bills.insert(0, {
+        'id': 'b${DateTime.now().millisecondsSinceEpoch}',
+        'store': store.trim(),
+        'amount': amt,
+        'date': _todayLabel(),
+        'category': meta['cat'],
+        'payment': payment,
+        'note': note.trim().isEmpty ? '—' : note.trim(),
+        'catColor': meta['color'],
+        'catBg': meta['bg'],
+        'icon': meta['icon'],
       });
-      _scrollChatToBottom();
     });
+    _closeOverlay();
+    _showToast('✦ Bill saved!');
   }
 
-  void _scrollChatToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_chatScrollController.hasClients) {
-        return;
-      }
-      _chatScrollController.animateTo(
-        _chatScrollController.position.maxScrollExtent + 100,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
-    });
+  String _todayLabel() {
+    final now = DateTime.now();
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return '${months[now.month - 1]} ${now.day}, ${now.year}';
   }
 
-  String _formatTime(String raw) {
-    if (raw.isEmpty || !raw.contains(':')) {
-      return raw;
-    }
-    final List<String> parts = raw.split(':');
-    final int hour = int.tryParse(parts[0]) ?? 0;
-    final int display = hour % 12 == 0 ? 12 : hour % 12;
-    final String suffix = hour >= 12 ? 'PM' : 'AM';
-    return '$display:${parts[1]} $suffix';
-  }
-
-  Color _goalAccent(String category) {
-    switch (category) {
-      case 'Health':
-        return _accent3;
-      case 'Relationships':
-        return _accent4;
-      case 'Finance':
-        return _accent5;
-      case 'Purpose':
-        return _accent3;
-      default:
-        return _accent2;
-    }
-  }
-
-  Color _goalCardBackground(String category) {
-    switch (category) {
-      case 'Health':
-      case 'Purpose':
-        return _accent3.withValues(alpha: 0.12);
-      case 'Relationships':
-        return _accent4.withValues(alpha: 0.12);
-      case 'Finance':
-        return _accent5.withValues(alpha: 0.14);
-      case 'Creativity':
-      case 'Mindfulness':
-        return _accent.withValues(alpha: 0.10);
-      default:
-        return _accent2.withValues(alpha: 0.10);
-    }
-  }
-
-  Color _goalCardBorder(String category) {
-    switch (category) {
-      case 'Health':
-      case 'Purpose':
-        return _accentBorder3;
-      case 'Relationships':
-        return _accentBorder4;
-      case 'Finance':
-        return _accentBorder5;
-      case 'Creativity':
-      case 'Mindfulness':
-        return _accentBorder;
-      default:
-        return _accentBorder2;
-    }
-  }
-
+  // ── BUILD ─────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final _GoalItem editingGoal = _editingGoalId == null
-        ? _GoalItem.empty()
-        : _goals.firstWhere((_GoalItem goal) => goal.id == _editingGoalId, orElse: () => _GoalItem.empty());
-
-    return GestureDetector(
-      onTap: () {
-        if (_dropdownOpen) {
-          setState(() {
-            _dropdownOpen = false;
-          });
-        }
-      },
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
       child: Scaffold(
-        backgroundColor: _bg,
-        body: SafeArea(
-          bottom: false,
-          child: Stack(
-            children: <Widget>[
-              Column(
-                children: <Widget>[
-                  _buildNav(context),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(14, 16, 14, 110),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          _buildAddPanel(),
-                          _buildSectionHeader('My Goals', '${_goals.length} ${_goals.length == 1 ? 'goal' : 'goals'}'),
-                          _buildFilters(),
-                          _buildGoalsSection(),
-                          _buildSectionHeader('AI Suggestions', 'Tap to add instantly'),
-                          _buildSuggestions(),
-                        ],
+        backgroundColor: kBg,
+        body: Stack(
+          children: [
+            // ── MESH BACKGROUND
+            _MeshBackground(),
+
+            // ── MAIN SCREEN
+            SafeArea(
+              bottom: false,
+              child: Column(
+                children: [
+                  _buildHeader(),
+                  Expanded(child: _buildScrollArea()),
+                  _buildBottomActions(),
+                ],
+              ),
+            ),
+
+            // ── CHAT FAB
+            Positioned(
+              bottom: 108,
+              right: 20,
+              child: _buildChatFab(),
+            ),
+
+            // ── CHAT PANEL
+            AnimatedBuilder(
+              animation: _chatSlide,
+              builder: (_, __) {
+                return Positioned(
+                  bottom: 170,
+                  right: 24,
+                  child: Opacity(
+                    opacity: _chatSlide.value,
+                    child: Transform(
+                      alignment: Alignment.bottomRight,
+                      transform: Matrix4.identity()
+                        ..translate(0.0, 16.0 * (1 - _chatSlide.value))
+                        ..scale(0.95 + 0.05 * _chatSlide.value),
+                      child: IgnorePointer(
+                        ignoring: !_chatOpen,
+                        child: _buildChatPanel(),
                       ),
                     ),
                   ),
-                ],
+                );
+              },
+            ),
+
+            // ── OVERLAY (Add Bill / Coupon Manager)
+            if (_overlayType.isNotEmpty)
+              AnimatedBuilder(
+                animation: _sheetSlide,
+                builder: (_, __) => _buildOverlayBackdrop(),
               ),
-              Positioned(
-                left: 30,
-                right: 30,
-                top: 255,
-                child: IgnorePointer(
-                  ignoring: !_dropdownOpen,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 220),
-                    opacity: _dropdownOpen ? 1 : 0,
-                    child: AnimatedSlide(
-                      duration: const Duration(milliseconds: 220),
-                      offset: _dropdownOpen ? Offset.zero : const Offset(0, -0.04),
-                      child: _buildDropdown(),
+
+            // ── TOAST NOTIFICATION
+            if (_toastVisible)
+              AnimatedBuilder(
+                animation: _toastAnim,
+                builder: (_, __) => Positioned(
+                  bottom: 120,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Opacity(
+                      opacity: _toastAnim.value,
+                      child: Transform.translate(
+                        offset: Offset(0, 10 * (1 - _toastAnim.value)),
+                        child: _buildToast(),
+                      ),
                     ),
                   ),
                 ),
               ),
-              Positioned.fill(
-                child: IgnorePointer(
-                  ignoring: !_modalOpen,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 220),
-                    opacity: _modalOpen ? 1 : 0,
-                    child: GestureDetector(
-                      onTap: _closeReminderModal,
-                      child: _buildModalOverlay(editingGoal.id == -1 ? null : editingGoal),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: IgnorePointer(
-                  ignoring: !_chatOpen,
-                  child: AnimatedSlide(
-                    duration: const Duration(milliseconds: 350),
-                    curve: Curves.easeOutCubic,
-                    offset: _chatOpen ? Offset.zero : const Offset(0, 1),
-                    child: _buildChatDrawer(),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 80,
-                child: IgnorePointer(
-                  ignoring: !_showToast,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 300),
-                    opacity: _showToast ? 1 : 0,
-                    child: AnimatedSlide(
-                      duration: const Duration(milliseconds: 300),
-                      offset: _showToast ? Offset.zero : const Offset(0, 0.25),
-                      child: _buildToast(),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(right: 16, bottom: 16, child: _buildFab()),
-            ],
-          ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildNav(BuildContext context) {
-    final double scale = _pressingBack ? 0.94 : (_hoveringBack ? 1.08 : 1);
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          height: 56,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: _bg2.withValues(alpha: 0.92),
-            border: Border(bottom: BorderSide(color: _accentBorder, width: 2)),
-            boxShadow: <BoxShadow>[
-              BoxShadow(color: _bg.withValues(alpha: 0.72), blurRadius: 20, offset: const Offset(0, 2)),
-            ],
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  MouseRegion(
-                    onEnter: (_) => setState(() => _hoveringBack = true),
-                    onExit: (_) => setState(() {
-                      _hoveringBack = false;
-                      _pressingBack = false;
-                    }),
-                    child: GestureDetector(
-                      onTapDown: (_) => setState(() => _pressingBack = true),
-                      onTapUp: (_) => setState(() => _pressingBack = false),
-                      onTapCancel: () => setState(() => _pressingBack = false),
-                      onTap: () => Navigator.of(context).maybePop(),
-                      child: AnimatedScale(
-                        scale: scale,
-                        duration: const Duration(milliseconds: 200),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: _hoveringBack ? _bg2.withValues(alpha: 0.6) : _accentSoft2,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: _accentBorder2),
-                          ),
-                          child: Icon(Icons.chevron_left_rounded, color: _accent2, size: 20),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text('Life Goals', style: _sf(size: 32, weight: FontWeight.w700)),
+  // ════════════════════════════════════════════════════════════════════
+  //  HEADER
+  // ════════════════════════════════════════════════════════════════════
+  Widget _buildHeader() {
+    return Container(
+      color: Colors.transparent, // Adjusted so mesh background shows
+      padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _PressScaleButton(
+            onTap: () => Navigator.maybePop(context),
+            child: Container(
+              width: 34, height: 34,
+              margin: const EdgeInsets.only(bottom: 4),
+              decoration: BoxDecoration(
+                color: kPanel,
+                border: Border.all(color: kBorder, width: 1),
+                borderRadius: BorderRadius.circular(17),
+                boxShadow: const [
+                  BoxShadow(color: Color(0x1F6B91FF), blurRadius: 8, offset: Offset(0, 2)),
                 ],
               ),
-              const SizedBox(width: 40),
-            ],
+              child: const Icon(Icons.arrow_back_ios_new_rounded, color: kText, size: 13),
+            ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAddPanel() {
-    return Stack(
-      children: <Widget>[
-        Container(
-          margin: const EdgeInsets.only(bottom: 28),
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
-          decoration: BoxDecoration(
-            color: _bg,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _cardBorder),
-            boxShadow: <BoxShadow>[
-              BoxShadow(color: _bg.withValues(alpha: 0.40), blurRadius: 28, offset: const Offset(0, 4)),
-              BoxShadow(color: _bg.withValues(alpha: 0.70), blurRadius: 4, offset: const Offset(0, 1)),
-            ],
-          ),
-          child: Column(
+          const SizedBox(width: 10),
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Icon(Icons.add_circle_outline_rounded, color: _accent5, size: 20),
-                  const SizedBox(width: 8),
-                  Text('Add a New Goal', style: _sf(size: 17.6, weight: FontWeight.w600)),
-                ],
-              ),
-              const SizedBox(height: 16),
-              _buildField(
-                label: 'Goal Title *',
-                icon: Icons.view_column_outlined,
-                child: TextField(
-                  controller: _titleController,
-                  focusNode: _titleFocusNode,
-                  decoration: _fieldDecoration('e.g. Run a 5K, Read 12 books...', error: _titleError),
-                  style: _sf(size: 16),
+            children: const [
+              Text('My Bills', style: TextStyle(
+                fontSize: 28, fontWeight: FontWeight.w900,
+                color: kText, height: 1.0, letterSpacing: -0.5,
+              )),
+              SizedBox(height: 4),
+              Text('BY AHVI', style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w700,
+                letterSpacing: 3.2, color: kMuted,
+              )),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  SCROLL AREA
+  // ════════════════════════════════════════════════════════════════════
+  Widget _buildScrollArea() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 4),
+          _buildSpendingCard(),
+          const SizedBox(height: 14),
+          _buildFilterTabs(),
+          const SizedBox(height: 12),
+          Text(
+            _activeFilter == 'all' ? 'Recent Bills' : '${_toTitleCase(_activeFilter)} Bills',
+            style: const TextStyle(
+              fontSize: 16, fontWeight: FontWeight.w700, color: kText,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _buildBillsList(),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  String _toTitleCase(String s) =>
+      s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+
+  // ════════════════════════════════════════════════════════════════════
+  //  SPENDING CARD
+  // ════════════════════════════════════════════════════════════════════
+  Widget _buildSpendingCard() {
+    final bills = _filteredBills;
+    final total = _totalAmount;
+    final count = bills.length;
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [kAccent2, kAccent, Color(0xD96B91FF)],
+          stops: [0.0, 0.4, 1.0],
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(color: Color(0x476B91FF), blurRadius: 30, offset: Offset(0, 8)),
+        ],
+      ),
+      clipBehavior: Clip.hardEdge,
+      child: Stack(
+        children: [
+          Positioned(top: -30, right: -30,
+              child: Container(width: 130, height: 130,
+                  decoration: const BoxDecoration(color: Color(0x1FFFFFFF), shape: BoxShape.circle))),
+          Positioned(bottom: -50, left: -20,
+              child: Container(width: 160, height: 160,
+                  decoration: const BoxDecoration(color: Color(0x12FFFFFF), shape: BoxShape.circle))),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('TOTAL SPENDING', style: TextStyle(
+                  fontSize: 10, fontWeight: FontWeight.w700,
+                  letterSpacing: 2.88, color: Color(0xBFFFFFFF),
+                )),
+                const SizedBox(height: 6),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: Align(
+                    key: ValueKey(total),
+                    alignment: Alignment.centerLeft,
+                    child: RichText(text: TextSpan(children: [
+                      const TextSpan(text: '₹', style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w500, color: Color(0xD9FFFFFF),
+                      )),
+                      TextSpan(text: _formatAmount(total), style: const TextStyle(
+                        fontSize: 32, fontWeight: FontWeight.w700,
+                        color: Colors.white, height: 1.0,
+                      )),
+                    ])),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(child: _buildStatPill('$count', 'Bills')),
+                    const SizedBox(width: 8),
+                    Expanded(child: _buildStatPill(_avgBill, 'Avg Bill')),
+                    const SizedBox(width: 8),
+                    Expanded(child: _buildStatPill(_topCategory, 'Top Cat.')),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatPill(String value, String label) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+      decoration: BoxDecoration(
+        color: const Color(0x38FFFFFF),
+        border: Border.all(color: const Color(0x4DFFFFFF), width: 1),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(value, style: const TextStyle(
+            fontSize: 18, fontWeight: FontWeight.w700,
+            color: Colors.white, height: 1.0,
+          )),
+          const SizedBox(height: 3),
+          Text(label.toUpperCase(), style: const TextStyle(
+            fontSize: 9, fontWeight: FontWeight.w600,
+            color: Color(0xB3FFFFFF), letterSpacing: 1.28,
+          )),
+        ],
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  FILTER TABS
+  // ════════════════════════════════════════════════════════════════════
+  Widget _buildFilterTabs() {
+    final tabs = [
+      {'key': 'all',      'label': 'All',      'color': Colors.white,  'bg': kBg2},
+      {'key': 'shopping', 'label': 'Shopping', 'color': kAccent2,      'bg': const Color(0x268D7DFF)},
+      {'key': 'food',     'label': 'Food',     'color': kAccent5,      'bg': const Color(0x26FFD86E)},
+      {'key': 'utility',  'label': 'Utility',  'color': kAccent3,      'bg': const Color(0x2604D7C8)},
+      {'key': 'medical',  'label': 'Medical',  'color': kAccent4,      'bg': const Color(0x26FF8EC7)},
+      {'key': 'other',    'label': 'Other',    'color': kText,         'bg': kBg2},
+    ];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: tabs.map((tab) {
+          final key      = tab['key'] as String;
+          final isActive = _activeFilter == key;
+          final color    = tab['color'] as Color;
+          final bg       = tab['bg'] as Color;
+          return Padding(
+            padding: const EdgeInsets.only(right: 7),
+            child: GestureDetector(
+              onTap: () => setState(() => _activeFilter = key),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                decoration: BoxDecoration(
+                  color: isActive ? bg : kPanel,
+                  border: Border.all(
+                    color: isActive ? color.withOpacity(0.6) : kBorder,
+                    width: 1.5,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isActive ? color.withOpacity(0.14) : const Color(0x0F6B91FF),
+                      blurRadius: isActive ? 14 : 8,
+                      offset: Offset(0, isActive ? 4 : 2),
+                    ),
+                  ],
+                ),
+                child: AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 200),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
+                    color: isActive ? color : kText,
+                    letterSpacing: 0.2,
+                  ),
+                  child: Text(tab['label'] as String),
                 ),
               ),
-              const SizedBox(height: 14),
-              _buildField(
-                label: 'Description (optional)',
-                icon: Icons.notes_rounded,
-                child: TextField(
-                  controller: _descriptionController,
-                  minLines: 4,
-                  maxLines: 4,
-                  decoration: _fieldDecoration('Why does this goal matter to you?'),
-                  style: _sf(size: 16),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  BILLS LIST
+  // ════════════════════════════════════════════════════════════════════
+  Widget _buildBillsList() {
+    final bills = _filteredBills;
+    if (bills.isEmpty) return _buildEmptyState();
+
+    return Column(
+      children: bills.asMap().entries.map((entry) {
+        final i    = entry.key;
+        final bill = entry.value;
+        return _AnimatedBillCard(
+          key: ValueKey(bill['id']),
+          bill: bill,
+          delay: Duration(milliseconds: i * 60),
+          onTap: () => _showDetailSheet(bill),
+          onDelete: () => _deleteBill(bill['id'] as String),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(40),
+      decoration: BoxDecoration(
+        color: kShell,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: kBorder, width: 1.5),
+      ),
+      child: Column(
+        children: const [
+          Text('🧾', style: TextStyle(fontSize: 56)),
+          SizedBox(height: 16),
+          Text('No Bills Yet', style: TextStyle(
+            fontSize: 20, fontWeight: FontWeight.w700, color: kText,
+          )),
+          SizedBox(height: 6),
+          Text('Tap "Add Bill" below to scan or\nmanually enter your first bill.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: kMuted, fontWeight: FontWeight.w500, height: 1.6),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  BOTTOM ACTIONS
+  // ════════════════════════════════════════════════════════════════════
+  Widget _buildBottomActions() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+      color: Colors.transparent,
+      child: Row(
+        children: [
+          Expanded(
+            child: _PressScaleButton(
+              onTap: () => _openOverlay('add'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: kAccent2,
+                  borderRadius: BorderRadius.circular(22),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x668D7DFF), blurRadius: 30, offset: Offset(0, 10)),
+                  ],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Icon(Icons.add_circle_outline_rounded, color: Colors.white, size: 18),
+                    SizedBox(width: 8),
+                    Text('Add Bill', style: TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white,
+                    )),
+                  ],
                 ),
               ),
-              const SizedBox(height: 14),
-              _buildField(label: 'Category', icon: Icons.sell_outlined, child: _buildCategoryTrigger()),
-              const SizedBox(height: 10),
-              _buildFormReminderSection(),
-              const SizedBox(height: 14),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: _addGoal,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        decoration: BoxDecoration(
-                          gradient: _uiGradient,
-                          borderRadius: BorderRadius.circular(14),
-                          boxShadow: <BoxShadow>[
-                            BoxShadow(color: _accentGlow2, blurRadius: 18, offset: const Offset(0, 5)),
-                          ],
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: <Widget>[
-                            Icon(Icons.add_rounded, color: _text, size: 15),
-                            const SizedBox(width: 7),
-                            Text('Add Goal', style: _sf(size: 15.2, weight: FontWeight.w600)),
-                          ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _PressScaleButton(
+              onTap: () => _openOverlay('coupon'),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: kAccent2,
+                      borderRadius: BorderRadius.circular(22),
+                      boxShadow: const [
+                        BoxShadow(color: Color(0x598D7DFF), blurRadius: 30, offset: Offset(0, 10)),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.local_offer_outlined, color: Colors.white, size: 18),
+                        SizedBox(width: 8),
+                        Text('My Coupons', style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white,
+                        )),
+                      ],
+                    ),
+                  ),
+                  Positioned(
+                    top: -6, right: 14,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      height: 18,
+                      constraints: const BoxConstraints(minWidth: 18),
+                      decoration: BoxDecoration(
+                        color: kAccent4,
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(color: kBg, width: 2),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '${_coupons.length}',
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white),
                         ),
                       ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  CHAT FAB 
+  // ════════════════════════════════════════════════════════════════════
+  Widget _buildChatFab() {
+    return _PressScaleButton(
+      onTap: _toggleChat,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 11, 18, 11),
+        decoration: BoxDecoration(
+          color: kAccent2,
+          borderRadius: BorderRadius.circular(50),
+          boxShadow: const [
+            BoxShadow(color: Color(0x8C8D7DFF), blurRadius: 20, offset: Offset(0, 6)),
+            BoxShadow(color: Color(0x33000000), blurRadius: 6, offset: Offset(0, 2)),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 26, height: 26,
+              child: Stack(
+                children: [
+                  Center(
+                    child: Icon(
+                      _chatOpen ? Icons.close_rounded : Icons.auto_awesome_rounded,
+                      color: Colors.white, size: 18,
+                    ),
+                  ),
+                  if (!_chatOpen)
+                    Positioned(
+                      top: -1, right: -1,
+                      child: AnimatedBuilder(
+                        animation: _pulseAnim,
+                        builder: (_, __) => Transform.scale(
+                          scale: _pulseAnim.value,
+                          child: Container(
+                            width: 8, height: 8,
+                            decoration: BoxDecoration(
+                              color: kAccent5,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: kAccent5.withOpacity(0.7), width: 2),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text('ASK AHVI', style: TextStyle(
+              fontSize: 12, fontWeight: FontWeight.w800,
+              color: Colors.white, letterSpacing: 0.96,
+            )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  CHAT PANEL 
+  // ════════════════════════════════════════════════════════════════════
+  Widget _buildChatPanel() {
+    return Container(
+      width: 300,
+      decoration: BoxDecoration(
+        color: kShell,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: kBorder, width: 1.5),
+        boxShadow: const [
+          BoxShadow(color: Color(0x66000000), blurRadius: 60, offset: Offset(0, 20)),
+          BoxShadow(color: kPanel2, blurRadius: 0, offset: Offset(0, 1)),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(26),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0x1A8D7DFF), Color(0x0FFF8EC7)],
+                  begin: Alignment.topLeft, end: Alignment.bottomRight,
+                ),
+                border: Border(bottom: BorderSide(color: kBorder, width: 1)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36, height: 36,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(colors: [kAccent2, kAccent4]),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Center(
+                      child: Text('A', style: TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white,
+                      )),
                     ),
                   ),
                   const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text('AHVI', style: TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w700, color: kText,
+                        )),
+                        Text('Online · Bills Assistant', style: TextStyle(
+                          fontSize: 9, color: kMuted, fontWeight: FontWeight.w500,
+                        )),
+                      ],
+                    ),
+                  ),
                   GestureDetector(
-                    onTap: () => _clearForm(showToast: true),
+                    onTap: _toggleChat,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      width: 26, height: 26,
                       decoration: BoxDecoration(
-                        color: _accentSoft,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: _accentBorder2),
+                        color: kPanel, borderRadius: BorderRadius.circular(13),
                       ),
-                      child: Row(
-                        children: <Widget>[
-                          Icon(Icons.close_rounded, color: _muted, size: 14),
-                          const SizedBox(width: 6),
-                          Text('Clear', style: _sf(size: 14.4, weight: FontWeight.w600, color: _muted)),
-                        ],
-                      ),
+                      child: const Icon(Icons.close_rounded, color: kText, size: 13),
                     ),
                   ),
                 ],
               ),
+            ),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: ListView.builder(
+                padding: const EdgeInsets.all(12),
+                shrinkWrap: true,
+                itemCount: _chatMessages.length,
+                itemBuilder: (_, i) {
+                  final msg = _chatMessages[i];
+                  final isAhvi = msg['from'] == 'ahvi';
+                  return Align(
+                    alignment: isAhvi ? Alignment.centerLeft : Alignment.centerRight,
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                      constraints: const BoxConstraints(maxWidth: 220),
+                      decoration: BoxDecoration(
+                        color: isAhvi
+                            ? const Color(0xFF1E2D45)
+                            : const Color(0xFF1A2038),
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(16),
+                          topRight: const Radius.circular(16),
+                          bottomLeft: Radius.circular(isAhvi ? 4 : 16),
+                          bottomRight: Radius.circular(isAhvi ? 16 : 4),
+                        ),
+                        border: Border.all(color: kBorder, width: 1),
+                      ),
+                      child: Text(msg['text']!, style: const TextStyle(
+                        fontSize: 12, color: kText, height: 1.5,
+                      )),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: kBorder, width: 1)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 32, height: 32,
+                    decoration: BoxDecoration(
+                      color: kPanel, borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Icon(Icons.mic_rounded, color: kMuted, size: 14),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _chatInputCtrl,
+                      style: const TextStyle(fontSize: 12, color: kText),
+                      decoration: const InputDecoration(
+                        hintText: 'Ask about your bills…',
+                        hintStyle: TextStyle(color: kMuted, fontSize: 12),
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 6),
+                      ),
+                      onSubmitted: (v) => _sendChatMsg(v),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => _sendChatMsg(_chatInputCtrl.text),
+                    child: Container(
+                      width: 32, height: 32,
+                      decoration: BoxDecoration(
+                        color: kAccent2, borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Icon(Icons.send_rounded, color: Colors.white, size: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _sendChatMsg(String text) {
+    if (text.trim().isEmpty) return;
+    setState(() {
+      _chatMessages.add({'from': 'user', 'text': text.trim()});
+      _chatMessages.add({'from': 'ahvi', 'text': 'Got it! I\'m reviewing your bills now… ✦'});
+    });
+    _chatInputCtrl.clear();
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  OVERLAY (Add Bill + Coupon Manager)
+  // ════════════════════════════════════════════════════════════════════
+  Widget _buildOverlayBackdrop() {
+    return GestureDetector(
+      onTap: _closeOverlay,
+      child: Container(
+        color: Color.lerp(Colors.transparent, const Color(0xB808111F), _sheetSlide.value),
+        child: GestureDetector(
+          onTap: () {}, 
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Transform.translate(
+                offset: Offset(0, (1 - _sheetSlide.value) * 600),
+                child: _overlayType == 'add'
+                    ? _buildAddSheet()
+                    : _buildCouponMgrSheet(),
+              ),
             ],
           ),
         ),
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: Container(
-            height: 3,
-            decoration: BoxDecoration(
-              color: _accentBorder2,
-              borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)),
-            ),
-          ),
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  ADD BILL SHEET
+  // ════════════════════════════════════════════════════════════════════
+  final _storeCtrl   = TextEditingController();
+  final _amountCtrl  = TextEditingController();
+  final _itemsCtrl   = TextEditingController();
+  final _notesCtrl   = TextEditingController();
+  final _couponCtrl  = TextEditingController();
+
+  Widget _buildAddSheet() {
+    return Container(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.93),
+      decoration: const BoxDecoration(
+        color: kBg2,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(36)),
+        border: Border(top: BorderSide(color: kBorder, width: 1.5)),
+        boxShadow: [
+          BoxShadow(color: Color(0x266B91FF), blurRadius: 60, offset: Offset(0, -20)),
+        ],
+      ),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(22, 16, 22, 40),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _sheetHandle(),
+            const Text('Add a Bill', style: TextStyle(
+              fontSize: 22, fontWeight: FontWeight.w700, color: kText,
+            )),
+            const SizedBox(height: 3),
+            const Text("Choose how you'd like to add your bill", style: TextStyle(
+              fontSize: 11, color: kMuted, fontWeight: FontWeight.w500,
+            )),
+            const SizedBox(height: 14),
+
+            _buildModeToggle(),
+            const SizedBox(height: 16),
+
+            if (_addMode == 'ai') ...[
+              _buildUploadSection(),
+              const SizedBox(height: 12),
+            ],
+
+            if (_addMode == 'manual') ...[
+              _buildManualBanner(),
+              const SizedBox(height: 12),
+            ],
+
+            _buildFormGroup('Store / Vendor *', child: _glassInput(
+              controller: _storeCtrl,
+              placeholder: 'e.g. Zara, Swiggy, Apollo…',
+            )),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: _buildFormGroup('Amount (₹) *', child: _glassInput(
+                controller: _amountCtrl, placeholder: '0.00',
+                inputType: const TextInputType.numberWithOptions(decimal: true),
+              ))),
+              const SizedBox(width: 10),
+              Expanded(child: _buildFormGroup('Date *', child: _datePickerTrigger())),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: _buildFormGroup('Category', child: _buildSelectField(
+                value: _selCategory,
+                items: ['Shopping', 'Food', 'Utility', 'Medical', 'Other'],
+                onChanged: (v) => setState(() => _selCategory = v!),
+              ))),
+              const SizedBox(width: 10),
+              Expanded(child: _buildFormGroup('Payment', child: _buildSelectField(
+                value: _selPayment,
+                items: ['UPI', 'Credit Card', 'Debit Card', 'Cash', 'Net Banking'],
+                onChanged: (v) => setState(() => _selPayment = v!),
+              ))),
+            ]),
+            const SizedBox(height: 10),
+            _buildFormGroup('Items (optional)', child: _glassInput(
+              controller: _itemsCtrl, placeholder: 'Shirt, Shoes, Watch…',
+            )),
+            const SizedBox(height: 10),
+            _buildFormGroup('Notes (optional)', child: _glassInput(
+              controller: _notesCtrl, placeholder: 'Any extra details…', maxLines: 3,
+            )),
+            const SizedBox(height: 10),
+
+            _buildCouponRow(),
+            const SizedBox(height: 10),
+
+            Row(children: [
+              Expanded(flex: 1, child: _PressScaleButton(
+                onTap: _closeOverlay,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  decoration: BoxDecoration(
+                    color: kPanel,
+                    border: Border.all(color: kBorder, width: 1.5),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Center(child: Text('Cancel', style: TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600, color: kMuted,
+                  ))),
+                ),
+              )),
+              const SizedBox(width: 10),
+              Expanded(flex: 2, child: _PressScaleButton(
+                onTap: () => _addBill(
+                  store: _storeCtrl.text,
+                  amount: _amountCtrl.text,
+                  category: _selCategory,
+                  payment: _selPayment,
+                  note: _notesCtrl.text,
+                ),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(colors: [kAccent, kAccent2]),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x4D6B91FF), blurRadius: 20, offset: Offset(0, 6)),
+                    ],
+                  ),
+                  child: const Center(child: Text('✦ Save Bill', style: TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white,
+                  ))),
+                ),
+              )),
+            ]),
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildModeToggle() {
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: kPanel,
+        border: Border.all(color: kBorder, width: 1.5),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: ['ai', 'manual'].map((mode) {
+          final isActive = _addMode == mode;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _addMode = mode),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 280),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: isActive
+                      ? (mode == 'ai' ? const Color(0x268D7DFF) : const Color(0x2604D7C8))
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      mode == 'ai' ? Icons.auto_awesome : Icons.edit_outlined,
+                      size: 14,
+                      color: isActive
+                          ? (mode == 'ai' ? kAccent2 : kAccent3)
+                          : kMuted,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      mode == 'ai' ? '✦ AI Autofill' : 'Enter Manually',
+                      style: TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w700,
+                        color: isActive
+                            ? (mode == 'ai' ? kAccent2 : kAccent3)
+                            : kMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildUploadSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('UPLOAD BILL PHOTO', style: TextStyle(
+          fontSize: 11, fontWeight: FontWeight.w700,
+          color: kMuted, letterSpacing: 1.6,
+        )),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: _uploadOptBtn(
+            icon: Icons.camera_alt_outlined,
+            iconColor: const Color(0xFFD4756E),
+            bg: const Color(0x1FD4756E),
+            border: const Color(0x33D4756E),
+            label: 'Camera', sub: 'Take a photo',
+          )),
+          const SizedBox(width: 10),
+          Expanded(child: _uploadOptBtn(
+            icon: Icons.upload_file_outlined,
+            iconColor: const Color(0xFF5A8FD8),
+            bg: const Color(0x1F5A8FD8),
+            border: const Color(0x335A8FD8),
+            label: 'Upload File', sub: 'JPG, PNG or PDF',
+          )),
+        ]),
       ],
     );
   }
 
-  Widget _buildCategoryTrigger() {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hoveringCategory = true),
-      onExit: (_) => setState(() => _hoveringCategory = false),
-      child: GestureDetector(
-        onTap: _toggleDropdown,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-          decoration: BoxDecoration(
-            color: _dropdownOpen ? _bg : (_hoveringCategory ? _panelSolid2.withValues(alpha: 0.8) : _panelSolid2),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: _dropdownOpen ? _accent2 : (_hoveringCategory ? _accentBorder2 : _borderStrong),
-            ),
-          ),
-          child: Row(
-            children: <Widget>[
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  gradient: _uiGradient,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(_selectedCategoryOption.icon, color: _text, size: 16),
-              ),
-              const SizedBox(width: 10),
-              Expanded(child: Text(_selectedCategoryOption.label, style: _sf(size: 16, weight: FontWeight.w500))),
-              AnimatedRotation(
-                turns: _dropdownOpen ? 0.5 : 0,
-                duration: const Duration(milliseconds: 300),
-                child: Icon(Icons.expand_more_rounded, color: _dropdownOpen ? _accent2 : _muted, size: 16),
-              ),
-            ],
-          ),
+  Widget _uploadOptBtn({
+    required IconData icon, required Color iconColor,
+    required Color bg, required Color border,
+    required String label, required String sub,
+  }) {
+    return _PressScaleButton(
+      onTap: () => _showToast('Camera/Upload coming soon'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+        decoration: BoxDecoration(
+          color: bg, border: Border.all(color: border, width: 1.5),
+          borderRadius: BorderRadius.circular(16),
         ),
+        child: Column(children: [
+          Icon(icon, color: iconColor, size: 22),
+          const SizedBox(height: 8),
+          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: iconColor)),
+          const SizedBox(height: 2),
+          Text(sub, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w500)),
+        ]),
       ),
     );
   }
 
-  Widget _buildFormReminderSection() {
-    final bool showDay = _formFrequency == 'Weekly' || _formFrequency == 'Custom';
+  Widget _buildManualBanner() {
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 10),
-      child: AnimatedCrossFade(
-        duration: const Duration(milliseconds: 220),
-        crossFadeState: _formReminderOn ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-        firstChild: GestureDetector(
-          onTap: _toggleFormReminder,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(13),
-            decoration: BoxDecoration(
-              color: _accentSoft,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _accentBorder2, width: 1.5),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                Icon(Icons.notifications_none_rounded, color: _muted, size: 15),
-                const SizedBox(width: 8),
-                Text('Add Reminder to this Goal', style: _sf(size: 13.76, weight: FontWeight.w600, color: _muted)),
-              ],
-            ),
-          ),
-        ),
-        secondChild: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: _accentSoft,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _accentBorder2),
-          ),
-          child: Column(
-            children: <Widget>[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      Icon(Icons.notifications_active_outlined, color: _accent5, size: 14),
-                      const SizedBox(width: 6),
-                      Text('Reminder', style: _sf(size: 13.44, weight: FontWeight.w600)),
-                    ],
-                  ),
-                  GestureDetector(
-                    onTap: _toggleFormReminder,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(color: _accentSoft4, borderRadius: BorderRadius.circular(8)),
-                      child: Row(
-                        children: <Widget>[
-                          Icon(Icons.close_rounded, color: _accent4, size: 13),
-                          const SizedBox(width: 4),
-                          Text('Remove', style: _sf(size: 12.48, weight: FontWeight.w600, color: _accent4)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: <Widget>[
-                  for (final String frequency in const <String>['Daily', 'Weekly', 'Monthly', 'Custom']) ...<Widget>[
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () => _pickFormFrequency(frequency),
-                        child: _FrequencyPill(text: frequency, selected: _formFrequency == frequency),
-                      ),
-                    ),
-                    if (frequency != 'Custom') const SizedBox(width: 6),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Expanded(
-                    child: _buildField(
-                      label: 'Time',
-                      icon: Icons.schedule_rounded,
-                      child: TextField(
-                        controller: _formReminderTimeController,
-                        decoration: _fieldDecoration('08:00'),
-                        style: _sf(size: 16),
-                      ),
-                    ),
-                  ),
-                  if (showDay) ...<Widget>[
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _buildField(
-                        label: 'Day',
-                        icon: Icons.calendar_today_outlined,
-                        child: _buildDayDropdown(
-                          value: _formReminderDay,
-                          onChanged: (String? value) {
-                            if (value == null) return;
-                            setState(() => _formReminderDay = value);
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              _buildField(
-                label: 'Note (optional)',
-                icon: Icons.message_outlined,
-                child: TextField(
-                  controller: _formReminderNoteController,
-                  decoration: _fieldDecoration("e.g. Don't forget your morning session!"),
-                  style: _sf(size: 16),
-                ),
-              ),
-            ],
-          ),
-        ),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0x1204D7C8),
+        border: Border.all(color: const Color(0x2904D7C8), width: 1.5),
+        borderRadius: BorderRadius.circular(16),
       ),
+      child: Row(children: [
+        const Icon(Icons.edit_rounded, color: kAccent3, size: 16),
+        const SizedBox(width: 10),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
+          Text('Manual Entry Mode', style: TextStyle(
+            fontSize: 13, fontWeight: FontWeight.w700, color: kAccent3,
+          )),
+          Text('Fill in the details below — all * fields required', style: TextStyle(
+            fontSize: 10, color: kMuted, fontWeight: FontWeight.w500,
+          )),
+        ]),
+      ]),
     );
   }
 
-  Widget _buildField({required String label, required IconData icon, required Widget child}) {
+  Widget _buildFormGroup(String label, {required Widget child}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Icon(icon, size: 11, color: _muted),
-            const SizedBox(width: 5),
-            Text(
-              label.toUpperCase(),
-              style: _sf(size: 11.52, weight: FontWeight.w600, color: _muted, letterSpacing: 1.28),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
+      children: [
+        Text(label, style: const TextStyle(
+          fontSize: 11, fontWeight: FontWeight.w600, color: kMuted, letterSpacing: 0.4,
+        )),
+        const SizedBox(height: 5),
         child,
       ],
     );
   }
 
-  Widget _buildSectionHeader(String title, String meta) {
+  Widget _glassInput({
+    required TextEditingController controller,
+    required String placeholder,
+    TextInputType? inputType,
+    int maxLines = 1,
+  }) {
     return Container(
-      padding: const EdgeInsets.only(bottom: 10),
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: _accentBorder2, width: 2))),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: <Widget>[
-          Text(title, style: _sf(size: 22.4, weight: FontWeight.w900)),
-          Text(meta.toUpperCase(), style: _sf(size: 11.52, weight: FontWeight.w600, color: _accent2, letterSpacing: 1.6)),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [kShell, kShell2],
+        ),
+        border: Border.all(color: kBorder, width: 1.5),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: const [
+          BoxShadow(color: Color(0x146B91FF), blurRadius: 14, offset: Offset(0, 2)),
         ],
+      ),
+      child: TextField(
+        controller: controller,
+        keyboardType: inputType,
+        maxLines: maxLines,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: kText),
+        decoration: InputDecoration(
+          hintText: placeholder,
+          hintStyle: const TextStyle(color: kMuted, fontSize: 13),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        ),
       ),
     );
   }
 
-  Widget _buildFilters() {
-    return SizedBox(
-      height: 42,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.only(bottom: 4),
-        itemCount: Screen4._filters.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 7),
-        itemBuilder: (BuildContext context, int index) {
-          final _FilterChipData item = Screen4._filters[index];
-          final bool selected = _selectedFilter == item.label;
-          final bool hovered = _hoveredFilter == item.label;
-          return MouseRegion(
-            onEnter: (_) => setState(() => _hoveredFilter = item.label),
-            onExit: (_) => setState(() => _hoveredFilter = null),
-            child: GestureDetector(
-              onTap: () => setState(() => _selectedFilter = item.label),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                transform: Matrix4.translationValues(0, (selected || hovered) ? -1 : 0, 0),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  gradient: selected ? _uiGradient : null,
-                  color: selected ? null : _bg,
-                  borderRadius: BorderRadius.circular(20),
-                  border: selected ? null : Border.all(color: hovered ? _accentBorder2 : _borderStrong, width: 1.5),
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: selected ? _accentGlow : (hovered ? _accentGlow2 : _bg.withValues(alpha: 0.54)),
-                      blurRadius: selected ? 14 : (hovered ? 12 : 4),
-                      offset: Offset(0, selected ? 4 : (hovered ? 3 : 1)),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Icon(item.icon, size: 13, color: selected ? _text : (hovered ? _accent2 : _muted)),
-                    const SizedBox(width: 5),
-                    Text(item.label, style: _sf(size: 12.8, weight: FontWeight.w600, color: selected ? _text : (hovered ? _accent2 : _muted))),
-                  ],
-                ),
+  Widget _datePickerTrigger() {
+    return GestureDetector(
+      onTap: () async {
+        await showDatePicker(
+          context: context,
+          initialDate: DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime.now(),
+          builder: (ctx, child) => Theme(
+            data: ThemeData.dark().copyWith(
+              colorScheme: const ColorScheme.dark(
+                primary: kAccent2, onPrimary: Colors.white,
+                surface: kShell, onSurface: kText,
               ),
             ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildGoalsSection() {
-    if (_filteredGoals.isEmpty) {
-      final bool noGoals = _goals.isEmpty;
-      return _buildEmptyState(
-        title: noGoals ? 'No goals yet' : 'No goals in this category',
-        description: noGoals ? 'Add your first goal above or pick from AI suggestions below.' : 'Try a different filter or add a new goal above.',
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 36),
-      child: Column(children: _filteredGoals.map(_buildGoalCard).toList()),
-    );
-  }
-
-  Widget _buildEmptyState({required String title, required String description}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 50, 20, 50),
-      margin: const EdgeInsets.only(bottom: 36),
-      child: Column(
-        children: <Widget>[
-          Icon(Icons.local_florist_outlined, color: _accent5, size: 48),
-          const SizedBox(height: 12),
-          Text(title, style: _sf(size: 16, weight: FontWeight.w600)),
-          const SizedBox(height: 6),
-          Text(description, textAlign: TextAlign.center, style: _sf(size: 13.12, color: _muted, height: 1.6)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGoalCard(_GoalItem goal) {
-    final bool hovered = _hoveredGoalId == goal.id;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hoveredGoalId = goal.id),
-      onExit: (_) => setState(() => _hoveredGoalId = null),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        margin: const EdgeInsets.only(bottom: 7),
-        transform: Matrix4.translationValues(0, hovered ? -2 : 0, 0),
-        padding: const EdgeInsets.all(11),
+            child: child!,
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          color: goal.cardBackground,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: goal.cardBorder),
-          boxShadow: <BoxShadow>[
-            BoxShadow(
-              color: _bg.withValues(alpha: 0.62),
-              blurRadius: hovered ? 18 : 8,
-              offset: Offset(0, hovered ? 6 : 2),
-            ),
-          ],
+          color: kShell,
+          border: Border.all(color: kBorder, width: 1.5),
+          borderRadius: BorderRadius.circular(14),
         ),
-        child: Column(
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: const Color.fromRGBO(255, 255, 255, 0.72),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(goal.icon, size: 14, color: goal.accent),
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(goal.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: _sf(size: 13.12, weight: FontWeight.w700, color: _tileText)),
-                      if (goal.description.isNotEmpty)
-                        Text(goal.description, maxLines: 1, overflow: TextOverflow.ellipsis, style: _sf(size: 11.2, color: _muted)),
-                    ],
-                  ),
-                ),
-                GestureDetector(
-                  onTap: () => _deleteGoal(goal.id),
-                  child: Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(color: _t.card, borderRadius: BorderRadius.circular(6)),
-                    child: Icon(Icons.delete_outline_rounded, size: 12, color: _accent4),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 7),
-            Container(
-              height: 4,
-              decoration: BoxDecoration(color: _bg.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(10)),
-              clipBehavior: Clip.antiAlias,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween<double>(begin: 0, end: goal.progress / 100),
-                duration: const Duration(milliseconds: 600),
-                builder: (BuildContext context, double value, Widget? child) {
-                  return FractionallySizedBox(
-                    widthFactor: value,
-                    alignment: Alignment.centerLeft,
-                    child: DecoratedBox(decoration: BoxDecoration(color: goal.accent, borderRadius: BorderRadius.circular(10))),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: _t.card,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: _cardBorder),
-                      ),
-                      child: Text(goal.category.toUpperCase(), style: _sf(size: 9.6, weight: FontWeight.w700, color: goal.accent, letterSpacing: 0.5)),
-                    ),
-                    const SizedBox(width: 6),
-                    Text('${goal.progress}%', style: _sf(size: 10.72, weight: FontWeight.w600, color: _tileText)),
-                  ],
-                ),
-                Row(
-                  children: <Widget>[
-                    SizedBox(
-                      width: 44,
-                      height: 28,
-                      child: TextFormField(
-                        initialValue: '${goal.progress}',
-                        onChanged: (String value) => _setProgress(goal, value),
-                        keyboardType: TextInputType.number,
-                        style: _sf(size: 11.52, weight: FontWeight.w600, color: _tileText),
-                        textAlign: TextAlign.center,
-                        decoration: InputDecoration(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                          filled: true,
-                          fillColor: _t.card,
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(6),
-                            borderSide: BorderSide(color: _cardBorder),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(6),
-                            borderSide: BorderSide(color: goal.accent),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    GestureDetector(
-                      onTap: () => _openReminderModal(goal),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: goal.reminder != null ? _t.card : _t.card.withValues(alpha: 0.7),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: _cardBorder),
-                        ),
-                        child: Row(
-                          children: <Widget>[
-                            Icon(goal.reminder != null ? Icons.notifications_active_outlined : Icons.notifications_none_outlined, size: 11, color: _tileText),
-                            const SizedBox(width: 4),
-                            Text(goal.reminder != null ? _formatTime(goal.reminder!.time) : 'Remind', style: _sf(size: 10.72, weight: FontWeight.w600, color: _tileText)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
+        child: Row(children: const [
+          Icon(Icons.calendar_today_outlined, size: 14, color: Color(0xFFC4A0C8)),
+          SizedBox(width: 8),
+          Expanded(child: Text('Select date', style: TextStyle(
+            fontSize: 13, fontWeight: FontWeight.w500, color: kMuted,
+          ))),
+          Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: Color(0xFFC4A0C8)),
+        ]),
       ),
     );
   }
 
-  Widget _buildSuggestions() {
-    return SizedBox(
-      height: 218,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.only(bottom: 14),
-        itemCount: _suggestions.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 12),
-        itemBuilder: (BuildContext context, int index) {
-          final _SuggestionData item = _suggestions[index];
-          final bool hovered = _hoveredSuggestionId == index;
-          final bool pressed = _pressedSuggestionId == index;
-          final bool flashing = _flashingSuggestion && _flashSuggestionId == index;
-          return MouseRegion(
-            onEnter: (_) => setState(() => _hoveredSuggestionId = index),
-            onExit: (_) => setState(() {
-              _hoveredSuggestionId = null;
-              _pressedSuggestionId = null;
-            }),
-            child: GestureDetector(
-              onTapDown: (_) => setState(() => _pressedSuggestionId = index),
-              onTapCancel: () => setState(() => _pressedSuggestionId = null),
-              onTapUp: (_) => setState(() => _pressedSuggestionId = null),
-              onTap: () => _quickAdd(item, index),
-              child: AnimatedScale(
-                duration: const Duration(milliseconds: 200),
-                scale: pressed ? 0.96 : 1,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 195,
-                  transform: Matrix4.translationValues(0, hovered ? -3 : 0, 0),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: flashing ? _accent2.withValues(alpha: 0.12) : item.cardBg,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: item.cardBorder),
-                    boxShadow: <BoxShadow>[
-                      BoxShadow(color: _bg.withValues(alpha: 0.46), blurRadius: hovered ? 28 : 12, offset: Offset(0, hovered ? 6 : 2)),
-                    ],
-                  ),
-                  child: Stack(
-                    children: <Widget>[
-                      Positioned(top: -16, left: -16, right: -16, child: Container(height: 4, color: item.stripe)),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Container(
-                            width: 44,
-                            height: 44,
-                            margin: const EdgeInsets.only(bottom: 12),
-                            decoration: BoxDecoration(
-                              gradient: _uiGradient,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Icon(item.icon, color: _text, size: 20),
-                          ),
-                          Text(item.title, style: _sf(size: 14.4, weight: FontWeight.w700, color: _tileText)),
-                          const SizedBox(height: 5),
-                          Text(item.description, style: _sf(size: 12.16, color: _muted, height: 1.5)),
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                            decoration: BoxDecoration(color: item.tagBg, borderRadius: BorderRadius.circular(20)),
-                            child: Text(item.tag.toUpperCase(), style: _sf(size: 10.56, weight: FontWeight.w700, color: _tileText, letterSpacing: 0.64)),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildDropdown() {
+  Widget _buildSelectField({
+    required String value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
     return Container(
-      constraints: const BoxConstraints(maxHeight: 260),
-      padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
-        color: _bg,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _borderStrong),
-        boxShadow: <BoxShadow>[
-          BoxShadow(color: _bg.withValues(alpha: 0.42), blurRadius: 48, offset: Offset(0, 16)),
-          BoxShadow(color: _bg.withValues(alpha: 0.64), blurRadius: 16, offset: Offset(0, 4)),
-        ],
-      ),
-      child: ListView.builder(
-        shrinkWrap: true,
-        itemCount: Screen4._dropdownOptions.length,
-        itemBuilder: (BuildContext context, int index) {
-          final _DropdownOptionData item = Screen4._dropdownOptions[index];
-          final bool active = item.value == _selectedCategory;
-          return GestureDetector(
-            onTap: () => _selectCategory(item),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              decoration: BoxDecoration(color: active ? _accentSoft2 : _bg.withValues(alpha: 0), borderRadius: BorderRadius.circular(10)),
-              child: Row(
-                children: <Widget>[
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(gradient: _uiGradient, borderRadius: BorderRadius.circular(10)),
-                    child: Icon(item.icon, size: 16, color: _text),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(item.label, style: _sf(size: 15.2, weight: FontWeight.w500, color: active ? _accent2 : _text))),
-                  AnimatedOpacity(
-                    duration: const Duration(milliseconds: 150),
-                    opacity: active ? 1 : 0,
-                    child: Icon(Icons.check_rounded, size: 14, color: _accent2),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildModalOverlay(_GoalItem? editingGoal) {
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-        child: Container(
-          color: _scrim,
-          alignment: Alignment.bottomCenter,
-          child: GestureDetector(
-            onTap: () {},
-            child: AnimatedSlide(
-              duration: const Duration(milliseconds: 320),
-              curve: Curves.easeOutCubic,
-              offset: _modalOpen ? Offset.zero : const Offset(0, 1),
-              child: _buildModal(editingGoal),
-            ),
-          ),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [kShell, kShell2],
         ),
+        border: Border.all(color: kBorder, width: 1.5),
+        borderRadius: BorderRadius.circular(16),
       ),
-    );
-  }
-
-  Widget _buildModal(_GoalItem? editingGoal) {
-    final bool showDay = _modalFrequency == 'Weekly' || _modalFrequency == 'Custom';
-    return Container(
-      width: double.infinity,
-      constraints: const BoxConstraints(maxWidth: 520, maxHeight: 700),
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-      decoration: BoxDecoration(
-        color: _bg,
-        borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
-      ),
-      child: ListView(
-        shrinkWrap: true,
-        children: <Widget>[
-          Center(child: Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 18), decoration: BoxDecoration(color: _bg.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(2)))),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: <Widget>[
-              Row(children: <Widget>[Icon(Icons.notifications_none_rounded, color: _accent5, size: 20), const SizedBox(width: 8), Text('Set Reminder', style: _sf(size: 19.2, weight: FontWeight.w600))]),
-              GestureDetector(
-                onTap: _closeReminderModal,
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(color: _bg.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(16)),
-                  child: Icon(Icons.close_rounded, color: _muted, size: 18),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(color: _accentSoft, borderRadius: BorderRadius.circular(10)),
-            child: Row(
-              children: <Widget>[
-                Icon(Icons.gps_fixed_rounded, color: _accent4, size: 14),
-                const SizedBox(width: 7),
-                RichText(
-                  text: TextSpan(
-                    style: _sf(size: 13.44),
-                    children: <TextSpan>[
-                      TextSpan(text: 'For: ', style: _sf(size: 13.44)),
-                      TextSpan(text: editingGoal?.title ?? '-', style: _sf(size: 13.44, weight: FontWeight.w700)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          _buildModalField(
-            label: 'Frequency',
-            icon: Icons.sync_alt_rounded,
-            child: Row(
-              children: <Widget>[
-                for (final String frequency in const <String>['Daily', 'Weekly', 'Monthly', 'Custom']) ...<Widget>[
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => _pickModalFrequency(frequency),
-                      child: _FrequencyPill(text: frequency, selected: _modalFrequency == frequency),
-                    ),
-                  ),
-                  if (frequency != 'Custom') const SizedBox(width: 7),
-                ],
-              ],
-            ),
-          ),
-          _buildModalField(
-            label: 'Reminder Time',
-            icon: Icons.schedule_rounded,
-            child: TextField(controller: _modalReminderTimeController, decoration: _fieldDecoration('08:00'), style: _sf(size: 16)),
-          ),
-          if (showDay)
-            _buildModalField(
-              label: 'Day of Week',
-              icon: Icons.calendar_today_outlined,
-              child: _buildDayDropdown(
-                value: _modalReminderDay,
-                onChanged: (String? value) {
-                  if (value == null) return;
-                  setState(() => _modalReminderDay = value);
-                },
-              ),
-            ),
-          _buildModalField(
-            label: 'Note (optional)',
-            icon: Icons.message_outlined,
-            child: TextField(controller: _modalReminderNoteController, decoration: _fieldDecoration("e.g. Don't forget your morning run!"), style: _sf(size: 16)),
-          ),
-          const SizedBox(height: 18),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: GestureDetector(
-                  onTap: _saveReminder,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      gradient: _uiGradient,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: <BoxShadow>[BoxShadow(color: _accentGlow2, blurRadius: 18, offset: Offset(0, 5))],
-                    ),
-                    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: <Widget>[Icon(Icons.notifications_active_outlined, color: _text, size: 15), const SizedBox(width: 7), Text('Save Reminder', style: _sf(size: 15.2, weight: FontWeight.w600))]),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              GestureDetector(
-                onTap: _clearReminder,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  decoration: BoxDecoration(color: _accentSoft4, borderRadius: BorderRadius.circular(14), border: Border.all(color: _accentBorder4)),
-                  child: Row(children: <Widget>[Icon(Icons.notifications_off_outlined, color: _accent4, size: 14), const SizedBox(width: 6), Text('Clear', style: _sf(size: 13.76, weight: FontWeight.w600, color: _accent4))]),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildModalField({required String label, required IconData icon, required Widget child}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(children: <Widget>[Icon(icon, size: 11, color: _muted), const SizedBox(width: 5), Text(label.toUpperCase(), style: _sf(size: 11.2, weight: FontWeight.w600, color: _muted, letterSpacing: 1.28))]),
-          const SizedBox(height: 7),
-          child,
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDayDropdown({required String value, required ValueChanged<String?> onChanged}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(color: _panelSolid2, borderRadius: BorderRadius.circular(12), border: Border.all(color: _borderStrong)),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: value,
-          dropdownColor: _bg2,
-          icon: Icon(Icons.expand_more_rounded, color: _muted),
+          dropdownColor: kShell,
+          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFFC4A0C8), size: 16),
           isExpanded: true,
-          style: _sf(size: 16),
-          items: Screen4._days.map((String day) => DropdownMenuItem<String>(value: day, child: Text(day, style: _sf(size: 16)))).toList(),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: kText),
+          items: items.map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
           onChanged: onChanged,
         ),
       ),
     );
   }
 
-  Widget _buildToast() {
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        decoration: BoxDecoration(color: _scrimStrong, borderRadius: BorderRadius.circular(24)),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(Icons.check_circle_outline_rounded, color: _text, size: 15),
-            const SizedBox(width: 7),
-            Text(_toastText, style: _sf(size: 13.76, weight: FontWeight.w500)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFab() {
-    return GestureDetector(
-      onTap: _toggleChat,
-      child: Container(
-        height: 50,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          gradient: _uiGradient,
-          borderRadius: BorderRadius.circular(25),
-          boxShadow: <BoxShadow>[
-            BoxShadow(color: _bg.withValues(alpha: 0.65), blurRadius: 24, offset: Offset(0, 6)),
-            BoxShadow(color: _bg2.withValues(alpha: 0.45), blurRadius: 8, offset: Offset(0, 2)),
-          ],
-        ),
-        child: Row(
-          children: <Widget>[
-            Icon(Icons.auto_awesome_outlined, color: _text, size: 16),
-            const SizedBox(width: 8),
-            Text('AHVI', style: _sf(size: 14.08, weight: FontWeight.w700, letterSpacing: 0.64)),
-            const SizedBox(width: 2),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 7,
-              height: 7,
+  Widget _buildCouponRow() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Coupon Code', style: TextStyle(
+          fontSize: 11, fontWeight: FontWeight.w600, color: kMuted,
+        )),
+        const SizedBox(height: 5),
+        Row(children: [
+          Expanded(
+            child: Container(
               decoration: BoxDecoration(
-                color: _chatOpen ? _text.withValues(alpha: 0.70) : _accent3,
-                shape: BoxShape.circle,
-                boxShadow: <BoxShadow>[BoxShadow(color: _accentGlow3, spreadRadius: 2), BoxShadow(color: _accent3.withValues(alpha: 0.55), blurRadius: 8)],
+                color: const Color(0x0A8D7DFF),
+                border: Border.all(color: const Color(0x598D7DFF), width: 1.5),
+                borderRadius: BorderRadius.circular(14),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildChatDrawer() {
-    return Container(
-      constraints: const BoxConstraints(maxHeight: 520),
-      decoration: BoxDecoration(
-        color: _bg,
-        borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
-        border: Border(top: BorderSide(color: _cardBorder)),
-      ),
-      child: Column(
-        children: <Widget>[
-          Container(width: 36, height: 4, margin: const EdgeInsets.fromLTRB(0, 10, 0, 0), decoration: BoxDecoration(color: _bg.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(2))),
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: _cardBorder))),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(gradient: _uiGradient, shape: BoxShape.circle),
-                      alignment: Alignment.center,
-                      child: Text('AH', style: _sf(size: 12, weight: FontWeight.w700)),
-                    ),
-                    const SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text('AHVI', style: _sf(size: 14.72, weight: FontWeight.w700)),
-                        const SizedBox(height: 2),
-                        Row(children: <Widget>[const _PulsingDot(), const SizedBox(width: 4), Text('Your AI Life Coach - Online', style: _sf(size: 11.2, color: _muted))]),
-                      ],
-                    ),
-                  ],
+              child: Row(children: [
+                const Padding(
+                  padding: EdgeInsets.only(left: 12),
+                  child: Icon(Icons.local_offer_outlined, size: 14, color: kAccent2),
                 ),
-                GestureDetector(
-                  onTap: _toggleChat,
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(color: _bg.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(16)),
-                    child: Icon(Icons.expand_more_rounded, color: _muted, size: 18),
+                Expanded(
+                  child: TextField(
+                    controller: _couponCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600,
+                      color: kText, letterSpacing: 1.0,
+                    ),
+                    decoration: const InputDecoration(
+                      hintText: 'Enter code',
+                      hintStyle: TextStyle(color: kMuted),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                    ),
                   ),
                 ),
+              ]),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _PressScaleButton(
+            onTap: () {
+              final code = _couponCtrl.text.trim().toUpperCase();
+              if (code.isEmpty) { _showToast('Enter a coupon code'); return; }
+              final found = _coupons.any((c) => c['code'] == code);
+              if (found) {
+                _showToast('✦ Coupon "$code" applied!');
+              } else {
+                _showToast('Coupon not found');
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0x1F8D7DFF),
+                border: Border.all(color: const Color(0x388D7DFF), width: 1.5),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Text('Apply', style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w700, color: kAccent2,
+              )),
+            ),
+          ),
+        ]),
+      ],
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  COUPON MANAGER SHEET
+  // ════════════════════════════════════════════════════════════════════
+  final _newCodeCtrl  = TextEditingController();
+  final _newValueCtrl = TextEditingController();
+  final _newNoteCtrl  = TextEditingController();
+
+  Widget _buildCouponMgrSheet() {
+    return Container(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.92),
+      decoration: const BoxDecoration(
+        color: kBg2,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(36)),
+        border: Border(top: BorderSide(color: kBorder, width: 1.5)),
+        boxShadow: [
+          BoxShadow(color: Color(0x2E8D7DFF), blurRadius: 60, offset: Offset(0, -20)),
+        ],
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 16, 22, 0),
+            child: Column(
+              children: [
+                _sheetHandle(),
+                Row(children: [
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Text('My Coupons', style: TextStyle(
+                        fontSize: 22, fontWeight: FontWeight.w700, color: kText,
+                      )),
+                      const SizedBox(height: 3),
+                      Text('${_coupons.length} Saved Coupon${_coupons.length != 1 ? 's' : ''}',
+                          style: const TextStyle(fontSize: 12, color: kMuted, fontWeight: FontWeight.w500)),
+                    ]),
+                  ),
+                  _PressScaleButton(
+                    onTap: _closeOverlay,
+                    child: Container(
+                      width: 34, height: 34,
+                      decoration: BoxDecoration(
+                        color: kPanel, border: Border.all(color: kBorder),
+                        borderRadius: BorderRadius.circular(17),
+                      ),
+                      child: const Icon(Icons.close_rounded, color: kText, size: 15),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 16),
               ],
             ),
           ),
           Expanded(
-            child: ListView(
-              controller: _chatScrollController,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              children: <Widget>[
-                for (final _ChatMessage message in _messages)
-                  Align(
-                    alignment: message.isUser ? Alignment.centerRight : Alignment.centerLeft,
-                    child: Container(
-                      constraints: const BoxConstraints(maxWidth: 290),
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        gradient: message.isUser ? _uiGradient : null,
-                        color: message.isUser ? null : _panelSolid2,
-                        borderRadius: BorderRadius.only(
-                          topLeft: const Radius.circular(18),
-                          topRight: const Radius.circular(18),
-                          bottomRight: Radius.circular(message.isUser ? 4 : 18),
-                          bottomLeft: Radius.circular(message.isUser ? 18 : 4),
-                        ),
-                        border: message.isUser ? null : Border.all(color: _cardBorder),
-                      ),
-                      child: Text(message.text, style: _sf(size: 14.08, height: 1.5)),
-                    ),
-                  ),
-                if (_typing)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(color: _panelSolid2, borderRadius: const BorderRadius.only(topLeft: Radius.circular(18), topRight: Radius.circular(18), bottomRight: Radius.circular(18), bottomLeft: Radius.circular(4))),
-                      child: const _TypingDots(),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-            decoration: BoxDecoration(border: Border(top: BorderSide(color: _cardBorder))),
-            child: Row(
-              children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    controller: _chatController,
-                    focusNode: _chatFocusNode,
-                    onSubmitted: (_) => _sendMessage(),
-                    decoration: _fieldDecoration('Ask me anything...').copyWith(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: _borderStrong)),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: _accentBorder2)),
-                    ),
-                    style: _sf(size: 14.72),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                GestureDetector(
-                  onTap: _sendMessage,
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      gradient: _uiGradient,
-                      shape: BoxShape.circle,
-                      boxShadow: <BoxShadow>[BoxShadow(color: _accentGlow2, blurRadius: 12, offset: Offset(0, 3))],
-                    ),
-                    child: Icon(Icons.send_rounded, color: _text, size: 15),
-                  ),
-                ),
-              ],
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(22, 0, 22, 40),
+              child: Column(
+                children: [
+                  _buildAddCouponForm(),
+                  const SizedBox(height: 16),
+                  if (_coupons.isEmpty) _buildCouponEmptyState(),
+                  ..._coupons.asMap().entries.map((e) =>
+                      _buildStoredCouponCard(e.value)),
+                ],
+              ),
             ),
           ),
         ],
       ),
     );
   }
-}
 
-class _FrequencyPill extends StatelessWidget {
-  const _FrequencyPill({required this.text, this.selected = false});
-
-  final String text;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.themeTokens;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
-      alignment: Alignment.center,
+  Widget _buildAddCouponForm() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       decoration: BoxDecoration(
-        color: selected ? t.accent.secondary.withValues(alpha: 0.14) : t.accent.primary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: selected ? t.accent.secondary : t.accent.primary.withValues(alpha: 0.44)),
+        color: kShell,
+        border: Border.all(color: kBorder, width: 1.5),
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: const [
+          BoxShadow(color: Color(0x33000000), blurRadius: 14, offset: Offset(0, 3)),
+        ],
       ),
-      child: Text(
-        text,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _couponFieldLabel('COUPON CODE'),
+        const SizedBox(height: 5),
+        _couponInput(controller: _newCodeCtrl, placeholder: 'E.G. SAVE10', isBold: true),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _couponFieldLabel('TYPE'),
+            const SizedBox(height: 5),
+            Container(
+              decoration: BoxDecoration(
+                color: kPanel, border: Border.all(color: kBorder, width: 1.5),
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _couponTypeVal,
+                  dropdownColor: kShell,
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFFC4A0C8), size: 16),
+                  isExpanded: true,
+                  padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 2),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: kText),
+                  items: ['Percent','Flat','Free']
+                      .map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+                  onChanged: (v) => setState(() => _couponTypeVal = v!),
+                ),
+              ),
+            ),
+          ])),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _couponFieldLabel('VALUE'),
+            const SizedBox(height: 5),
+            _couponInput(
+              controller: _newValueCtrl, placeholder: '0',
+              inputType: TextInputType.number,
+            ),
+          ])),
+        ]),
+        const SizedBox(height: 10),
+        _couponFieldLabel('NOTE (OPTIONAL)'),
+        const SizedBox(height: 5),
+        _couponInput(controller: _newNoteCtrl, placeholder: 'Short description…'),
+        const SizedBox(height: 12),
+        _PressScaleButton(
+          onTap: _saveNewCoupon,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 13),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [kAccent2, kAccent]),
+              borderRadius: BorderRadius.circular(15),
+              boxShadow: const [
+                BoxShadow(color: Color(0x528D7DFF), blurRadius: 16, offset: Offset(0, 5)),
+              ],
+            ),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: const [
+              Icon(Icons.add_rounded, color: Colors.white, size: 16),
+              SizedBox(width: 6),
+              Text('Save Coupon', style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white,
+              )),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  void _saveNewCoupon() {
+    final code = _newCodeCtrl.text.trim().toUpperCase();
+    final value = double.tryParse(_newValueCtrl.text) ?? 0;
+    final note = _newNoteCtrl.text.trim();
+    if (code.isEmpty) { _showToast('Enter a coupon code'); return; }
+    if (_couponTypeVal != 'Free' && value <= 0) { _showToast('Enter a valid value'); return; }
+    if (_coupons.any((c) => c['code'] == code)) { _showToast('Coupon already saved!'); return; }
+
+    final palettes = [
+      [const Color(0xFF8D7DFF), const Color(0xFF6B91FF)],
+      [const Color(0xFFFF8EC7), const Color(0xFFFFD86E)],
+      [const Color(0xFF04D7C8), const Color(0xFF6B91FF)],
+      [const Color(0xFF6B91FF), const Color(0xFF04D7C8)],
+    ];
+    final grad = palettes[_coupons.length % palettes.length];
+    final bigNum = _couponTypeVal == 'Free' ? '🎁' :
+    (_couponTypeVal == 'Flat' ? '₹${value.toInt()}' : '${value.toInt()}%');
+    final unitTxt = _couponTypeVal == 'Free' ? 'SPECIAL' :
+    (_couponTypeVal == 'Flat' ? 'FLAT OFF' : 'OFF');
+
+    setState(() {
+      _coupons.insert(0, {
+        'id': 'c${DateTime.now().millisecondsSinceEpoch}',
+        'code': code,
+        'type': _couponTypeVal.toLowerCase(),
+        'value': value.toInt(),
+        'note': note.isEmpty ? '' : note,
+        'bigNum': bigNum,
+        'unitTxt': unitTxt,
+        'gradient': grad,
+      });
+    });
+    _newCodeCtrl.clear();
+    _newValueCtrl.clear();
+    _newNoteCtrl.clear();
+    _showToast('✦ Coupon "$code" saved!');
+  }
+
+  Widget _couponFieldLabel(String label) {
+    return Text(label, style: const TextStyle(
+      fontSize: 9.5, fontWeight: FontWeight.w700,
+      letterSpacing: 1.6, color: kMuted,
+    ));
+  }
+
+  Widget _couponInput({
+    required TextEditingController controller,
+    required String placeholder,
+    bool isBold = false,
+    TextInputType? inputType,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: kPanel, border: Border.all(color: kBorder, width: 1.5),
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: TextField(
+        controller: controller,
+        keyboardType: inputType,
+        textCapitalization: isBold ? TextCapitalization.characters : TextCapitalization.none,
         style: TextStyle(
-          color: selected ? t.accent.secondary : t.mutedText,
-          fontSize: 12.48,
-          fontWeight: FontWeight.w600,
-          fontFamilyFallback: const <String>['SF Pro Display', 'SF Pro Text', 'Helvetica Neue', 'Arial'],
+          fontSize: isBold ? 14 : 13,
+          fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
+          color: kText, letterSpacing: isBold ? 1.0 : 0,
+        ),
+        decoration: InputDecoration(
+          hintText: placeholder,
+          hintStyle: const TextStyle(color: kMuted, fontSize: 13),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCouponEmptyState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
+      decoration: BoxDecoration(
+        color: kShell,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: kBorder, width: 1.5, style: BorderStyle.solid),
+      ),
+      child: Column(children: const [
+        Text('🏷️', style: TextStyle(fontSize: 40)),
+        SizedBox(height: 10),
+        Text('No coupons saved yet', style: TextStyle(
+          fontSize: 15, fontWeight: FontWeight.w700, color: kText,
+        )),
+        SizedBox(height: 5),
+        Text('Add a coupon code above to save it here', style: TextStyle(
+          fontSize: 11, color: kMuted, fontWeight: FontWeight.w500,
+        )),
+      ]),
+    );
+  }
+
+  Widget _buildStoredCouponCard(Map<String, dynamic> coupon) {
+    final gradientColors = coupon['gradient'] as List<Color>;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      height: 90,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(color: Color(0x218050C8), blurRadius: 16, offset: Offset(0, 4)),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius: const BorderRadius.horizontal(left: Radius.circular(20)),
+            child: Container(
+              width: 82,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: gradientColors,
+                  begin: Alignment.topLeft, end: Alignment.bottomRight,
+                ),
+              ),
+              child: Stack(children: [
+                Positioned(top: -18, right: -18,
+                    child: Container(width: 56, height: 56,
+                        decoration: const BoxDecoration(color: Color(0x1FFFFFFF), shape: BoxShape.circle))),
+                Positioned(bottom: -22, left: -10,
+                    child: Container(width: 64, height: 64,
+                        decoration: const BoxDecoration(color: Color(0x14FFFFFF), shape: BoxShape.circle))),
+                Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(coupon['bigNum'] as String,
+                        style: const TextStyle(
+                          fontSize: 22, fontWeight: FontWeight.w900,
+                          color: Colors.white, height: 1.0,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(coupon['unitTxt'] as String,
+                        style: const TextStyle(
+                          fontSize: 10, fontWeight: FontWeight.w700,
+                          color: Color(0xD9FFFFFF), letterSpacing: 0.64,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ]),
+            ),
+          ),
+          SizedBox(
+            width: 14,
+            child: CustomPaint(painter: _PerforationPainter()),
+          ),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+              decoration: BoxDecoration(
+                color: kShell,
+                borderRadius: const BorderRadius.horizontal(right: Radius.circular(20)),
+                border: Border.all(color: kBorder, width: 1.5),
+              ),
+              child: Row(children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(coupon['code'] as String,
+                        style: const TextStyle(
+                          fontFamily: 'Courier New',
+                          fontSize: 15, fontWeight: FontWeight.w800,
+                          color: kText, letterSpacing: 1.28,
+                        ),
+                      ),
+                      if ((coupon['note'] as String).isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(coupon['note'] as String,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 10, color: kMuted, fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: gradientColors.first.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.local_offer, size: 8, color: gradientColors.first),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${coupon['value']}${coupon['type'] == 'percent' ? '%' : '₹'} Off',
+                            style: TextStyle(
+                              fontSize: 9, fontWeight: FontWeight.w700,
+                              letterSpacing: 0.96, color: gradientColors.first,
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ],
+                  ),
+                ),
+                _PressScaleButton(
+                  onTap: () => _deleteCoupon(coupon['id'] as String),
+                  child: Container(
+                    width: 28, height: 28,
+                    decoration: BoxDecoration(
+                      color: const Color(0x14FF6B7A),
+                      border: Border.all(color: const Color(0x33FF6B7A), width: 1),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(Icons.delete_outline_rounded,
+                        size: 13, color: Color(0x99FF6B7A)),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  DETAIL SHEET 
+  // ════════════════════════════════════════════════════════════════════
+  void _showDetailSheet(Map<String, dynamic> bill) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _DetailSheet(bill: bill, onDelete: (id) {
+        Navigator.pop(context);
+        _deleteBill(id);
+      }),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  TOAST
+  // ════════════════════════════════════════════════════════════════════
+  Widget _buildToast() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xF20F1A2D),
+        border: Border.all(color: kBorder, width: 1),
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: const [
+          BoxShadow(color: Color(0x33000000), blurRadius: 20),
+        ],
+      ),
+      child: Text(_toastMsg, style: const TextStyle(
+        fontSize: 13, fontWeight: FontWeight.w600, color: kText,
+      )),
+    );
+  }
+
+  Widget _sheetHandle() {
+    return Center(
+      child: Container(
+        width: 40, height: 4,
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          color: kPanel2, borderRadius: BorderRadius.circular(2),
         ),
       ),
     );
   }
 }
 
-class _PulsingDot extends StatefulWidget {
-  const _PulsingDot();
+// ════════════════════════════════════════════════════════════════════
+//  ANIMATED BILL CARD
+// ════════════════════════════════════════════════════════════════════
+class _AnimatedBillCard extends StatefulWidget {
+  final Map<String, dynamic> bill;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+  final Duration delay;
+
+  const _AnimatedBillCard({
+    super.key,
+    required this.bill,
+    required this.onTap,
+    required this.onDelete,
+    required this.delay,
+  });
 
   @override
-  State<_PulsingDot> createState() => _PulsingDotState();
+  State<_AnimatedBillCard> createState() => _AnimatedBillCardState();
 }
 
-class _PulsingDotState extends State<_PulsingDot> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 2),
-  )..repeat();
+class _AnimatedBillCardState extends State<_AnimatedBillCard>
+    with SingleTickerProviderStateMixin {
+
+  late AnimationController _ctrl;
+  late Animation<double>   _opacity;
+  late Animation<Offset>   _slide;
+  bool _pressed = false;
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final tkn = context.themeTokens;
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (BuildContext context, Widget? child) {
-        final double t = _controller.value < 0.5 ? _controller.value * 2 : (1 - _controller.value) * 2;
-        return Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            color: tkn.accent.tertiary,
-            shape: BoxShape.circle,
-            boxShadow: <BoxShadow>[BoxShadow(color: tkn.accent.tertiary.withValues(alpha: 0.34), spreadRadius: 2 + (2 * t))],
-          ),
-        );
-      },
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
     );
+    _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slide   = Tween<Offset>(
+      begin: const Offset(0, 0.15),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: const Cubic(0.34, 1.2, 0.64, 1)));
+
+    Future.delayed(widget.delay, () {
+      if (mounted) _ctrl.forward();
+    });
   }
-}
-
-class _TypingDots extends StatefulWidget {
-  const _TypingDots();
-
-  @override
-  State<_TypingDots> createState() => _TypingDotsState();
-}
-
-class _TypingDotsState extends State<_TypingDots> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1200),
-  )..repeat();
 
   @override
   void dispose() {
-    _controller.dispose();
+    _ctrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final tkn = context.themeTokens;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List<Widget>.generate(3, (int index) {
-        return Padding(
-          padding: EdgeInsets.only(right: index == 2 ? 0 : 4),
-          child: AnimatedBuilder(
-            animation: _controller,
-            builder: (BuildContext context, Widget? child) {
-              final double t = (_controller.value + (index * 0.2)) % 1.0;
-              final double offset = t < 0.3 ? -6 * (t / 0.3) : (t < 0.6 ? -6 * (1 - ((t - 0.3) / 0.3)) : 0);
-              return Transform.translate(offset: Offset(0, offset), child: child);
-            },
+    final bill = widget.bill;
+
+    return FadeTransition(
+      opacity: _opacity,
+      child: SlideTransition(
+        position: _slide,
+        child: GestureDetector(
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapUp: (_) {
+            setState(() => _pressed = false);
+            widget.onTap();
+          },
+          onTapCancel: () => setState(() => _pressed = false),
+          child: AnimatedScale(
+            scale: _pressed ? 0.98 : 1.0,
+            duration: const Duration(milliseconds: 120),
             child: Container(
-              width: 7,
-              height: 7,
-              decoration: BoxDecoration(color: tkn.mutedText, shape: BoxShape.circle),
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: kShell,
+                border: Border.all(color: kBorder, width: 1.5),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: _pressed ? const Color(0x236B91FF) : const Color(0x40000000),
+                    blurRadius: _pressed ? 24 : 12,
+                    offset: Offset(0, _pressed ? 8 : 3),
+                  ),
+                ],
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 52, height: 62,
+                    decoration: BoxDecoration(
+                      color: bill['catBg'] as Color,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: kBorder, width: 1.5),
+                      boxShadow: const [
+                        BoxShadow(color: Color(0x1F7850B4), blurRadius: 9, offset: Offset(0, 3)),
+                      ],
+                    ),
+                    child: Center(
+                      child: Text(bill['icon'] as String,
+                          style: const TextStyle(fontSize: 26)),
+                    ),
+                  ),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          bill['store'] as String,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                          style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w700, color: kText,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Row(children: [
+                          Text(bill['date'] as String,
+                            style: const TextStyle(
+                              fontSize: 10, fontWeight: FontWeight.w500, color: kMuted,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: bill['catBg'] as Color,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              (bill['category'] as String).toUpperCase(),
+                              style: TextStyle(
+                                fontSize: 9, fontWeight: FontWeight.w700,
+                                letterSpacing: 0.96, color: bill['catColor'] as Color,
+                              ),
+                            ),
+                          ),
+                        ]),
+                        const SizedBox(height: 4),
+                        Text(bill['note'] as String,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                          style: const TextStyle(
+                            fontSize: 10, color: kMuted, fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '₹${_fmtAmount(bill['amount'] as double)}',
+                        style: const TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w700,
+                          color: kText, height: 1.0,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(bill['payment'] as String,
+                        style: const TextStyle(
+                          fontSize: 9, color: kMuted, fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      GestureDetector(
+                        onTap: widget.onDelete,
+                        child: Container(
+                          width: 22, height: 22,
+                          decoration: BoxDecoration(
+                            color: const Color(0x26FF6B7A),
+                            border: Border.all(color: const Color(0x4DFF6B7A), width: 1),
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                          child: const Icon(Icons.close_rounded,
+                              size: 11, color: kRed),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
-        );
-      }),
+        ),
+      ),
+    );
+  }
+
+  String _fmtAmount(double v) {
+    if (v >= 1000) {
+      final s = v.toStringAsFixed(0);
+      final parts = <String>[];
+      var rem = s;
+      while (rem.length > 3) {
+        parts.insert(0, rem.substring(rem.length - 3));
+        rem = rem.substring(0, rem.length - 3);
+      }
+      parts.insert(0, rem);
+      return parts.join(',');
+    }
+    return v.toStringAsFixed(0);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  DETAIL SHEET 
+// ════════════════════════════════════════════════════════════════════
+class _DetailSheet extends StatelessWidget {
+  final Map<String, dynamic> bill;
+  final void Function(String id) onDelete;
+
+  const _DetailSheet({required this.bill, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: kBg2,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(36)),
+        border: Border(top: BorderSide(color: kBorder, width: 1.5)),
+        boxShadow: [
+          BoxShadow(color: Color(0x2E6B91FF), blurRadius: 60, offset: Offset(0, -20)),
+        ],
+      ),
+      constraints: const BoxConstraints(maxHeight: 700),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(22, 16, 22, 48),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(color: kPanel2, borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 68, height: 80,
+                  decoration: BoxDecoration(
+                    color: bill['catBg'] as Color,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0x4DC4A0C8), width: 1.5),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x247850B4), blurRadius: 14, offset: Offset(0, 4)),
+                    ],
+                  ),
+                  child: Center(
+                    child: Text(bill['icon'] as String, style: const TextStyle(fontSize: 32)),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(bill['store'] as String,
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: kText)),
+                    const SizedBox(height: 4),
+                    Text(bill['date'] as String,
+                        style: const TextStyle(fontSize: 11, color: kMuted, fontWeight: FontWeight.w500)),
+                  ],
+                )),
+                Text(
+                  '₹${_fmtAmount(bill['amount'] as double)}',
+                  style: const TextStyle(
+                    fontSize: 26, fontWeight: FontWeight.w600, color: kText,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0x1F8D7DFF),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0x388D7DFF), width: 1),
+              ),
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                Text('✦', style: TextStyle(fontSize: 8, color: kAccent2)),
+                SizedBox(width: 4),
+                Text('AI Scanned', style: TextStyle(
+                  fontSize: 10, fontWeight: FontWeight.w700, color: kAccent2,
+                )),
+              ]),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(top: 18, bottom: 10),
+              child: Text('BILL DETAILS', style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w600,
+                letterSpacing: 2.4, color: kMuted,
+              )),
+            ),
+            _detailRow('Category', (bill['category'] as String).toUpperCase()),
+            _detailRow('Payment',  bill['payment'] as String),
+            _detailRow('Amount',   '₹${_fmtAmount(bill['amount'] as double)}'),
+            _detailRow('Date',     bill['date'] as String),
+            const Padding(
+              padding: EdgeInsets.only(top: 18, bottom: 10),
+              child: Text('NOTES', style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w600,
+                letterSpacing: 2.4, color: kMuted,
+              )),
+            ),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0x148D7DFF), Color(0x0DFF8EC7)],
+                  begin: Alignment.topLeft, end: Alignment.bottomRight,
+                ),
+                border: Border.all(color: const Color(0x238D7DFF), width: 1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(bill['note'] as String, style: const TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w500, color: kText, height: 1.6,
+              )),
+            ),
+            const SizedBox(height: 18),
+            Row(children: [
+              Expanded(child: _detailBtn(context, 'Share', false)),
+              const SizedBox(width: 9),
+              Expanded(child: _detailBtn(context, 'Delete Bill', true,
+                  onTap: () => onDelete(bill['id'] as String))),
+            ]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detailRow(String key, String value) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: kPanel, border: Border.all(color: kBorder, width: 1),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(key, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: kMuted)),
+          Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: kText)),
+        ],
+      ),
+    );
+  }
+
+  Widget _detailBtn(BuildContext ctx, String label, bool isPrimary, {VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap ?? () => Navigator.pop(ctx),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        decoration: BoxDecoration(
+          gradient: isPrimary ? const LinearGradient(
+            colors: [Color(0xCCFF6B7A), Color(0xCCFF8EC7)],
+            begin: Alignment.topLeft, end: Alignment.bottomRight,
+          ) : null,
+          color: isPrimary ? null : kPanel,
+          border: Border.all(color: kBorder, width: 1),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: isPrimary ? const [
+            BoxShadow(color: Color(0x47FF6B7A), blurRadius: 20, offset: Offset(0, 6)),
+          ] : null,
+        ),
+        child: Center(child: Text(label, style: TextStyle(
+          fontSize: 13, fontWeight: FontWeight.w600,
+          color: isPrimary ? Colors.white : kText,
+        ))),
+      ),
+    );
+  }
+
+  String _fmtAmount(double v) {
+    if (v >= 1000) {
+      final s = v.toStringAsFixed(0);
+      final parts = <String>[];
+      var rem = s;
+      while (rem.length > 3) {
+        parts.insert(0, rem.substring(rem.length - 3));
+        rem = rem.substring(0, rem.length - 3);
+      }
+      parts.insert(0, rem);
+      return parts.join(',');
+    }
+    return v.toStringAsFixed(0);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  MESH BACKGROUND
+// ════════════════════════════════════════════════════════════════════
+class _MeshBackground extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: CustomPaint(painter: _MeshPainter()),
     );
   }
 }
 
-class _FilterChipData {
-  const _FilterChipData(this.label, this.icon);
+class _MeshPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..color = kBg,
+    );
+    final paint1 = Paint()
+      ..shader = RadialGradient(
+        center: const Alignment(-0.6, -0.8),
+        radius: 1.0,
+        colors: [const Color(0x2E6B91FF), Colors.transparent],
+        stops: const [0.0, 0.6],
+      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint1);
 
-  final String label;
-  final IconData icon;
+    final paint2 = Paint()
+      ..shader = RadialGradient(
+        center: const Alignment(0.6, 0.6),
+        radius: 0.9,
+        colors: [const Color(0x1F8D7DFF), Colors.transparent],
+        stops: const [0.0, 0.55],
+      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint2);
+  }
+
+  @override
+  bool shouldRepaint(_) => false;
 }
 
-class _DropdownOptionData {
-  const _DropdownOptionData(this.label, this.value, this.icon);
+// ════════════════════════════════════════════════════════════════════
+//  PRESS SCALE BUTTON
+// ════════════════════════════════════════════════════════════════════
+class _PressScaleButton extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onTap;
 
-  final String label;
-  final String value;
-  final IconData icon;
+  const _PressScaleButton({required this.child, required this.onTap});
+
+  @override
+  State<_PressScaleButton> createState() => _PressScaleButtonState();
 }
 
-class _SuggestionData {
-  const _SuggestionData({
-    required this.title,
-    required this.description,
-    required this.tag,
-    required this.icon,
-    required this.stripe,
-    required this.tagBg,
-    required this.cardBg,
-    required this.cardBorder,
-  });
+class _PressScaleButtonState extends State<_PressScaleButton> {
+  bool _down = false;
 
-  final String title;
-  final String description;
-  final String tag;
-  final IconData icon;
-  final Color stripe;
-  final Color tagBg;
-  final Color cardBg;
-  final Color cardBorder;
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _down = true),
+      onTapUp: (_) { setState(() => _down = false); widget.onTap(); },
+      onTapCancel: () => setState(() => _down = false),
+      child: AnimatedScale(
+        scale: _down ? 0.96 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        child: widget.child,
+      ),
+    );
+  }
 }
 
-class _GoalReminder {
-  const _GoalReminder({
-    required this.frequency,
-    required this.time,
-    required this.day,
-    required this.note,
-  });
+// ════════════════════════════════════════════════════════════════════
+//  PERFORATED DIVIDER
+// ════════════════════════════════════════════════════════════════════
+class _PerforationPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final notchPaint = Paint()
+      ..color = kBg2
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(size.width / 2, 0), 8, notchPaint);
+    canvas.drawCircle(Offset(size.width / 2, size.height), 8, notchPaint);
+    canvas.drawCircle(Offset(size.width / 2, size.height / 2), 8, notchPaint);
 
-  final String frequency;
-  final String time;
-  final String day;
-  final String note;
-}
+    final dashPaint = Paint()
+      ..color = kBorder
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    const dashH = 5.0;
+    const dashGap = 5.0;
+    double y = 0;
+    while (y < size.height) {
+      canvas.drawLine(
+        Offset(size.width / 2, y),
+        Offset(size.width / 2, min(y + dashH, size.height)),
+        dashPaint,
+      );
+      y += dashH + dashGap;
+    }
+  }
 
-class _GoalItem {
-  _GoalItem({
-    required this.id,
-    required this.title,
-    required this.description,
-    required this.category,
-    required this.icon,
-    required this.accent,
-    required this.cardBackground,
-    required this.cardBorder,
-    required this.progress,
-    required this.reminder,
-  });
-
-  _GoalItem.empty()
-      : id = -1,
-        title = '',
-        description = '',
-        category = '',
-        icon = Icons.circle,
-        accent = kTransparent,
-        cardBackground = kTransparent,
-        cardBorder = kTransparent,
-        progress = 0,
-        reminder = null;
-
-  final int id;
-  final String title;
-  final String description;
-  final String category;
-  final IconData icon;
-  final Color accent;
-  final Color cardBackground;
-  final Color cardBorder;
-  int progress;
-  _GoalReminder? reminder;
-}
-
-class _ChatMessage {
-  const _ChatMessage({required this.text, required this.isUser});
-
-  final String text;
-  final bool isUser;
+  @override
+  bool shouldRepaint(_) => false;
 }

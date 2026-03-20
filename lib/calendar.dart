@@ -85,14 +85,14 @@ const Map<String, List<Map<String, String>>> kOutfits = {
   ],
 };
 
-class Screen4 extends StatefulWidget {
-  const Screen4({super.key});
+class CalendarScreen extends StatefulWidget {
+  const CalendarScreen({super.key});
 
   @override
-  State<Screen4> createState() => _Screen4State();
+  State<CalendarScreen> createState() => _CalendarScreenState();
 }
 
-class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
+class _CalendarScreenState extends State<CalendarScreen> with TickerProviderStateMixin {
   final DateTime _today = DateTime.now();
   late int _viewYear;
   late int _viewMonth;

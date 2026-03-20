@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // [ADDED B33: clipboard]
+import 'package:provider/provider.dart'; // <-- Added for Appwrite
 import 'package:myapp/theme/theme_tokens.dart';
+import 'package:myapp/services/appwrite_service.dart'; // <-- Added for Appwrite
 
 // ─── Color constants (unchanged) ──────────────────────────────────
 // Colors are resolved from theme tokens in widget builds.
@@ -58,13 +60,14 @@ void showToast(BuildContext context, String message) {
 }
 
 // ─── Entry point ──────────────────────────────────────────────────
-class Screen4 extends StatefulWidget {
-  const Screen4({super.key});
+// RENAMED from Screen4 to WorkoutScreen to match main.dart routing!
+class WorkoutScreen extends StatefulWidget {
+  const WorkoutScreen({super.key});
   @override
-  State<Screen4> createState() => _Screen4State();
+  State<WorkoutScreen> createState() => _WorkoutScreenState();
 }
 
-class _Screen4State extends State<Screen4> with TickerProviderStateMixin { // [ADDED B09: TickerProviderStateMixin for page transitions]
+class _WorkoutScreenState extends State<WorkoutScreen> with TickerProviderStateMixin { // [ADDED B09: TickerProviderStateMixin for page transitions]
   int _page = 0;
 
   // [ADDED B09] Page transition animation
@@ -328,6 +331,7 @@ class _HomePage extends StatefulWidget {
 
 class _HomePageState extends State<_HomePage> {
   String _currentTab = 'all';
+  bool _isLoading = true; // <-- ADDED for DB Sync
 
   final List<Map<String, dynamic>> _categories = [
     {'id': 'running', 'label': 'Running', 'emoji': '🏃'},
@@ -336,41 +340,76 @@ class _HomePageState extends State<_HomePage> {
     {'id': 'hiit', 'label': 'HIIT / Cardio', 'emoji': '⚡'},
   ];
 
-  // [CHANGED B08: made mutable for delete support]
-  final List<Map<String, dynamic>> _outfits = [
-    {'id': '1', 'name': 'Morning Run', 'emoji': '🏃', 'cat': 'running', 'tag': 'Running'},
-    {'id': '2', 'name': 'Leg Day', 'emoji': '🏋️', 'cat': 'gym', 'tag': 'Gym'},
-    {'id': '3', 'name': 'Yoga Flow', 'emoji': '🧘', 'cat': 'yoga', 'tag': 'Yoga'},
-    {'id': '4', 'name': 'HIIT Session', 'emoji': '⚡', 'cat': 'hiit', 'tag': 'HIIT'},
-    {'id': '5', 'name': 'Track Sprint', 'emoji': '🏃', 'cat': 'running', 'tag': 'Running'},
-    {'id': '6', 'name': 'Push Day', 'emoji': '🏋️', 'cat': 'gym', 'tag': 'Gym'},
-  ];
+  // <-- CHANGED: Empty list, populated from DB
+  List<Map<String, dynamic>> _outfits = [];
 
   List<Map<String, dynamic>> get _filteredOutfits => _currentTab == 'all'
       ? _outfits
       : _outfits.where((o) => o['cat'] == _currentTab).toList();
 
-  // [ADDED B08] Delete outfit and show toast
-  void _deleteOutfit(String id) {
-    setState(() => _outfits.removeWhere((o) => o['id'] == id));
-    showToast(context, 'Outfit removed');
+  @override
+  void initState() {
+    super.initState();
+    _fetchOutfits(); // <-- Fetch on init
+  }
+
+  // <-- ADDED: Fetch from Appwrite logic
+  Future<void> _fetchOutfits() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final docs = await appwrite.getWorkoutOutfits();
+      if (mounted) {
+        setState(() {
+          _outfits = docs.map((d) => {
+            'id': d.$id,
+            'name': d.data['name'],
+            'emoji': d.data['emoji'],
+            'cat': d.data['cat'],
+            'tag': d.data['tag'],
+          }).toList();
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // <-- ADDED: Delete from Appwrite logic
+  void _deleteOutfit(String id) async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      await appwrite.deleteWorkoutOutfit(id);
+      setState(() => _outfits.removeWhere((o) => o['id'] == id));
+      showToast(context, 'Outfit removed');
+    } catch (e) {
+      showToast(context, 'Error deleting outfit');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 120),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 56),
-            _TopBar(title: 'Workout', onBack: widget.onBack),
-            const SizedBox(height: 20),
-            _HeroBanner(),
-            const SizedBox(height: 20),
-            _TabsSection(
+    if (_isLoading) {
+      return Center(child: CircularProgressIndicator(color: context.themeTokens.accent.primary));
+    }
+
+    return CustomScrollView(
+      slivers: [
+        const SliverToBoxAdapter(child: SizedBox(height: 56)),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          sliver: SliverToBoxAdapter(child: _TopBar(title: 'Workout', onBack: widget.onBack)),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 20)),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          sliver: SliverToBoxAdapter(child: _HeroBanner()),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 20)),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          sliver: SliverToBoxAdapter(
+            child: _TabsSection(
               categories: _categories,
               currentTab: _currentTab,
               outfitsCount: _outfits.length,
@@ -378,14 +417,21 @@ class _HomePageState extends State<_HomePage> {
               // [CHANGED B13: wire modal open — shows Add Outfit dialog]
               onAddOutfit: () => _openAddOutfitModal(context),
             ),
-            const SizedBox(height: 8),
-            // [CHANGED B08/B10: pass onDelete callback and indices for stagger]
-            _OutfitGrid(outfits: _filteredOutfits, onDelete: _deleteOutfit),
-            const SizedBox(height: 32),
-            _SavedSection(),
-          ],
+          ),
         ),
-      ),
+        const SliverToBoxAdapter(child: SizedBox(height: 8)),
+        // [CHANGED B08/B10: pass onDelete callback and indices for stagger]
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          sliver: _OutfitGrid(outfits: _filteredOutfits, onDelete: _deleteOutfit),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 32)),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          sliver: SliverToBoxAdapter(child: _SavedSection()),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 120)),
+      ],
     );
   }
 
@@ -398,7 +444,10 @@ class _HomePageState extends State<_HomePage> {
       barrierLabel: 'Close',
       barrierColor: t.backgroundPrimary.withValues(alpha: 0.72),
       transitionDuration: const Duration(milliseconds: 250),
-      pageBuilder: (ctx, anim1, anim2) => const _AddOutfitModal(onClose: null), // onClose wired below
+      pageBuilder: (ctx, anim1, anim2) => _AddOutfitModal(
+        onOutfitAdded: _fetchOutfits, // <-- Added callback to refresh list!
+        onClose: () => Navigator.of(ctx).pop(),
+      ),
       transitionBuilder: (ctx, anim, secondary, child) {
         // [ADDED B13] Scale + fade in (0.98 → 1.0 scale, 0 → 1 opacity)
         final curved = CurvedAnimation(parent: anim, curve: Curves.easeOut);
@@ -434,8 +483,15 @@ class _TopBar extends StatelessWidget {
               child: Center(child: Icon(Icons.arrow_back, color: t.mutedText, size: 16))),
         ),
         const SizedBox(width: 12),
-        Text(title, style: TextStyle(color: t.textPrimary, fontSize: 22,
-            fontWeight: FontWeight.w700, letterSpacing: -0.5)),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: t.textPrimary, fontSize: 22,
+                fontWeight: FontWeight.w700, letterSpacing: -0.5),
+          ),
+        ),
       ],
     );
   }
@@ -455,25 +511,46 @@ class _HeroBanner extends StatelessWidget {
     return Container(
       height: 220,
       decoration: BoxDecoration(
-          gradient: kAccentGrad,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: t.cardBorder)),
+        gradient: kAccentGrad,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: t.cardBorder),
+      ),
       clipBehavior: Clip.hardEdge,
-      child: Stack(
+      child: Row(
         children: [
-          Positioned(left: 24, top: 26, bottom: 28, width: MediaQuery.of(context).size.width * 0.5 - 40,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Dress well,', style: TextStyle(color: t.textPrimary, fontSize: 28,
-                    fontWeight: FontWeight.w700, letterSpacing: -0.8, height: 1.12)),
-                Text('train better.', style: TextStyle(color: t.textPrimary.withValues(alpha: 0.82), fontSize: 28,
-                    fontWeight: FontWeight.w700, letterSpacing: -0.8, height: 1.12)),
-                const SizedBox(height: 10),
-                Text('Organize your workout outfits. Chat with AHVI for AI-powered style advice.',
-                    style: TextStyle(color: t.mutedText, fontSize: 12, fontWeight: FontWeight.w300, height: 1.55)),
-              ])),
-          Positioned(right: 0, bottom: 0, width: MediaQuery.of(context).size.width * 0.5, height: 220 * 1.2,
-              child: Image.network('https://i.pinimg.com/736x/a0/1d/6e/a01d6eb20afe2f8e9aed9e32ac861bbc.jpg',
-                  fit: BoxFit.contain, alignment: Alignment.bottomRight, errorBuilder: (ctx2, err, stack) => const SizedBox())),
+          Expanded(
+            flex: 3,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 26, 12, 28),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Dress well,', style: TextStyle(color: t.textPrimary, fontSize: 28,
+                      fontWeight: FontWeight.w700, letterSpacing: -0.8, height: 1.12)),
+                  Text('train better.', style: TextStyle(color: t.textPrimary.withValues(alpha: 0.82), fontSize: 28,
+                      fontWeight: FontWeight.w700, letterSpacing: -0.8, height: 1.12)),
+                  const SizedBox(height: 10),
+                  Text('Organize your workout outfits. Chat with AHVI for AI-powered style advice.',
+                      style: TextStyle(color: t.mutedText, fontSize: 12, fontWeight: FontWeight.w300, height: 1.55)),
+                ],
+              ),
+            ),
+          ),
+          Flexible(
+            flex: 2,
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: Image.network(
+                  'https://i.pinimg.com/736x/a0/1d/6e/a01d6eb20afe2f8e9aed9e32ac861bbc.jpg',
+                  fit: BoxFit.contain,
+                  alignment: Alignment.bottomRight,
+                  errorBuilder: (ctx2, err, stack) => const SizedBox(),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -501,26 +578,64 @@ class _TabsSection extends StatelessWidget {
     );
     return Column(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(children: [
-              Text('YOUR OUTFITS', style: TextStyle(color: t.mutedText, fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 2)),
-              const SizedBox(width: 4),
-              Text('— ', style: TextStyle(color: t.mutedText.withValues(alpha: 0.6), fontSize: 11)),
-              Text('$outfitsCount', style: TextStyle(color: t.mutedText, fontSize: 11, fontWeight: FontWeight.w600)),
-              Text(' saved', style: TextStyle(color: t.mutedText.withValues(alpha: 0.6), fontSize: 11)),
-            ]),
-            GestureDetector(
-              onTap: onAddOutfit,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 9),
-                decoration: BoxDecoration(gradient: kAccentGrad, borderRadius: BorderRadius.circular(50),
-                    boxShadow: [BoxShadow(color: accent.primary.withValues(alpha: 0.28), blurRadius: 18, offset: const Offset(0, 4))]),
-                child: Text('+ Add Outfit', style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w500)),
-              ),
-            ),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 380;
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Text('YOUR OUTFITS', style: TextStyle(color: t.mutedText, fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 2)),
+                    const SizedBox(width: 4),
+                    Text('— ', style: TextStyle(color: t.mutedText.withValues(alpha: 0.6), fontSize: 11)),
+                    Text('$outfitsCount', style: TextStyle(color: t.mutedText, fontSize: 11, fontWeight: FontWeight.w600)),
+                    Text(' saved', style: TextStyle(color: t.mutedText.withValues(alpha: 0.6), fontSize: 11)),
+                  ]),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: GestureDetector(
+                      onTap: onAddOutfit,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          gradient: kAccentGrad,
+                          borderRadius: BorderRadius.circular(50),
+                          boxShadow: [BoxShadow(color: accent.primary.withValues(alpha: 0.28), blurRadius: 18, offset: const Offset(0, 4))],
+                        ),
+                        child: Text('+ Add Outfit', style: TextStyle(color: t.textPrimary, fontSize: 12.5, fontWeight: FontWeight.w500)),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+            return Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(children: [
+                  Text('YOUR OUTFITS', style: TextStyle(color: t.mutedText, fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 2)),
+                  const SizedBox(width: 4),
+                  Text('— ', style: TextStyle(color: t.mutedText.withValues(alpha: 0.6), fontSize: 11)),
+                  Text('$outfitsCount', style: TextStyle(color: t.mutedText, fontSize: 11, fontWeight: FontWeight.w600)),
+                  Text(' saved', style: TextStyle(color: t.mutedText.withValues(alpha: 0.6), fontSize: 11)),
+                ]),
+                GestureDetector(
+                  onTap: onAddOutfit,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 9),
+                    decoration: BoxDecoration(
+                      gradient: kAccentGrad,
+                      borderRadius: BorderRadius.circular(50),
+                      boxShadow: [BoxShadow(color: accent.primary.withValues(alpha: 0.28), blurRadius: 18, offset: const Offset(0, 4))],
+                    ),
+                    child: Text('+ Add Outfit', style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w500)),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 16),
         SingleChildScrollView(
@@ -598,14 +713,20 @@ class _OutfitGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (outfits.isEmpty) return _EmptyGrid();
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 0.85),
-      itemCount: outfits.length,
-      // [CHANGED B10: pass index for stagger]
-      itemBuilder: (context, i) => _OutfitCard(outfit: outfits[i], index: i, onDelete: onDelete),
+    if (outfits.isEmpty) {
+      return SliverToBoxAdapter(child: _EmptyGrid());
+    }
+    return SliverGrid(
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: 0.85,
+      ),
+      delegate: SliverChildBuilderDelegate(
+        (context, i) => _OutfitCard(outfit: outfits[i], index: i, onDelete: onDelete),
+        childCount: outfits.length,
+      ),
     );
   }
 }
@@ -794,7 +915,15 @@ class _SavedSection extends StatelessWidget {
     return Column(
       children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text('🔖 SAVED BY AHVI', style: TextStyle(color: t.mutedText, fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 2)),
+          Expanded(
+            child: Text(
+              '🔖 SAVED BY AHVI',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: t.mutedText, fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 2),
+            ),
+          ),
+          const SizedBox(width: 8),
           GestureDetector(child: Text('Clear all', style: TextStyle(color: t.mutedText, fontSize: 11))),
         ]),
         const SizedBox(height: 16),
@@ -1343,8 +1472,9 @@ class _ChatInputBar extends StatelessWidget {
 // ─── Add Outfit Modal ─────────────────────────────────────────────
 // [CHANGED B13/B14/B34: now a proper dialog widget with close callback and auto-focus]
 class _AddOutfitModal extends StatefulWidget {
+  final VoidCallback? onOutfitAdded; // Added to refresh list
   final VoidCallback? onClose;
-  const _AddOutfitModal({this.onClose});
+  const _AddOutfitModal({this.onOutfitAdded, this.onClose});
   @override
   State<_AddOutfitModal> createState() => _AddOutfitModalState();
 }
@@ -1359,8 +1489,13 @@ class _AddOutfitModalState extends State<_AddOutfitModal> {
   String? _selectedCat;
   final List<String> _items = [];
   final TextEditingController _itemCtrl = TextEditingController();
-  // [ADDED B34] FocusNode for auto-focus on open
+  
+  // Controllers to actually save data
+  final TextEditingController _nameCtrl = TextEditingController();
+  final TextEditingController _notesCtrl = TextEditingController();
   final FocusNode _nameFocusNode = FocusNode();
+  
+  bool _isSaving = false;
 
   @override
   void initState() {
@@ -1374,7 +1509,13 @@ class _AddOutfitModalState extends State<_AddOutfitModal> {
   }
 
   @override
-  void dispose() { _itemCtrl.dispose(); _nameFocusNode.dispose(); super.dispose(); }
+  void dispose() { 
+    _itemCtrl.dispose(); 
+    _nameCtrl.dispose();
+    _notesCtrl.dispose();
+    _nameFocusNode.dispose(); 
+    super.dispose(); 
+  }
 
   void _addItem() {
     if (_itemCtrl.text.trim().isNotEmpty) {
@@ -1387,6 +1528,41 @@ class _AddOutfitModalState extends State<_AddOutfitModal> {
       widget.onClose!();
     } else {
       Navigator.of(context).pop(); // [ADDED B14] close via Navigator when shown as dialog
+    }
+  }
+
+  // Real Appwrite DB Save Logic
+  void _saveOutfit() async {
+    if (_nameCtrl.text.trim().isEmpty || _selectedCat == null) {
+      showToast(context, 'Please enter a name and select a category');
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final catData = _categories.firstWhere((c) => c['id'] == _selectedCat);
+      
+      await appwrite.createWorkoutOutfit({
+        'name': _nameCtrl.text.trim(),
+        'cat': _selectedCat,
+        'tag': catData['label'],
+        'emoji': catData['emoji'],
+        'items': _items,
+        'notes': _notesCtrl.text.trim()
+      });
+
+      if (mounted) {
+        showToast(context, 'Outfit saved ✓');
+        if(widget.onOutfitAdded != null) widget.onOutfitAdded!();
+        _close();
+      }
+    } catch (e) {
+      if (mounted) {
+        showToast(context, 'Error saving outfit');
+        setState(() => _isSaving = false);
+      }
     }
   }
 
@@ -1426,8 +1602,12 @@ class _AddOutfitModalState extends State<_AddOutfitModal> {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   const _FormLabel(text: 'Outfit Name'),
                   const SizedBox(height: 8),
-                  // [CHANGED B16/B34: pass focusNode to TextField wrapper]
-                  _FormInputWithFocus(hint: 'e.g. Sunday Morning Run', focusNode: _nameFocusNode),
+                  // [CHANGED B16/B34: pass focusNode and Controller]
+                  _FormInputWithFocus(
+                    controller: _nameCtrl, 
+                    hint: 'e.g. Sunday Morning Run', 
+                    focusNode: _nameFocusNode
+                  ),
                   const SizedBox(height: 20),
                   const _FormLabel(text: 'Workout Type'),
                   const SizedBox(height: 12),
@@ -1491,7 +1671,8 @@ class _AddOutfitModalState extends State<_AddOutfitModal> {
                   const SizedBox(height: 8),
                   Container(
                     decoration: BoxDecoration(color: t.panel, borderRadius: BorderRadius.circular(14), border: Border.all(color: t.cardBorder)),
-                    child: TextField(style: TextStyle(color: t.textPrimary, fontSize: 14), minLines: 3, maxLines: 5,
+                    // Attached Notes controller
+                    child: TextField(controller: _notesCtrl, style: TextStyle(color: t.textPrimary, fontSize: 14), minLines: 3, maxLines: 5,
                         decoration: InputDecoration(hintText: 'e.g. Great for hot weather, breathable and light', hintStyle: TextStyle(color: t.mutedText.withValues(alpha: 0.6), fontSize: 14), contentPadding: const EdgeInsets.all(14), border: InputBorder.none)),
                   ),
                   const SizedBox(height: 24),
@@ -1500,10 +1681,12 @@ class _AddOutfitModalState extends State<_AddOutfitModal> {
                     decoration: BoxDecoration(gradient: kAccentGrad, borderRadius: BorderRadius.circular(50),
                         boxShadow: [BoxShadow(color: accent.primary.withValues(alpha: 0.35), blurRadius: 18, offset: const Offset(0, 4))]),
                     child: ElevatedButton(
-                      onPressed: () { showToast(context, 'Outfit saved ✓'); _close(); },
+                      onPressed: _isSaving ? null : _saveOutfit,
                       style: ElevatedButton.styleFrom(backgroundColor: t.backgroundPrimary.withValues(alpha: 0.0), shadowColor: t.backgroundPrimary.withValues(alpha: 0.0),
                           padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50))),
-                      child: Text('Save Outfit', style: TextStyle(color: t.textPrimary, fontSize: 14, fontWeight: FontWeight.w500)),
+                      child: _isSaving 
+                        ? SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: t.textPrimary, strokeWidth: 2))
+                        : Text('Save Outfit', style: TextStyle(color: t.textPrimary, fontSize: 14, fontWeight: FontWeight.w500)),
                     ),
                   ),
                 ]),
@@ -1520,7 +1703,9 @@ class _AddOutfitModalState extends State<_AddOutfitModal> {
 class _FormInputWithFocus extends StatefulWidget {
   final String hint;
   final FocusNode? focusNode;
-  const _FormInputWithFocus({required this.hint, this.focusNode});
+  final TextEditingController? controller; // Added to enable saving text
+  
+  const _FormInputWithFocus({required this.hint, this.focusNode, this.controller});
   @override
   State<_FormInputWithFocus> createState() => _FormInputWithFocusState();
 }
@@ -1559,6 +1744,7 @@ class _FormInputWithFocusState extends State<_FormInputWithFocus> {
             : null,
       ),
       child: TextField(
+        controller: widget.controller,
         focusNode: _focus,
         style: TextStyle(color: t.textPrimary, fontSize: 14),
         decoration: InputDecoration(hintText: widget.hint, hintStyle: TextStyle(color: t.mutedText.withValues(alpha: 0.6), fontSize: 14),
@@ -1576,5 +1762,3 @@ class _FormLabel extends StatelessWidget {
   Widget build(BuildContext context) => Text(text.toUpperCase(),
       style: TextStyle(color: context.themeTokens.mutedText, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.5));
 }
-
-

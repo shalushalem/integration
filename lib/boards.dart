@@ -228,11 +228,8 @@ abstract final class _A {
   static const Duration entry   = Duration(milliseconds: 500);
   static const Duration page    = Duration(milliseconds: 600);
 
-  // F3/F5: springy overshoot for active toggles and hover lifts
   static const Curve spring     = Cubic(0.34, 1.56, 0.64, 1.0);
-  // F4/header: smooth deceleration
   static const Curve pageEntry  = Cubic(0.22, 1.0,  0.36, 1.0);
-  // general ease
   static const Curve ease       = Curves.easeOutCubic;
 }
 
@@ -249,7 +246,6 @@ class BoardsScreen extends StatefulWidget {
 class _BoardsScreenState extends State<BoardsScreen>
     with TickerProviderStateMixin {
 
-  // ── Theme shortcuts ──────────────────────────────────────────────────────
   AppThemeTokens get _theme => context.themeTokens;
   Color get _bg2         => _theme.backgroundSecondary;
   Color get _panel       => _theme.panel;
@@ -263,20 +259,16 @@ class _BoardsScreenState extends State<BoardsScreen>
   Color get _shell       => _theme.phoneShell;
 
   bool _isLifeTab = true;
+  bool _hasStartedAnimations = false; // <-- FIX: Tracks if entry animations fired
 
-  // ── Animation controllers ─────────────────────────────────────────────────
-
-  // F1: Header entry (slide-down + fade, 600 ms)
   late final AnimationController _headerCtrl;
   late final Animation<double>   _headerOpacity;
   late final Animation<Offset>   _headerSlide;
 
-  // F2: Toggle entry (same as header, 100 ms delayed)
   late final AnimationController _toggleCtrl;
   late final Animation<double>   _toggleOpacity;
   late final Animation<Offset>   _toggleSlide;
 
-  // F4: Section fade+slide on tab switch (350 ms)
   late final AnimationController _sectionCtrl;
   late final Animation<double>   _sectionOpacity;
   late final Animation<Offset>   _sectionSlide;
@@ -285,39 +277,36 @@ class _BoardsScreenState extends State<BoardsScreen>
   void initState() {
     super.initState();
 
-    // F1 – header
     _headerCtrl = AnimationController(vsync: this, duration: _A.page);
-    _headerOpacity = CurvedAnimation(
-      parent: _headerCtrl, curve: _A.pageEntry,
-    );
-    _headerSlide = Tween<Offset>(
-      begin: const Offset(0, -0.35), end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _headerCtrl, curve: _A.pageEntry));
+    _headerOpacity = CurvedAnimation(parent: _headerCtrl, curve: _A.pageEntry);
+    _headerSlide = Tween<Offset>(begin: const Offset(0, -0.35), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _headerCtrl, curve: _A.pageEntry));
 
-    // F2 – toggle (delayed 100 ms)
     _toggleCtrl = AnimationController(vsync: this, duration: _A.page);
-    _toggleOpacity = CurvedAnimation(
-      parent: _toggleCtrl, curve: _A.pageEntry,
-    );
-    _toggleSlide = Tween<Offset>(
-      begin: const Offset(0, -0.35), end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _toggleCtrl, curve: _A.pageEntry));
+    _toggleOpacity = CurvedAnimation(parent: _toggleCtrl, curve: _A.pageEntry);
+    _toggleSlide = Tween<Offset>(begin: const Offset(0, -0.35), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _toggleCtrl, curve: _A.pageEntry));
 
-    // F4 – section switch
     _sectionCtrl = AnimationController(vsync: this, duration: _A.slow);
-    _sectionOpacity = CurvedAnimation(
-      parent: _sectionCtrl, curve: Curves.ease,
-    );
-    _sectionSlide = Tween<Offset>(
-      begin: const Offset(0, 0.04), end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _sectionCtrl, curve: Curves.ease));
+    _sectionOpacity = CurvedAnimation(parent: _sectionCtrl, curve: Curves.ease);
+    _sectionSlide = Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _sectionCtrl, curve: Curves.ease));
 
-    // Kick-off sequence
-    _headerCtrl.forward();
-    Future.delayed(const Duration(milliseconds: 100),
-            () { if (mounted) _toggleCtrl.forward(); });
-    Future.delayed(const Duration(milliseconds: 200),
-            () { if (mounted) _sectionCtrl.forward(); });
+    // REMOVED immediate .forward() calls here to fix the IndexedStack bug!
+  }
+
+  // <-- THE FIX: Only play animations when the tab actually becomes visible
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (TickerMode.of(context) && !_hasStartedAnimations) {
+      _hasStartedAnimations = true;
+      _headerCtrl.forward();
+      Future.delayed(const Duration(milliseconds: 100),
+              () { if (mounted) _toggleCtrl.forward(); });
+      Future.delayed(const Duration(milliseconds: 200),
+              () { if (mounted) _sectionCtrl.forward(); });
+    }
   }
 
   @override
@@ -328,17 +317,15 @@ class _BoardsScreenState extends State<BoardsScreen>
     super.dispose();
   }
 
-  // F4 – tab switch: reset + replay section fade
   void _switchTab(bool isLife) {
     if (_isLifeTab == isLife) return;
-    HapticFeedback.selectionClick(); // tactile tab feedback
+    HapticFeedback.selectionClick(); 
     setState(() => _isLifeTab = isLife);
     _sectionCtrl
       ..reset()
       ..forward();
   }
 
-  // ── Navigation helper ─────────────────────────────────────────────────────
   void _push(Widget page) {
     HapticFeedback.lightImpact();
     Navigator.of(context).push(
@@ -364,20 +351,15 @@ class _BoardsScreenState extends State<BoardsScreen>
     );
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _bg2,
       body: Stack(
         children: [
-          // Ambient background gradients
           Positioned.fill(child: _buildAmbientBg()),
-
-          // Content
           SafeArea(
             child: CustomScrollView(
-              // iOS-style bounce physics
               physics: const BouncingScrollPhysics(
                 parent: AlwaysScrollableScrollPhysics(),
               ),
@@ -387,7 +369,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                       _S.base, _S.xl, _S.base, 132),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
-                      // F1 – header entry
                       FadeTransition(
                         opacity: _headerOpacity,
                         child: SlideTransition(
@@ -396,8 +377,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                         ),
                       ),
                       const SizedBox(height: _S.lg),
-
-                      // F2 – toggle entry
                       FadeTransition(
                         opacity: _toggleOpacity,
                         child: SlideTransition(
@@ -405,9 +384,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                           child: _buildToggle(),
                         ),
                       ),
-                      const SizedBox(height: _S.base + _S.xs), // 20
-
-                      // F4 – section fade on switch
+                      const SizedBox(height: _S.base + _S.xs), 
                       FadeTransition(
                         opacity: _sectionOpacity,
                         child: SlideTransition(
@@ -438,9 +415,6 @@ class _BoardsScreenState extends State<BoardsScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  //  AMBIENT BACKGROUND
-  // ─────────────────────────────────────────────────────────────────────────
   Widget _buildAmbientBg() {
     return Stack(
       children: [
@@ -472,16 +446,12 @@ class _BoardsScreenState extends State<BoardsScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  //  HEADER  (F1)
-  // ─────────────────────────────────────────────────────────────────────────
   Widget _buildHeader() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            // F12 – back button with press/hover scale
             _HoverPressButton(
               onTap: () {
                 final navigator = Navigator.of(context);
@@ -518,7 +488,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                 fontSize: 38,
                 fontWeight: FontWeight.w700,
                 height: 1.0,
-                letterSpacing: -1.0,  // tighter for large display type
+                letterSpacing: -1.0, 
                 color: _text,
               ),
             ),
@@ -539,9 +509,6 @@ class _BoardsScreenState extends State<BoardsScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  //  TOGGLE  (F2 + F3)
-  // ─────────────────────────────────────────────────────────────────────────
   Widget _buildToggle() {
     return Container(
       decoration: BoxDecoration(
@@ -581,15 +548,11 @@ class _BoardsScreenState extends State<BoardsScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  //  LIFE SECTION  (F9 staggered)
-  // ─────────────────────────────────────────────────────────────────────────
   Widget _buildLifeSection() {
     final lifeContentColor = _text;
 
     return Column(
       children: [
-        // Card 0 – Calendar (full width) delay 100 ms
         _StaggeredCard(
           delay: const Duration(milliseconds: 100),
           child: CalendarCard(
@@ -606,7 +569,6 @@ class _BoardsScreenState extends State<BoardsScreen>
         ),
         const SizedBox(height: _S.md),
 
-        // Cards 1 + 2 – Daily Wear & Home Utilities
         Row(
           children: [
             Expanded(
@@ -632,7 +594,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _card,
                   arrowColor: lifeContentColor,
                   shellColor: _shell,
-                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
                   onTap: () => _push(const OccasionBoard(
                     occasion: 'Daily Wear',
                     title: 'Daily Wear',
@@ -674,7 +635,6 @@ class _BoardsScreenState extends State<BoardsScreen>
         ),
         const SizedBox(height: _S.md),
 
-        // Cards 3 + 4 – Workout & Life Goals
         Row(
           children: [
             Expanded(
@@ -700,7 +660,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _panel,
                   arrowColor: lifeContentColor,
                   shellColor: _shell,
-                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
                   onTap: () => _push(const OccasionBoard(
                     occasion: 'Workout',
                     title: 'Work Out',
@@ -734,7 +693,8 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _panel,
                   arrowColor: lifeContentColor,
                   shellColor: _shell,
-                  onTap: () => _push(const bills.Screen4()),
+                  // <-- FIX: updated from bills.Screen4() to bills.BillsScreen()
+                  onTap: () => _push(const bills.BillsScreen()),
                 ),
               ),
             ),
@@ -742,7 +702,6 @@ class _BoardsScreenState extends State<BoardsScreen>
         ),
         const SizedBox(height: _S.md),
 
-        // Card 5 – Skincare (full width)
         _StaggeredCard(
           delay: const Duration(milliseconds: 380),
           child: _VCard(
@@ -772,13 +731,9 @@ class _BoardsScreenState extends State<BoardsScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  //  BOARDS SECTION  (F10 staggered)
-  // ─────────────────────────────────────────────────────────────────────────
   Widget _buildBoardsSection() {
     return Column(
       children: [
-        // Row 1 – Party Looks + Office Fits
         Row(
           children: [
             Expanded(
@@ -786,7 +741,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                 delay: const Duration(milliseconds: 80),
                 child: _VCard(
                   fullWidth: false,
-                  // Party Looks → #ffb08f → #ff8f72 (warm coral/orange)
                   gradient: const LinearGradient(
                     begin: Alignment.topLeft, end: Alignment.bottomRight,
                     colors: [Color(0xFFFFB08F), Color(0xFFFF8F72)],
@@ -806,7 +760,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _panel,
                   arrowColor: const Color(0xFFFF8F72),
                   shellColor: _shell,
-                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
                   onTap: () => _push(const OccasionBoard(
                     occasion: 'Party',
                     title: 'Party Looks',
@@ -822,7 +775,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                 delay: const Duration(milliseconds: 160),
                 child: _VCard(
                   fullWidth: false,
-                  // Office Fits → #ffe07e → #ffc956 (warm yellow/gold)
                   gradient: const LinearGradient(
                     begin: Alignment.topLeft, end: Alignment.bottomRight,
                     colors: [Color(0xFFFFE07E), Color(0xFFFFC956)],
@@ -842,7 +794,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _panel,
                   arrowColor: const Color(0xFFFFC956),
                   shellColor: _shell,
-                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
                   onTap: () => _push(const OccasionBoard(
                     occasion: 'Office',
                     title: 'Office Fits',
@@ -856,7 +807,6 @@ class _BoardsScreenState extends State<BoardsScreen>
         ),
         const SizedBox(height: _S.md),
 
-        // Row 2 – Vacation + Occasion
         Row(
           children: [
             Expanded(
@@ -864,7 +814,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                 delay: const Duration(milliseconds: 160),
                 child: _VCard(
                   fullWidth: false,
-                  // Vacation → #9af0d3 → #58dcb0 (mint green)
                   gradient: const LinearGradient(
                     begin: Alignment.topLeft, end: Alignment.bottomRight,
                     colors: [Color(0xFF9AF0D3), Color(0xFF58DCB0)],
@@ -884,7 +833,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _panel,
                   arrowColor: const Color(0xFF58DCB0),
                   shellColor: _shell,
-                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
                   onTap: () => _push(const OccasionBoard(
                     occasion: 'Vacation',
                     title: 'Vacation',
@@ -900,7 +848,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                 delay: const Duration(milliseconds: 240),
                 child: _VCard(
                   fullWidth: false,
-                  // Occasion → #9dcbff → #77a8ff (periwinkle blue)
                   gradient: const LinearGradient(
                     begin: Alignment.topLeft, end: Alignment.bottomRight,
                     colors: [Color(0xFF9DCBFF), Color(0xFF77A8FF)],
@@ -920,7 +867,6 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _card,
                   arrowColor: const Color(0xFF77A8FF),
                   shellColor: _shell,
-                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
                   onTap: () => _push(const OccasionBoard(
                     occasion: 'Occasion',
                     title: 'Occasion',
@@ -934,8 +880,6 @@ class _BoardsScreenState extends State<BoardsScreen>
         ),
         const SizedBox(height: _S.md),
 
-        // Everything Else (full-width horizontal)
-        // Everything Else → #ffbfdc → #ff96c7 (pink)
         _StaggeredCard(
           delay: const Duration(milliseconds: 240),
           child: _EverythingElseCard(
@@ -953,9 +897,6 @@ class _BoardsScreenState extends State<BoardsScreen>
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  TOGGLE BUTTON  (F3 — animated active pill with scale + glow)
-// ═════════════════════════════════════════════════════════════════════════════
 class _ToggleButton extends StatefulWidget {
   final String label;
   final IconData icon;
@@ -1040,7 +981,6 @@ class _ToggleButtonState extends State<_ToggleButton>
           ]
               : null,
         ),
-        // F3: smooth animated scale on active state
         child: ScaleTransition(
           scale: _scaleAnim,
           child: Row(
@@ -1075,20 +1015,11 @@ class _ToggleButtonState extends State<_ToggleButton>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Builds a [Matrix4] that first translates by [dy] on the Y axis,
-/// then uniformly scales by [scale]. Uses non-deprecated Matrix4 APIs.
 Matrix4 _scaleTranslate(double scale, double dy) {
   return Matrix4.translationValues(0.0, dy, 0.0)
     ..multiply(Matrix4.diagonal3Values(scale, scale, 1.0));
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  VCARD  (F5 hover lift, F6 press scale, F7 icon rotate+scale, F8 arrow)
-// ═════════════════════════════════════════════════════════════════════════════
 class _VCard extends StatefulWidget {
   final bool fullWidth;
   final Gradient gradient;
@@ -1145,7 +1076,6 @@ class _VCardState extends State<_VCard> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    // F7: icon rotate + scale controller
     _iconCtrl = AnimationController(
       vsync: this,
       duration: _A.normal,
@@ -1219,12 +1149,10 @@ class _VCardState extends State<_VCard> with SingleTickerProviderStateMixin {
               _S.base, _S.base + _S.xs, _S.base, _S.base),
           child: Stack(
             children: [
-              // Main content column
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // F7: icon with animated rotate + scale
                   AnimatedBuilder(
                     animation: _iconCtrl,
                     builder: (_, child) => Transform.rotate(
@@ -1244,7 +1172,7 @@ class _VCardState extends State<_VCard> with SingleTickerProviderStateMixin {
                       child: Center(child: widget.iconWidget),
                     ),
                   ),
-                  const SizedBox(height: _S.sm + _S.xs), // 12
+                  const SizedBox(height: _S.sm + _S.xs),
                   Text(
                     widget.title,
                     maxLines: 2,
@@ -1270,12 +1198,9 @@ class _VCardState extends State<_VCard> with SingleTickerProviderStateMixin {
                       height: 1.4,
                     ),
                   ),
-                  // spacer so arrow never overlaps text
                   const SizedBox(height: _S.xl),
                 ],
               ),
-
-              // Badge (top-right)
               if (widget.badge != null)
                 Positioned(
                   top: 0,
@@ -1299,8 +1224,6 @@ class _VCardState extends State<_VCard> with SingleTickerProviderStateMixin {
                     ),
                   ),
                 ),
-
-              // F8: arrow (bottom-right), translates 2px on hover
               Positioned(
                 bottom: 0,
                 right: 0,
@@ -1338,11 +1261,7 @@ class _VCardState extends State<_VCard> with SingleTickerProviderStateMixin {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  EVERYTHING ELSE CARD  (horizontal layout, reuses press/hover pattern)
-// ═════════════════════════════════════════════════════════════════════════════
 class _EverythingElseCard extends StatefulWidget {
-  // Replaced accent2 with explicit gradient colors for Everything Else
   final Color gradientStart;
   final Color gradientEnd;
   final Color cardColor;
@@ -1483,10 +1402,7 @@ class _EverythingElseCardState extends State<_EverythingElseCard> {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  STAGGERED CARD ENTRY  (F9 + F10)
-//  opacity 0→1 + translateY(20px→0), single forward run
-// ═════════════════════════════════════════════════════════════════════════════
+// <-- THE FIX: TickerMode dependency injection ensures these don't run while hidden
 class _StaggeredCard extends StatefulWidget {
   final Widget child;
   final Duration delay;
@@ -1502,6 +1418,7 @@ class _StaggeredCardState extends State<_StaggeredCard>
   late final AnimationController _ctrl;
   late final Animation<double> _opacity;
   late final Animation<Offset> _slide;
+  bool _hasStarted = false; // Tracks if animation fired
 
   @override
   void initState() {
@@ -1512,10 +1429,19 @@ class _StaggeredCardState extends State<_StaggeredCard>
       begin: const Offset(0, 0.14),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _ctrl, curve: _A.pageEntry));
+    // REMOVED immediate .forward() call
+  }
 
-    Future.delayed(widget.delay, () {
-      if (mounted) _ctrl.forward();
-    });
+  // Trigger animation ONLY when TickerMode enables this widget
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (TickerMode.of(context) && !_hasStarted) {
+      _hasStarted = true;
+      Future.delayed(widget.delay, () {
+        if (mounted) _ctrl.forward();
+      });
+    }
   }
 
   @override
@@ -1533,10 +1459,6 @@ class _StaggeredCardState extends State<_StaggeredCard>
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  HOVER-PRESS BUTTON  (F12 — back button + any tap target needing scale)
-//  Consolidates the former _HoverScaleButton; now also handles press scale.
-// ═════════════════════════════════════════════════════════════════════════════
 class _HoverPressButton extends StatefulWidget {
   final Widget child;
   final VoidCallback onTap;
