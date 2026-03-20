@@ -1,24 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:appwrite/models.dart' hide Row;
+import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
+import 'package:myapp/services/appwrite_service.dart';
 
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Screen4(),
-    );
-  }
-}
-// ─── Data ────────────────────────────────────────────────────────────────────
-
+// ── Data model ───────────────────────────────────────────────────────────────
 class LookItem {
   final String id;
   final String title;
@@ -26,8 +12,8 @@ class LookItem {
   final String emoji;
   final String category;
   final String? imageUrl;
-  final BadgeStyle badge;
-  final PlaceholderBg bg;
+  final LookBadgeStyle badge;
+  final LookBgStyle bg;
 
   const LookItem({
     required this.id,
@@ -41,122 +27,222 @@ class LookItem {
   });
 }
 
-enum BadgeStyle { wedding, gala, formal, garden, brunch, date, defaultBadge }
-enum PlaceholderBg { wedding, gala, formal, garden, brunch, date, defaultBg }
+enum LookBadgeStyle { streetwear, athleisure, boho, minimalist, vintage, monochrome, cottagecore, defaultBadge }
+enum LookBgStyle { streetwear, athleisure, boho, minimalist, vintage, monochrome, cottagecore, defaultBg }
 
-// ─── Colors / tokens ─────────────────────────────────────────────────────────
+// ── Main Screen ──────────────────────────────────────────────────────────────
+class OccasionBoard extends StatefulWidget {
+  final String occasion;
+  final String title;
+  final String subtitle;
+  final String emptyEmoji;
 
+  const OccasionBoard({
+    super.key, 
+    required this.occasion,
+    required this.title,
+    required this.subtitle,
+    this.emptyEmoji = '✨',
+  });
 
-// ─── Sample data (mirrors the JS defaults) ───────────────────────────────────
+  @override
+  State<OccasionBoard> createState() => _OccasionBoardState();
+}
 
-final _sampleLooks = [
-  LookItem(
-    id: '1', title: 'Garden Wedding Guest',
-    description: 'Floral midi in blush & ivory',
-    emoji: '🌸', category: 'Garden Party',
-    badge: BadgeStyle.garden, bg: PlaceholderBg.garden,
-  ),
-  LookItem(
-    id: '2', title: 'Black Tie Gala',
-    description: 'Floor-length emerald gown with gold',
-    emoji: '✨', category: 'Gala',
-    badge: BadgeStyle.gala, bg: PlaceholderBg.gala,
-  ),
-  LookItem(
-    id: '3', title: 'Sunday Brunch',
-    description: 'Linen wrap dress in sage green',
-    emoji: '☀️', category: 'Brunch',
-    badge: BadgeStyle.brunch, bg: PlaceholderBg.brunch,
-  ),
-  LookItem(
-    id: '4', title: 'Rooftop Date Night',
-    description: 'Sleek silk slip with strappy heels',
-    emoji: '🌙', category: 'Date Night',
-    badge: BadgeStyle.date, bg: PlaceholderBg.date,
-  ),
-  LookItem(
-    id: '5', title: 'Bridal Shower',
-    description: 'Soft white lace tea-length dress',
-    emoji: '💍', category: 'Wedding',
-    badge: BadgeStyle.wedding, bg: PlaceholderBg.wedding,
-  ),
-  LookItem(
-    id: '6', title: 'Award Ceremony',
-    description: 'Tailored navy blazer dress with pearls',
-    emoji: '🥂', category: 'Formal',
-    badge: BadgeStyle.formal, bg: PlaceholderBg.formal,
-  ),
-];
+class _OccasionBoardState extends State<OccasionBoard> {
+  AppThemeTokens get _t => context.themeTokens;
+  Color get _bg => _t.backgroundPrimary;
+  Color get _bg2 => _t.backgroundSecondary;
+  Color get _phoneShell => _t.phoneShell;
+  Color get _text => _t.textPrimary;
 
-// ─── Screen ──────────────────────────────────────────────────────────────────
+  bool _isLoading = true;
+  String? _toastMessage;
+  List<LookItem> _looks = [];
 
-class Screen4 extends StatelessWidget {
-  const Screen4({super.key});
+  @override
+  void initState() {
+    super.initState();
+    _fetchLooks();
+  }
+
+  Future<void> _fetchLooks() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      // 🔥 Fetch dynamically based on the parameter passed from boards.dart!
+      final docs = await appwrite.getSavedBoardsByOccasion(widget.occasion);
+
+      final List<LookItem> loadedLooks = [];
+
+      for (var doc in docs) {
+        // Pick a dynamic badge based on string length to give it that varied Pinterest feel
+        final badgeIndex = doc.$id.length % LookBadgeStyle.values.length;
+        final dynamicBadge = LookBadgeStyle.values[badgeIndex];
+        final dynamicBg = LookBgStyle.values[badgeIndex];
+
+        loadedLooks.add(LookItem(
+          id: doc.$id,
+          title: doc.data['occasion'] ?? widget.occasion, 
+          description: doc.data['outfitDescription'] ?? 'Custom ${widget.occasion} inspiration',
+          emoji: doc.data['emoji'] ?? widget.emptyEmoji, 
+          category: widget.occasion,
+          imageUrl: doc.data['imageUrl'],
+          badge: dynamicBadge,
+          bg: dynamicBg,
+        ));
+      }
+
+      if (mounted) {
+        setState(() {
+          _looks = loadedLooks;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+      _showToast('Failed to load looks.');
+    }
+  }
+
+  Future<void> _deleteLook(String id) async {
+    setState(() => _looks.removeWhere((l) => l.id == id));
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      await appwrite.deleteSavedBoard(id);
+      _showToast('Look removed');
+    } catch (e) {
+      _showToast('Failed to delete from cloud');
+    }
+  }
+
+  void _showToast(String msg) {
+    setState(() => _toastMessage = msg);
+    Future.delayed(const Duration(milliseconds: 2200), () {
+      if (mounted) setState(() => _toastMessage = null);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final t = context.themeTokens;
+    final countText = _looks.isEmpty
+        ? 'No looks saved yet'
+        : '${_looks.length} look${_looks.length != 1 ? 's' : ''} saved';
+
     return Scaffold(
-      backgroundColor: t.backgroundPrimary,
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: const Alignment(-0.6, -1),
-            end: const Alignment(0.6, 1),
-            colors: [t.backgroundPrimary, t.backgroundSecondary, t.backgroundPrimary],
-            stops: const [0, 0.5, 1],
-          ),
-        ),
-        child: Column(
-          children: [
-            const _Header(),
-            Expanded(
-              child: _ScrollArea(looks: _sampleLooks),
+      backgroundColor: _bg,
+      body: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                stops: const [0.0, 0.5, 1.0],
+                colors: [_bg, _bg2, _bg],
+              ),
             ),
-          ],
-        ),
+          ),
+          Column(
+            children: [
+              // ── HEADER ──
+              _Header(
+                countText: countText, 
+                title: widget.title, 
+                subtitle: widget.subtitle
+              ),
+              
+              // ── GRID SCROLL AREA ──
+              Expanded(
+                child: Container(
+                  color: _bg,
+                  child: _isLoading 
+                      ? Center(child: CircularProgressIndicator(color: _t.accent.primary))
+                      : _looks.isEmpty
+                          ? _EmptyState(title: widget.title, emoji: widget.emptyEmoji)
+                          : _LooksGrid(
+                              looks: _looks,
+                              onDelete: _deleteLook,
+                              onShare: (look) => _showToast('Copied!'),
+                            ),
+                ),
+              ),
+            ],
+          ),
+          // ── TOAST ──
+          if (_toastMessage != null)
+            Positioned(
+              bottom: 28,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _phoneShell,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    _toastMessage!,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: _text,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
 }
 
-// ─── Header ──────────────────────────────────────────────────────────────────
-
+// ── Header ───────────────────────────────────────────────────────────────────
 class _Header extends StatelessWidget {
-  const _Header();
+  final String countText;
+  final String title;
+  final String subtitle;
+  
+  const _Header({
+    required this.countText, 
+    required this.title, 
+    required this.subtitle
+  });
 
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
     return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 48, 14, 16), 
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: const Alignment(-1, -1),
-          end: const Alignment(1, 1),
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          stops: const [0.0, 0.5, 1.0],
           colors: [t.phoneShellInner, t.phoneShell, t.backgroundSecondary],
-          stops: const [0, 0.5, 1],
         ),
       ),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          // ::before  – yellow radial glow top-right
           Positioned(
             top: -30,
             right: -20,
             child: Container(
-              width: 150,
-              height: 150,
+              width: 160,
+              height: 160,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
-                  colors: [t.accent.secondary.withValues(alpha: 0.30), t.backgroundPrimary.withValues(alpha: 0.0)],
-                  stops: const [0, 0.65],
+                  colors: [t.accent.tertiary.withValues(alpha: 0.30), t.backgroundPrimary.withValues(alpha: 0.0)],
+                  stops: const [0.0, 0.65],
                 ),
               ),
             ),
           ),
-          // ::after  – pink radial glow bottom-left
           Positioned(
             bottom: -20,
             left: 20,
@@ -166,79 +252,57 @@ class _Header extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
-                  colors: [t.accent.tertiary.withValues(alpha: 0.20), t.backgroundPrimary.withValues(alpha: 0.0)],
-                  stops: const [0, 0.65],
+                  colors: [t.accent.primary.withValues(alpha: 0.22), t.backgroundPrimary.withValues(alpha: 0.0)],
+                  stops: const [0.0, 0.65],
                 ),
               ),
             ),
           ),
-          // Actual content
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 18, 14, 10),
-              child: Column(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _BackButton(),
+                  const SizedBox(width: 8),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: t.textPrimary,
+                      letterSpacing: -0.4,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // header-top
-                  Row(
-                    children: [
-                      // back-btn
-                      GestureDetector(
-                        onTap: () => Navigator.maybePop(context),
-                        child: Container(
-                          width: 26,
-                          height: 26,
-                          decoration: BoxDecoration(
-                            color: t.panel,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: t.cardBorder, width: 1),
-                          ),
-                          child: Icon(
-                            Icons.chevron_left_rounded,
-                            color: t.textPrimary,
-                            size: 16,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // header-title
-                      Text(
-                        'Occasion Looks 💍',
-                        style: TextStyle(
-                          fontFamily: 'DM Sans',
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: t.textPrimary,
-                          letterSpacing: -0.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  // header-meta
                   Text(
-                    'Your saved occasion inspiration',
+                    subtitle,
                     style: TextStyle(
-                      fontFamily: 'DM Sans',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w400,
-                      color: t.accent.secondary,
-                      height: 1,
+                      fontFamily: 'Inter',
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: t.accent.tertiary.withValues(alpha: 0.85),
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${_sampleLooks.length} looks saved',
+                    countText,
                     style: TextStyle(
-                      fontFamily: 'DM Mono',
-                      fontSize: 10,
+                      fontFamily: 'Inter',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w400,
                       color: t.mutedText,
                     ),
                   ),
                 ],
               ),
-            ),
+            ],
           ),
         ],
       ),
@@ -246,75 +310,103 @@ class _Header extends StatelessWidget {
   }
 }
 
-// ─── Scroll area + grid ───────────────────────────────────────────────────────
-
-class _ScrollArea extends StatelessWidget {
-  final List<LookItem> looks;
-  const _ScrollArea({required this.looks});
-
+class _BackButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
-    return Container(
-      color: t.backgroundPrimary,
-      child: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.all(8),
-        child: _LooksGrid(looks: looks),
+    return GestureDetector(
+      onTap: () => Navigator.maybePop(context),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: t.panel,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: t.cardBorder, width: 1),
+        ),
+        child: Center(
+          child: Icon(
+            Icons.chevron_left_rounded,
+            size: 20,
+            color: t.textPrimary,
+          ),
+        ),
       ),
     );
   }
 }
 
+// ── Looks Grid ───────────────────────────────────────────────────────────────
 class _LooksGrid extends StatelessWidget {
   final List<LookItem> looks;
-  const _LooksGrid({required this.looks});
+  final ValueChanged<String> onDelete;
+  final ValueChanged<LookItem> onShare;
+  const _LooksGrid({required this.looks, required this.onDelete, required this.onShare});
 
   @override
   Widget build(BuildContext context) {
-    // Featured card (index 0) spans full width; rest are 2-column pairs.
-    final List<Widget> rows = [];
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
+      child: _buildGrid(),
+    );
+  }
 
-    for (int i = 0; i < looks.length; i++) {
-      if (i == 0) {
-        // featured – full width
-        rows.add(_LookCard(look: looks[i], featured: true));
-        rows.add(const SizedBox(height: 8));
-      } else if (i % 2 == 1) {
-        // start of a pair
-        final hasNext = i + 1 < looks.length;
-        rows.add(
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(child: _LookCard(look: looks[i], featured: false)),
-                if (hasNext) ...[
-                  const SizedBox(width: 8),
-                  Expanded(child: _LookCard(look: looks[i + 1], featured: false)),
-                ],
-              ],
-            ),
-          ),
-        );
-        rows.add(const SizedBox(height: 8));
-      }
-      // index i+1 already rendered above in the pair
+  Widget _buildGrid() {
+    final List<Widget> rows = [];
+    int i = 0;
+
+    // First card is "featured" (full-width)
+    if (looks.isNotEmpty) {
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _LookCard(look: looks[0], featured: true, onDelete: onDelete, onShare: onShare),
+        ),
+      );
+      i = 1;
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: rows,
-    );
+    // Remaining cards in 2-column pairs
+    while (i < looks.length) {
+      final left = looks[i];
+      final right = i + 1 < looks.length ? looks[i + 1] : null;
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: _LookCard(look: left, featured: false, onDelete: onDelete, onShare: onShare)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: right != null
+                    ? _LookCard(look: right, featured: false, onDelete: onDelete, onShare: onShare)
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
+        ),
+      );
+      i += 2;
+    }
+
+    return Column(children: rows);
   }
 }
 
-// ─── Look card ────────────────────────────────────────────────────────────────
-
+// ── Look Card ────────────────────────────────────────────────────────────────
 class _LookCard extends StatefulWidget {
   final LookItem look;
   final bool featured;
-  const _LookCard({required this.look, required this.featured});
+  final ValueChanged<String> onDelete;
+  final ValueChanged<LookItem> onShare;
+
+  const _LookCard({
+    required this.look,
+    required this.featured,
+    required this.onDelete,
+    required this.onShare,
+  });
 
   @override
   State<_LookCard> createState() => _LookCardState();
@@ -322,10 +414,85 @@ class _LookCard extends StatefulWidget {
 
 class _LookCardState extends State<_LookCard> {
   bool _hovered = false;
+  AppThemeTokens get _t => context.themeTokens;
+
+  Gradient _bgGradient(LookBgStyle bg) {
+    switch (bg) {
+      case LookBgStyle.streetwear:
+        return LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [_t.accent.secondary.withValues(alpha: 0.15), _t.accent.primary.withValues(alpha: 0.18)],
+        );
+      case LookBgStyle.athleisure:
+        return LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [_t.accent.tertiary.withValues(alpha: 0.18), _t.accent.primary.withValues(alpha: 0.15)],
+        );
+      case LookBgStyle.boho:
+        return LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [_t.accent.secondary.withValues(alpha: 0.22), _t.accent.tertiary.withValues(alpha: 0.16)],
+        );
+      case LookBgStyle.minimalist:
+        return LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [_t.accent.primary.withValues(alpha: 0.12), _t.accent.secondary.withValues(alpha: 0.10)],
+        );
+      case LookBgStyle.vintage:
+        return LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [_t.accent.secondary.withValues(alpha: 0.22), _t.accent.tertiary.withValues(alpha: 0.20)],
+        );
+      case LookBgStyle.monochrome:
+        return LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [_t.phoneShell.withValues(alpha: 0.60), _t.phoneShellInner.withValues(alpha: 0.50)],
+        );
+      case LookBgStyle.cottagecore:
+        return LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [_t.accent.tertiary.withValues(alpha: 0.14), _t.accent.secondary.withValues(alpha: 0.20)],
+        );
+      case LookBgStyle.defaultBg:
+        return LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [_t.accent.primary.withValues(alpha: 0.12), _t.accent.tertiary.withValues(alpha: 0.10)],
+        );
+    }
+  }
+
+  Color _badgeColor(LookBadgeStyle badge) {
+    switch (badge) {
+      case LookBadgeStyle.streetwear: return _t.accent.secondary;
+      case LookBadgeStyle.athleisure: return _t.accent.tertiary;
+      case LookBadgeStyle.boho: return _t.accent.secondary;
+      case LookBadgeStyle.minimalist: return _t.accent.primary;
+      case LookBadgeStyle.vintage: return _t.accent.secondary;
+      case LookBadgeStyle.monochrome: return _t.mutedText;
+      case LookBadgeStyle.cottagecore: return _t.accent.tertiary;
+      case LookBadgeStyle.defaultBadge: return _t.accent.tertiary;
+    }
+  }
+
+  Color _badgeBg(LookBadgeStyle badge) {
+    switch (badge) {
+      case LookBadgeStyle.streetwear: return _t.accent.secondary.withValues(alpha: 0.15);
+      case LookBadgeStyle.athleisure: return _t.accent.tertiary.withValues(alpha: 0.15);
+      case LookBadgeStyle.boho: return _t.accent.secondary.withValues(alpha: 0.20);
+      case LookBadgeStyle.minimalist: return _t.accent.primary.withValues(alpha: 0.15);
+      case LookBadgeStyle.vintage: return _t.accent.secondary.withValues(alpha: 0.16);
+      case LookBadgeStyle.monochrome: return _t.panel;
+      case LookBadgeStyle.cottagecore: return _t.accent.tertiary.withValues(alpha: 0.14);
+      case LookBadgeStyle.defaultBadge: return _t.panel;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final t = context.themeTokens;
+    final look = widget.look;
+    final aspectRatio = widget.featured ? 2.0 : 1.0;
+    final onAccent = Theme.of(context).colorScheme.onPrimary;
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -334,268 +501,165 @@ class _LookCardState extends State<_LookCard> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           decoration: BoxDecoration(
-            color: t.panel,
-            borderRadius: BorderRadius.circular(10),
+            color: _t.card,
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: _hovered ? t.accent.primary : t.cardBorder,
+              color: _hovered ? _t.accent.tertiary : _t.cardBorder,
               width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
                 color: _hovered
-                    ? t.accent.primary.withValues(alpha: 0.22)
-                    : t.accent.primary.withValues(alpha: 0.10),
+                    ? _t.accent.tertiary.withValues(alpha: 0.18)
+                    : Colors.black.withValues(alpha: 0.2),
                 blurRadius: _hovered ? 28 : 12,
-                offset:  Offset(0, _hovered ? 8 : 2),
+                offset: const Offset(0, 4),
               ),
             ],
           ),
-          clipBehavior: Clip.antiAlias,
+          clipBehavior: Clip.hardEdge,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Image / placeholder
               Stack(
                 children: [
-                  _PlaceholderImage(
-                    look: widget.look,
-                    featured: widget.featured,
+                  look.imageUrl != null && look.imageUrl!.isNotEmpty
+                      ? AspectRatio(
+                          aspectRatio: aspectRatio,
+                          child: Image.network(
+                            look.imageUrl!,
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                          ),
+                        )
+                      : AspectRatio(
+                          aspectRatio: aspectRatio,
+                          child: Container(
+                            decoration: BoxDecoration(gradient: _bgGradient(look.bg)),
+                            child: Center(
+                              child: Text(look.emoji, style: const TextStyle(fontSize: 32)),
+                            ),
+                          ),
+                        ),
+                  // Delete button
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: AnimatedOpacity(
+                      opacity: _hovered ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: GestureDetector(
+                        onTap: () => widget.onDelete(look.id),
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: _t.phoneShellInner.withValues(alpha: 0.85),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: _t.cardBorder, width: 1),
+                          ),
+                          child: Center(
+                            child: Icon(Icons.close, size: 14, color: _t.textPrimary),
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
-                  // delete btn (top-right)
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                      child: _OverlayIconBtn(
-                        visible: _hovered,
-                        onTap: () {},
-                        hoverColor: t.accent.tertiary.withValues(alpha: 0.40),
-                        child: Icon(Icons.close, color: t.textPrimary, size: 11),
-                      ),
-                    ),
-                  // share btn (top-left)
-                  Positioned(
-                    top: 8,
-                    left: 8,
-                      child: _OverlayIconBtn(
-                        visible: _hovered,
-                        onTap: () {},
-                        hoverColor: t.accent.primary.withValues(alpha: 0.40),
-                        child: Icon(Icons.share_outlined, color: t.textPrimary, size: 11),
-                      ),
-                    ),
                 ],
               ),
-              _CardInfo(look: widget.look),
-              _TryOnButton(onTap: () {}),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Placeholder image ────────────────────────────────────────────────────────
-
-class _PlaceholderImage extends StatelessWidget {
-  final LookItem look;
-  final bool featured;
-  const _PlaceholderImage({required this.look, required this.featured});
-
-  LinearGradient _bgGradient(AppThemeTokens t) {
-    switch (look.bg) {
-      case PlaceholderBg.wedding:
-        return LinearGradient(
-          begin: Alignment(-1, -1), end: Alignment(1, 1),
-          colors: [t.accent.tertiary.withValues(alpha: 0.20), t.accent.secondary.withValues(alpha: 0.18)],
-        );
-      case PlaceholderBg.gala:
-        return LinearGradient(
-          begin: Alignment(-1, -1), end: Alignment(1, 1),
-          colors: [t.accent.secondary.withValues(alpha: 0.20), t.accent.secondary.withValues(alpha: 0.16)],
-        );
-      case PlaceholderBg.formal:
-        return LinearGradient(
-          begin: Alignment(-1, -1), end: Alignment(1, 1),
-          colors: [t.accent.primary.withValues(alpha: 0.20), t.accent.secondary.withValues(alpha: 0.16)],
-        );
-      case PlaceholderBg.garden:
-        return LinearGradient(
-          begin: Alignment(-1, -1), end: Alignment(1, 1),
-          colors: [t.accent.tertiary.withValues(alpha: 0.18), t.accent.primary.withValues(alpha: 0.14)],
-        );
-      case PlaceholderBg.brunch:
-        return LinearGradient(
-          begin: Alignment(-1, -1), end: Alignment(1, 1),
-          colors: [t.accent.secondary.withValues(alpha: 0.20), t.accent.tertiary.withValues(alpha: 0.14)],
-        );
-      case PlaceholderBg.date:
-        return LinearGradient(
-          begin: Alignment(-1, -1), end: Alignment(1, 1),
-          colors: [t.accent.secondary.withValues(alpha: 0.16), t.accent.tertiary.withValues(alpha: 0.18)],
-        );
-      case PlaceholderBg.defaultBg:
-        return LinearGradient(
-          begin: Alignment(-1, -1), end: Alignment(1, 1),
-          colors: [t.accent.primary.withValues(alpha: 0.14), t.accent.secondary.withValues(alpha: 0.12)],
-        );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.themeTokens;
-    return AspectRatio(
-      aspectRatio: featured ? 2 / 1 : 1 / 1,
-      child: look.imageUrl != null
-          ? Image.network(look.imageUrl!, fit: BoxFit.cover)
-          : Container(
-        decoration: BoxDecoration(gradient: _bgGradient(t)),
-        child: Center(
-          child: Text(look.emoji,
-              style: const TextStyle(fontSize: 20)),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Card info ────────────────────────────────────────────────────────────────
-
-class _CardInfo extends StatelessWidget {
-  final LookItem look;
-  const _CardInfo({required this.look});
-
-  _BadgeColors _badgeColors(AppThemeTokens t) {
-    switch (look.badge) {
-      case BadgeStyle.wedding:
-        return _BadgeColors(bg: t.accent.tertiary.withValues(alpha: 0.20), text: t.accent.tertiary);
-      case BadgeStyle.gala:
-        return _BadgeColors(bg: t.accent.secondary.withValues(alpha: 0.20), text: t.accent.secondary);
-      case BadgeStyle.formal:
-        return _BadgeColors(bg: t.accent.primary.withValues(alpha: 0.20), text: t.accent.primary);
-      case BadgeStyle.garden:
-        return _BadgeColors(bg: t.accent.tertiary.withValues(alpha: 0.18), text: t.accent.tertiary);
-      case BadgeStyle.brunch:
-        return _BadgeColors(bg: t.accent.secondary.withValues(alpha: 0.20), text: t.accent.secondary);
-      case BadgeStyle.date:
-        return _BadgeColors(bg: t.accent.tertiary.withValues(alpha: 0.16), text: t.accent.tertiary);
-      case BadgeStyle.defaultBadge:
-        return _BadgeColors(bg: t.cardBorder.withValues(alpha: 0.40), text: t.accent.secondary);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.themeTokens;
-    final bc = _badgeColors(t);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(7, 5, 7, 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // category badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-            decoration: BoxDecoration(
-              color: bc.bg,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              '${look.emoji} ${look.category}'.toUpperCase(),
-              style: TextStyle(
-                fontFamily: 'DM Sans',
-                fontSize: 7,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.06 * 7,
-                color: bc.text,
+              // Card info
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Badge
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: _badgeBg(look.badge),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        look.category.toUpperCase(),
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 8,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5,
+                          color: _badgeColor(look.badge),
+                        ),
+                      ),
+                    ),
+                    // Title
+                    Text(
+                      look.title,
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: _t.textPrimary,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    // Description
+                    Text(
+                      look.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 11,
+                        color: _t.mutedText,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          // title
-          Text(
-            look.title,
-            style: TextStyle(
-              fontFamily: 'DM Sans',
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: t.textPrimary,
-              height: 1.3,
-            ),
-          ),
-          const SizedBox(height: 2),
-          // description
-          Text(
-            look.description,
-            style: TextStyle(
-              fontFamily: 'DM Sans',
-              fontSize: 9,
-              color: t.mutedText,
-              height: 1.4,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BadgeColors {
-  final Color bg;
-  final Color text;
-  const _BadgeColors({required this.bg, required this.text});
-}
-
-// ─── Try-On button ────────────────────────────────────────────────────────────
-
-class _TryOnButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _TryOnButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.themeTokens;
-    final onAccent = Theme.of(context).colorScheme.onPrimary;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          height: 30,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: const Alignment(-1, -1),
-              end: const Alignment(1, 1),
-              colors: [t.accent.secondary, t.accent.primary, t.accent.secondary],
-              stops: const [0, 0.5, 1],
-            ),
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: [
-              BoxShadow(
-                color: t.accent.primary.withValues(alpha: 0.45),
-                blurRadius: 12,
-                offset: const Offset(0, 3),
-              ),
-              BoxShadow(
-                color: t.backgroundPrimary.withValues(alpha: 0.16),
-                blurRadius: 3,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.auto_awesome, color: onAccent, size: 12),
-              const SizedBox(width: 5),
-              Text(
-                'Try On',
-                style: TextStyle(
-                  fontFamily: 'DM Sans',
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
-                  color: onAccent,
-                  letterSpacing: 0.04 * 10.5,
+              // Try On button
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+                child: GestureDetector(
+                  onTap: () {},
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [_t.accent.tertiary, _t.accent.primary],
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _t.accent.tertiary.withValues(alpha: 0.40),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.auto_awesome_rounded, size: 14, color: onAccent),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Try On',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: onAccent,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -606,51 +670,44 @@ class _TryOnButton extends StatelessWidget {
   }
 }
 
-// ─── Overlay icon button (delete / share) ─────────────────────────────────────
-
-class _OverlayIconBtn extends StatefulWidget {
-  final bool visible;
-  final VoidCallback onTap;
-  final Widget child;
-  final Color hoverColor;
-  const _OverlayIconBtn({
-    required this.visible,
-    required this.onTap,
-    required this.child,
-    required this.hoverColor,
-  });
-
-  @override
-  State<_OverlayIconBtn> createState() => _OverlayIconBtnState();
-}
-
-class _OverlayIconBtnState extends State<_OverlayIconBtn> {
-  bool _pressed = false;
+// ── Empty / No-results states ────────────────────────────────────────────────
+class _EmptyState extends StatelessWidget {
+  final String title;
+  final String emoji;
+  const _EmptyState({required this.title, required this.emoji});
 
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
-    return AnimatedOpacity(
-      duration: const Duration(milliseconds: 200),
-      opacity: widget.visible ? 1 : 0,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapUp: (_) => setState(() => _pressed = false),
-        onTapCancel: () => setState(() => _pressed = false),
-        child: AnimatedScale(
-          scale: _pressed ? 0.88 : 1,
-          duration: const Duration(milliseconds: 150),
-          child: Container(
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              color: t.phoneShellInner.withValues(alpha: 0.70),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: t.cardBorder, width: 1),
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 60),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 52)),
+            const SizedBox(height: 16),
+            Text(
+              'No $title yet',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: t.textPrimary,
+              ),
             ),
-            child: widget.child,
-          ),
+            const SizedBox(height: 8),
+            Text(
+              'Save your favorite looks from the AI chat and they\'ll automatically appear here.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 14,
+                color: t.mutedText,
+                height: 1.5,
+              ),
+            ),
+          ],
         ),
       ),
     );

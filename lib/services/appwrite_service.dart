@@ -1,115 +1,105 @@
 import 'dart:typed_data';
-import 'package:appwrite/appwrite.dart';
-import 'package:appwrite/enums.dart'; // Added for OAuthProvider
-import 'package:appwrite/models.dart';
 import 'package:flutter/material.dart';
-import '../config/env.dart';
+import 'package:appwrite/appwrite.dart';
+import 'package:appwrite/models.dart';
+import 'package:appwrite/enums.dart'; // Needed for OAuthProvider enum
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class AppwriteService extends ChangeNotifier {
-  Client client = Client();
+  late Client client;
   late Account account;
   late Databases databases;
-  late Avatars avatars; // ⬅️ Added for getUserAvatar
+  late Avatars avatars;
+
+  // ── Environment Variables ──
+  String get _endpoint => dotenv.env['EXPO_PUBLIC_APPWRITE_ENDPOINT'] ?? 'https://cloud.appwrite.io/v1';
+  String get _projectId => dotenv.env['EXPO_PUBLIC_APPWRITE_PROJECT_ID'] ?? '';
+  String get _databaseId => dotenv.env['EXPO_PUBLIC_APPWRITE_DATABASE_ID'] ?? '';
+  String get _plansCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_PLANS'] ?? 'plans';
+  String get _savedBoardsCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_SAVED_BOARDS'] ?? 'saved_boards';
 
   AppwriteService() {
-    client
-        .setEndpoint(Env.appwriteEndpoint)
-        .setProject(Env.appwriteProjectId);
+    client = Client()
+      ..setEndpoint(_endpoint)
+      ..setProject(_projectId);
+
     account = Account(client);
     databases = Databases(client);
-    avatars = Avatars(client); // ⬅️ Initialized
+    avatars = Avatars(client);
   }
 
   // =========================================================================
   // AUTHENTICATION METHODS
   // =========================================================================
 
+  /// Gets the currently logged-in user
   Future<User?> getCurrentUser() async {
     try {
       return await account.get();
     } catch (e) {
+      debugPrint("No active session or error: $e");
       return null;
     }
   }
+  
+  /// Logs the user in with Email/Password
+  Future<Session?> loginEmailPassword(String email, String password) async {
+     try {
+       final session = await account.createEmailPasswordSession(email: email, password: password);
+       notifyListeners();
+       return session;
+     } catch(e) {
+       debugPrint("Login error: $e");
+       rethrow;
+     }
+  }
 
-  /// ⬅️ ADDED: Google Login Method for signin.dart
+  /// Logs the user in with Google OAuth
   Future<bool> loginWithGoogle() async {
     try {
-      // Initiates the Google OAuth2 flow
-      await account.createOAuth2Session(
-        provider: OAuthProvider.google, 
-      );
-      return true;
-    } on AppwriteException catch (e) {
+      // Use the enum OAuthProvider.google instead of the string 'google'
+      await account.createOAuth2Session(provider: OAuthProvider.google);
+      notifyListeners();
+      return true; // Returns true on success for signin.dart
+    } catch (e) {
       debugPrint("Google login error: $e");
-      return false;
+      return false; // Returns false on failure
     }
   }
 
-  // =========================================================================
-  // AVATAR METHODS
-  // =========================================================================
+  /// Registers a new user
+  Future<User> registerEmailPassword(String email, String password, String name) async {
+     try {
+       final user = await account.create(
+         userId: ID.unique(), 
+         email: email, 
+         password: password, 
+         name: name
+       );
+       return user;
+     } catch(e) {
+       debugPrint("Register error: $e");
+       rethrow;
+     }
+  }
 
-  /// ⬅️ ADDED: Generates a fallback Avatar with initials for home.dart
+  /// Logs the user out
+  Future<void> logout() async {
+     try {
+       await account.deleteSession(sessionId: 'current');
+       notifyListeners();
+     } catch(e) {
+       debugPrint("Logout error: $e");
+     }
+  }
+
+  /// Gets the user's avatar (initials based on their name)
   Future<Uint8List?> getUserAvatar(String name) async {
     try {
-      // Returns a Uint8List containing the image bytes for initials
       return await avatars.getInitials(name: name);
     } catch (e) {
-      debugPrint("Avatar generation error: $e");
+      debugPrint("Avatar error: $e");
       return null;
-    }
-  }
-
-  // =========================================================================
-  // USER PROFILE DB METHODS
-  // =========================================================================
-
-  Future<Map<String, dynamic>?> getUserProfile() async {
-    try {
-      final user = await getCurrentUser();
-      if (user == null) return null;
-
-      final document = await databases.getDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.usersCollection,
-        documentId: user.$id,
-      );
-      return document.data;
-    } on AppwriteException catch (e) {
-      if (e.code == 404) return null; 
-      debugPrint("Error fetching profile from DB: $e");
-      rethrow;
-    }
-  }
-
-  Future<void> saveUserProfile(Map<String, dynamic> profileData) async {
-    try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-      
-      try {
-        await databases.updateDocument(
-          databaseId: Env.appwriteDatabaseId,
-          collectionId: Env.usersCollection,
-          documentId: user.$id,
-          data: profileData,
-        );
-      } on AppwriteException catch (e) {
-        if (e.code == 404) {
-          await databases.createDocument(
-            databaseId: Env.appwriteDatabaseId,
-            collectionId: Env.usersCollection,
-            documentId: user.$id,
-            data: profileData,
-          );
-        } else {
-          rethrow;
-        }
-      }
-    } catch (e) {
-      debugPrint("Error saving profile to DB: $e");
-      rethrow;
     }
   }
 
@@ -117,68 +107,134 @@ class AppwriteService extends ChangeNotifier {
   // CALENDAR PLANS DB METHODS
   // =========================================================================
 
+  /// Creates a new outfit plan for the calendar
+  Future<Document> createPlan(Map<String, dynamic> data) async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      // Automatically attach the logged-in user's ID for security
+      data['userId'] = user.$id; 
+
+      return await databases.createDocument(
+        databaseId: _databaseId,
+        collectionId: _plansCollection,
+        documentId: ID.unique(),
+        data: data,
+      );
+    } catch (e) {
+      debugPrint("Error creating plan: $e");
+      rethrow;
+    }
+  }
+
+  /// Gets all plans for the currently logged-in user
   Future<List<Document>> getUserPlans() async {
     try {
       final user = await getCurrentUser();
       if (user == null) throw Exception("User not authenticated");
 
       final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.plansCollection,
+        databaseId: _databaseId,
+        collectionId: _plansCollection,
         queries: [
           Query.equal('userId', user.$id),
         ],
       );
       return result.documents;
     } catch (e) {
-      debugPrint("Error fetching plans from DB: $e");
+      debugPrint("Error fetching plans: $e");
+      return [];
+    }
+  }
+
+  /// Deletes a specific plan from the calendar
+  Future<void> deletePlan(String documentId) async {
+    try {
+      await databases.deleteDocument(
+        databaseId: _databaseId,
+        collectionId: _plansCollection,
+        documentId: documentId,
+      );
+    } catch (e) {
+      debugPrint("Error deleting plan: $e");
+      rethrow;
+    }
+  }
+
+  /// Updates the reminder status (bell icon) for a plan
+  Future<void> updatePlanReminder(String documentId, bool reminder) async {
+    try {
+      await databases.updateDocument(
+        databaseId: _databaseId,
+        collectionId: _plansCollection,
+        documentId: documentId,
+        data: {'reminder': reminder},
+      );
+    } catch (e) {
+      debugPrint("Error updating plan reminder: $e");
+      rethrow;
+    }
+  }
+
+  // =========================================================================
+  // SAVED BOARDS DB METHODS
+  // =========================================================================
+
+  /// Fetches saved style boards filtered by occasion (e.g., 'Party', 'Office')
+  Future<List<Document>> getSavedBoardsByOccasion(String occasion) async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      final result = await databases.listDocuments(
+        databaseId: _databaseId,
+        collectionId: _savedBoardsCollection,
+        queries: [
+          Query.equal('userId', user.$id),
+          Query.equal('occasion', occasion),
+          Query.orderDesc('\$createdAt'), // Shows newest boards first
+        ],
+      );
+      return result.documents;
+    } catch (e) {
+      debugPrint("Error fetching $occasion boards: $e");
       return []; 
     }
   }
 
-  Future<Document> createPlan(Map<String, dynamic> planData) async {
+  /// Fetches ALL saved style boards (Used for the "Everything Else" screen)
+  Future<List<Document>> getAllSavedBoards() async {
     try {
       final user = await getCurrentUser();
       if (user == null) throw Exception("User not authenticated");
-      
-      planData['userId'] = user.$id;
 
-      return await databases.createDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.plansCollection,
-        documentId: ID.unique(),
-        data: planData,
+      final result = await databases.listDocuments(
+        databaseId: _databaseId,
+        collectionId: _savedBoardsCollection,
+        queries: [
+          Query.equal('userId', user.$id),
+          Query.orderDesc('\$createdAt'), // Shows newest boards first
+        ],
       );
+      return result.documents;
     } catch (e) {
-      debugPrint("Error creating plan in DB: $e");
-      rethrow;
+      debugPrint("Error fetching all boards: $e");
+      return []; 
     }
   }
 
-  Future<void> deletePlan(String documentId) async {
+  /// Deletes a specific saved board
+  Future<void> deleteSavedBoard(String documentId) async {
     try {
       await databases.deleteDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.plansCollection,
+        databaseId: _databaseId,
+        collectionId: _savedBoardsCollection,
         documentId: documentId,
       );
     } catch (e) {
-      debugPrint("Error deleting plan from DB: $e");
-      rethrow;
-    }
-  }
-
-  Future<void> updatePlanReminder(String documentId, bool reminderState) async {
-    try {
-      await databases.updateDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.plansCollection,
-        documentId: documentId,
-        data: {'reminder': reminderState},
-      );
-    } catch (e) {
-      debugPrint("Error updating plan reminder in DB: $e");
-      rethrow;
+      debugPrint("Error deleting board: $e");
+      throw Exception("Failed to delete board");
     }
   }
 }

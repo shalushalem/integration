@@ -16,9 +16,21 @@ const List<String> kMonths = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
+// ── Dynamic Occasion Images ──
+String getOccasionImage(String occasion) {
+  final occ = occasion.toLowerCase();
+  if (occ.contains('gym') || occ.contains('workout')) return 'https://images.unsplash.com/photo-1518310383802-640c2de311b2?w=400&q=80';
+  if (occ.contains('office') || occ.contains('study')) return 'https://images.unsplash.com/photo-1487222477894-8943e31ef7b2?w=400&q=80';
+  if (occ.contains('party')) return 'https://images.unsplash.com/photo-1566336528768-eeec445a49b5?w=400&q=80';
+  if (occ.contains('shop')) return 'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=400&q=80';
+  if (occ.contains('date')) return 'https://images.unsplash.com/photo-1495385794356-15371f348c31?w=400&q=80';
+  if (occ.contains('travel')) return 'https://images.unsplash.com/photo-1506012787146-f92b2d7d6d96?w=400&q=80';
+  return 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=400&q=80'; // default chic placeholder
+}
+
 // Plan data model
 class Plan {
-  final String? id; // ⬅️ ADDED: To track the Appwrite Document ID
+  final String? id; 
   final String occasion;
   final String emoji;
   final String outfitDescription;
@@ -81,13 +93,11 @@ class Screen4 extends StatefulWidget {
 }
 
 class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
-  // Calendar state
   final DateTime _today = DateTime.now();
   late int _viewYear;
   late int _viewMonth;
   late DateTime _selectedDay;
 
-  // ⬅️ START EMPTY: We will fetch from Appwrite
   final Map<DateTime, List<Plan>> _plansData = {};
 
   DateTime _normalizeDate(DateTime d) => DateTime(d.year, d.month, d.day);
@@ -96,7 +106,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   List<Plan> get _todayPlans => _plansForDay(_selectedDay);
 
   // Modal state
-  bool _modalOpen = false;
   String _selectedEvent = '';
   String _selectedEventEmoji = '📅';
   String _selectedAmPm = 'AM';
@@ -104,12 +113,17 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   final TextEditingController _minCtrl = TextEditingController();
   final FocusNode _hourFocus = FocusNode();
   final FocusNode _minFocus = FocusNode();
-  int _pickedOutfitIdx = -1;
 
-  // Chat state
+  // Chat & Plan Creation state
   bool _showChat = false;
+  bool _isCreatingPlan = false;
+  bool _isSaving = false; 
+  DateTime? _pendingPlanDate;
+  String _pendingOutfit = '';
   String _activeOccasion = 'Gym';
   String _activeEmoji = '💪';
+  List<Map<String, String>> _currentChatChips = kSuggestionChips;
+  
   final TextEditingController _chatCtrl = TextEditingController();
   final List<Map<String, String>> _messages = [];
   bool _isTyping = false;
@@ -119,9 +133,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   final List<AnimationController> _bubbleControllers = [];
   late AnimationController _pulseController;
   late Animation<double> _pulseAnim;
-  late AnimationController _modalAnimController;
-  late Animation<Offset> _modalSlideAnim;
-  late Animation<double> _modalFadeAnim;
   final List<AnimationController> _cardControllers = [];
   final List<Animation<double>> _cardFadeAnims = [];
   final List<Animation<Offset>> _cardSlideAnims = [];
@@ -144,21 +155,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       CurvedAnimation(parent: _pulseController, curve: Curves.easeOut),
     );
 
-    _modalAnimController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 420),
-    );
-    _modalSlideAnim = Tween<Offset>(
-      begin: const Offset(0, 1),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _modalAnimController,
-      curve: Curves.easeOutCubic,
-    ));
-    _modalFadeAnim = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _modalAnimController, curve: Curves.easeOut),
-    );
-
     _typingController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -178,11 +174,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       }
     });
 
-    // ⬅️ FETCH FROM DB ON LOAD
     _loadPlansFromAppwrite();
   }
 
-  // ── APPWRITE FETCH LOGIC ───────────────────────────────────────────
   Future<void> _loadPlansFromAppwrite() async {
     try {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
@@ -192,6 +186,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       
       for (var doc in docs) {
         final data = doc.data;
+        // Parse UTC from Appwrite to Local time
         final dt = DateTime.parse(data['dateTime']).toLocal(); 
         final dateKey = _normalizeDate(dt);
         
@@ -199,7 +194,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           id: doc.$id,
           occasion: data['occasion'] ?? 'Event',
           emoji: data['emoji'] ?? '📅',
-          outfitDescription: data['outfitDescription'] ?? '',
+          outfitDescription: data['outfitDescription'] ?? 'Custom Outfit',
           dateTime: dt,
           reminder: data['reminder'] ?? true,
         );
@@ -215,7 +210,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         _initCardAnimations();
       }
     } catch (e) {
-      _showToast('Failed to load plans');
+      debugPrint("Error loading plans: $e");
     }
   }
 
@@ -259,7 +254,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _hourFocus.dispose();
     _minFocus.dispose();
     _pulseController.dispose();
-    _modalAnimController.dispose();
     _typingController.dispose();
     for (final c in _bubbleControllers) {
       c.dispose();
@@ -324,11 +318,13 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     return '$hour:$mm $ampm';
   }
 
-  LinearGradient _eventBg(String type, AppThemeTokens t) {
+  LinearGradient _eventBg(String type, bool active, AppThemeTokens t) {
     final c = _eventColor(type, t);
     return LinearGradient(
       begin: Alignment.topLeft, end: Alignment.bottomRight,
-      colors: [c.withValues(alpha: 0.22), c.withValues(alpha: 0.12)],
+      colors: active
+          ? [c.withValues(alpha: 0.35), c.withValues(alpha: 0.18)]
+          : [c.withValues(alpha: 0.22), c.withValues(alpha: 0.11)],
     );
   }
 
@@ -366,14 +362,12 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     overlay.insert(entry);
   }
 
-  // ── APPWRITE DELETE LOGIC ───────────────────────────────────────────
   Future<void> _deletePlan(int index) async {
     final list = _plansData[_selectedDayKey];
     if (list == null || index >= list.length) return;
     
     final planToDelete = list[index];
     
-    // Optimistic UI update
     setState(() {
       list.removeAt(index);
       if (list.isEmpty) _plansData.remove(_selectedDayKey);
@@ -391,7 +385,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     }
   }
 
-  // ── APPWRITE REMINDER LOGIC ───────────────────────────────────────────
   void _toggleReminder(int index) {
     final plans = _plansData[_selectedDayKey];
     if (plans == null || index >= plans.length) return;
@@ -409,77 +402,79 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _showToast(plan.reminder ? '🔔 Reminder turned on!' : '🔕 Reminder turned off');
   }
 
-  // ── APPWRITE SAVE LOGIC ───────────────────────────────────────────
-  Future<void> _savePlan() async {
-    final hRaw = int.tryParse(_hourCtrl.text);
-    final mRaw = int.tryParse(_minCtrl.text);
-    if (_selectedEvent.isEmpty) {
-      _showToast('⚠ Please choose an occasion first.');
-      return;
-    }
-    if (hRaw == null || hRaw < 1 || hRaw > 12) {
-      _showToast('⚠ Enter a valid hour (1–12).');
-      return;
-    }
-    if (mRaw == null || mRaw < 0 || mRaw > 59) {
-      _showToast('⚠ Enter a valid minute (0–59).');
-      return;
-    }
+  Future<void> _savePlanFromChat() async {
+    if (_pendingPlanDate == null || _isSaving) return; 
 
-    final selectedOutfit = (_pickedOutfitIdx >= 0 &&
-        kOutfits.containsKey(_selectedEvent) &&
-        _pickedOutfitIdx < kOutfits[_selectedEvent]!.length)
-        ? kOutfits[_selectedEvent]![_pickedOutfitIdx]['summary'] ?? ''
-        : '(no outfit selected)';
-
-    final hour = (_selectedAmPm == 'PM') ? (hRaw % 12) + 12 : (hRaw % 12);
-    final planDateTime = DateTime(
-      _selectedDay.year, _selectedDay.month, _selectedDay.day, hour, mRaw,
-    );
-
+    setState(() => _isSaving = true);
     final appwrite = Provider.of<AppwriteService>(context, listen: false);
 
     try {
+      final desc = _pendingOutfit.isEmpty ? 'Custom Outfit' : _pendingOutfit;
+
       final doc = await appwrite.createPlan({
-        'occasion': _selectedEvent,
-        'emoji': _selectedEventEmoji,
-        'outfitDescription': selectedOutfit,
-        'dateTime': planDateTime.toUtc().toIso8601String(), 
+        'occasion': _activeOccasion,
+        'emoji': _activeEmoji,
+        'outfitDescription': desc, 
+        'dateTime': _pendingPlanDate!.toUtc().toIso8601String(), 
         'reminder': true,
       });
 
       final newPlan = Plan(
         id: doc.$id,
-        emoji: _selectedEventEmoji,
-        occasion: _selectedEvent,
-        outfitDescription: selectedOutfit,
-        dateTime: planDateTime,
+        emoji: _activeEmoji,
+        occasion: _activeOccasion,
+        outfitDescription: desc,
+        dateTime: _pendingPlanDate!,
         reminder: true,
       );
 
       setState(() {
         _plansData[_selectedDayKey] = [...(_plansData[_selectedDayKey] ?? []), newPlan];
         _plansData[_selectedDayKey]!.sort((a, b) => a.dateTime.compareTo(b.dateTime));
-        _modalOpen = false;
+        _showChat = false;
+        _isCreatingPlan = false;
       });
+      
       _initCardAnimations();
       _showToast('📅 Plan saved!');
     } catch (e) {
       _showToast('⚠ Failed to save plan. Check connection.');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
   void _openModal() {
+    final now = DateTime.now();
+    int h = now.hour % 12;
+    if (h == 0) h = 12;
+
     setState(() {
-      _modalOpen = true;
       _selectedEvent = '';
       _selectedEventEmoji = '📅';
-      _pickedOutfitIdx = -1;
-      _selectedAmPm = 'AM';
-      _hourCtrl.clear();
-      _minCtrl.clear();
+      _selectedAmPm = now.hour >= 12 ? 'PM' : 'AM';
+      _hourCtrl.text = h.toString();
+      _minCtrl.text = '00';
     });
-    _modalAnimController.forward(from: 0);
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.65),
+      useRootNavigator: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, modalSetState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: _buildModalSheet(sheetContext, modalSetState, context.themeTokens),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<String> _getAIReply(String userText) async {
@@ -533,6 +528,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
     setState(() {
       _messages.add({'role': 'user', 'text': text});
+      if (_pendingOutfit.isEmpty) {
+        _pendingOutfit = text; 
+      }
       _chatCtrl.clear();
       _chipsVisible = false;
       _isTyping = true;
@@ -586,7 +584,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             ),
           ),
           _showChat ? _buildChatPage(t) : _buildMainContent(t),
-          if (_modalOpen) _buildModal(t),
         ],
       ),
     );
@@ -806,7 +803,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               padding: const EdgeInsets.symmetric(vertical: 20),
               child: Center(
                 child: Text(
-                  'Nothing planned ??\nTap "Add a Plan" below',
+                  'Nothing planned 🤔\nTap "Add a Plan" below',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13, color: t.mutedText, height: 1.6),
                 ),
@@ -854,8 +851,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         setState(() {
           _activeOccasion = plan.occasion;
           _activeEmoji = plan.emoji;
+          _isCreatingPlan = false; // Just viewing
           _showChat = true;
           _messages.clear();
+          _currentChatChips = kSuggestionChips;
           _chipsVisible = true;
         });
       },
@@ -864,8 +863,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           setState(() {
             _activeOccasion = plan.occasion;
             _activeEmoji = plan.emoji;
+            _isCreatingPlan = false;
             _showChat = true;
             _messages.clear();
+            _currentChatChips = kSuggestionChips;
             _chipsVisible = true;
           });
         },
@@ -873,61 +874,89 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         translateY: -4.0,
         hoverScale: 1.02,
         hoverTranslateY: -4.0,
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: _planCardBg(colorType, t),
-            borderRadius: BorderRadius.circular(18),
-            border: Border(
-              top: BorderSide(color: _planBorderTop(colorType, t), width: 1),
-              left: BorderSide(color: _planBorderTop(colorType, t).withValues(alpha: 0.45), width: 1),
-              right: BorderSide(color: t.cardBorder.withValues(alpha: 0.22), width: 1),
-              bottom: BorderSide(color: t.cardBorder.withValues(alpha: 0.22), width: 1),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: _planCardBg(colorType, t),
+              border: Border(
+                top: BorderSide(color: _planBorderTop(colorType, t), width: 1),
+                left: BorderSide(color: _planBorderTop(colorType, t).withValues(alpha: 0.45), width: 1),
+                right: BorderSide(color: t.cardBorder.withValues(alpha: 0.22), width: 1),
+                bottom: BorderSide(color: t.cardBorder.withValues(alpha: 0.22), width: 1),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.35),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.all(14),
-          child: Stack(
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(plan.emoji, style: const TextStyle(fontSize: 20)),
-                  const SizedBox(height: 6),
-                  Text(plan.occasion, style: TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700, color: t.textPrimary,
-                  )),
-                  const SizedBox(height: 4),
-                  Text(_formatPlanTime(plan), style: TextStyle(
-                    fontSize: 11.5, color: t.mutedText, height: 1.4,
-                  )),
-                  const SizedBox(height: 3),
-                  Text(plan.outfitDescription, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(
-                    fontSize: 10.5, color: t.mutedText.withValues(alpha: 0.6), height: 1.4,
-                  )),
-                ],
-              ),
-              Positioned(
-                top: 0, right: 0,
-                child: _RotatingDeleteButton(
-                  t: t,
-                  onTap: () => _deletePlan(index),
+            child: Stack(
+              children: [
+                // Display Image! Fades in beautifully on the right side
+                Positioned(
+                  right: 0, top: 0, bottom: 0,
+                  width: 80,
+                  child: ShaderMask(
+                    shaderCallback: (rect) {
+                      return const LinearGradient(
+                        begin: Alignment.centerLeft, end: Alignment.centerRight,
+                        colors: [Colors.transparent, Colors.black],
+                        stops: [0.0, 0.6],
+                      ).createShader(rect);
+                    },
+                    blendMode: BlendMode.dstIn,
+                    child: Image.network(
+                      getOccasionImage(plan.occasion),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
+                  ),
                 ),
-              ),
-              Positioned(
-                bottom: 0, right: 0,
-                child: _BellButton(
-                  t: t,
-                  isOn: plan.reminder,
-                  onTap: () => _toggleReminder(index),
+                // Text Content
+                Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(plan.emoji, style: const TextStyle(fontSize: 20)),
+                      const SizedBox(height: 6),
+                      Text(plan.occasion, style: TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w700, color: t.textPrimary,
+                      )),
+                      const SizedBox(height: 2),
+                      Text(_formatPlanTime(plan), style: TextStyle(
+                        fontSize: 11, color: t.mutedText, height: 1.4,
+                      )),
+                      const SizedBox(height: 4),
+                      // Prevents overflow crashes from long outfit descriptions
+                      Flexible(
+                        child: Text(plan.outfitDescription, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(
+                          fontSize: 10.5, color: t.textPrimary.withValues(alpha: 0.8), height: 1.3,
+                        )),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+                Positioned(
+                  top: 0, right: 0,
+                  child: _RotatingDeleteButton(
+                    t: t,
+                    onTap: () => _deletePlan(index),
+                  ),
+                ),
+                Positioned(
+                  bottom: 0, right: 0,
+                  child: _BellButton(
+                    t: t,
+                    isOn: plan.reminder,
+                    onTap: () => _toggleReminder(index),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1000,31 +1029,51 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             ),
           ),
           const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$_activeOccasion — Style Chat',
-                style: TextStyle(
-                  fontSize: 17, fontWeight: FontWeight.w700, color: t.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Row(
-                children: [
-                  Container(
-                    width: 7, height: 7,
-                    decoration: BoxDecoration(
-                      color: t.accent.tertiary, shape: BoxShape.circle,
-                    ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$_activeOccasion — Style Chat',
+                  style: TextStyle(
+                    fontSize: 17, fontWeight: FontWeight.w700, color: t.textPrimary,
                   ),
-                  const SizedBox(width: 6),
-                  Text('Ask anything about your outfit.',
-                      style: TextStyle(fontSize: 12, color: t.mutedText)),
-                ],
-              ),
-            ],
+                ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    Container(
+                      width: 7, height: 7,
+                      decoration: BoxDecoration(
+                        color: t.accent.tertiary, shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text('Ask anything about your outfit.',
+                        style: TextStyle(fontSize: 12, color: t.mutedText)),
+                  ],
+                ),
+              ],
+            ),
           ),
+          if (_isCreatingPlan)
+            _ScaleButton(
+               onTap: _isSaving ? () {} : _savePlanFromChat, 
+               scaleTo: _isSaving ? 1.0 : 1.05,
+               child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                     gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
+                     borderRadius: BorderRadius.circular(12),
+                     boxShadow: [
+                       BoxShadow(color: t.accent.primary.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 3)),
+                     ],
+                  ),
+                  child: _isSaving 
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text('Save Plan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+               ),
+            )
         ],
       ),
     );
@@ -1035,8 +1084,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
     if (_messages.isEmpty) {
       allItems.add(_buildAIBubble(
-        'Hi! I\'m your style assistant for $_activeOccasion $_activeEmoji '
-            'Ask me what to wear and I\'ll put together a complete outfit for you! 👗',
+        'Hi! Let\'s pick an outfit for your $_activeOccasion $_activeEmoji. What vibe are you feeling today?',
         t,
       ));
     } else {
@@ -1235,12 +1283,13 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               height: 38,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
-                itemCount: kSuggestionChips.length,
+                itemCount: _currentChatChips.length,
                 separatorBuilder: (_, __) => const SizedBox(width: 8),
                 itemBuilder: (context, i) {
                   return _ScaleButton(
                     onTap: () {
-                      _chatCtrl.text = kSuggestionChips[i]['label']!;
+                      _chatCtrl.text = _currentChatChips[i]['label']!;
+                      _pendingOutfit = _currentChatChips[i]['label']!;
                       _sendMessage();
                     },
                     scaleTo: 1.03,
@@ -1254,7 +1303,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                         boxShadow: [BoxShadow(color: t.accent.primary.withValues(alpha: 0.1), blurRadius: 8)],
                       ),
                       child: Text(
-                        kSuggestionChips[i]['label']!,
+                        _currentChatChips[i]['label']!,
                         style: TextStyle(
                           fontSize: 12, fontWeight: FontWeight.w600, color: t.accent.primary,
                         ),
@@ -1332,320 +1381,165 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildModal(AppThemeTokens t) {
-    return GestureDetector(
-      onTap: () => setState(() => _modalOpen = false),
-      child: FadeTransition(
-        opacity: _modalFadeAnim,
-        child: Container(
-          color: Colors.black.withValues(alpha: 0.65),
-          child: Align(
-            alignment: Alignment.bottomCenter,
-            child: GestureDetector(
-              onTap: () {},
-              child: SlideTransition(
-                position: _modalSlideAnim,
-                child: Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.fromLTRB(14, 0, 14, 18),
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                      colors: [t.backgroundSecondary, t.phoneShell],
-                    ),
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(32), topRight: Radius.circular(32),
-                      bottomLeft: Radius.circular(22), bottomRight: Radius.circular(22),
-                    ),
-                    border: Border(
-                      top: BorderSide(color: Colors.white.withValues(alpha: 0.15), width: 1.5),
-                      left: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
-                      right: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
-                    ),
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 36, offset: const Offset(0, -8)),
-                    ],
-                  ),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Center(
-                          child: Container(
-                            width: 42, height: 4,
-                            margin: const EdgeInsets.only(bottom: 18),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.18),
-                              borderRadius: BorderRadius.circular(99),
-                            ),
-                          ),
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('New Plan', style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.w600, color: t.textPrimary,
-                            )),
-                            GestureDetector(
-                              onTap: () => setState(() => _modalOpen = false),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-                                decoration: BoxDecoration(
-                                  color: t.panel,
-                                  borderRadius: BorderRadius.circular(11),
-                                  border: Border.all(color: t.cardBorder),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.close, size: 13, color: t.mutedText),
-                                    const SizedBox(width: 5),
-                                    Text('Close', style: TextStyle(
-                                      fontSize: 13, fontWeight: FontWeight.w600, color: t.mutedText,
-                                    )),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-                        Text('CHOOSE OCCASION', style: TextStyle(
-                          fontSize: 10.5, fontWeight: FontWeight.w700,
-                          letterSpacing: 0.16 * 10.5, color: t.mutedText,
-                        )),
-                        const SizedBox(height: 10),
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 4, mainAxisSpacing: 8,
-                            crossAxisSpacing: 8, childAspectRatio: 0.9,
-                          ),
-                          itemCount: kEventTypes.length,
-                          itemBuilder: (context, i) {
-                            final ev = kEventTypes[i];
-                            final isActive = _selectedEvent == ev['label'];
-                            return _ScaleButton(
-                              onTap: () {
-                                setState(() {
-                                  _selectedEvent = ev['label']!;
-                                  _selectedEventEmoji = ev['emoji']!;
-                                });
-                              },
-                              scaleTo: 1.06,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 11),
-                                decoration: BoxDecoration(
-                                  gradient: _eventBg(ev['type']!, t),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: isActive
-                                        ? _eventColor(ev['type']!, t).withValues(alpha: 0.55)
-                                        : t.cardBorder,
-                                    width: isActive ? 1.5 : 1,
-                                  ),
-                                ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(ev['emoji']!, style: const TextStyle(fontSize: 18)),
-                                    const SizedBox(height: 5),
-                                    Text(ev['label']!, style: TextStyle(
-                                      fontSize: 11, fontWeight: FontWeight.w700,
-                                      color: _eventColor(ev['type']!, t),
-                                    )),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _selectedEvent.isNotEmpty
-                              ? 'IDEAS FOR ${_selectedEvent.toUpperCase()}'
-                              : 'OUTFIT SUGGESTIONS',
-                          style: TextStyle(
-                            fontSize: 10.5, fontWeight: FontWeight.w700,
-                            letterSpacing: 0.16 * 10.5, color: t.mutedText,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        _buildOutfitCarousel(t),
-                        const SizedBox(height: 16),
-                        Text('SET TIME', style: TextStyle(
-                          fontSize: 10.5, fontWeight: FontWeight.w700,
-                          letterSpacing: 0.16 * 10.5, color: t.mutedText,
-                        )),
-                        const SizedBox(height: 10),
-                        _buildTimeRow(t, setState),
-                        const SizedBox(height: 16),
-                        _ScaleButton(
-                          onTap: _savePlan,
-                          scaleTo: 1.015,
-                          pressScale: 0.98,
-                          translateY: -2.0,
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 15),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
-                              borderRadius: BorderRadius.circular(18),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: t.accent.primary.withValues(alpha: 0.35),
-                                  blurRadius: 22, offset: const Offset(0, 6),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: const [
-                                Icon(Icons.calendar_today, size: 16, color: Colors.white),
-                                SizedBox(width: 8),
-                                Text('Save to Calendar', style: TextStyle(
-                                  fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white,
-                                )),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOutfitCarousel(AppThemeTokens t) {
-    final outfits = kOutfits[_selectedEvent];
-    if (outfits == null) {
-      return Container(
+  Widget _buildModalSheet(BuildContext sheetContext, StateSetter modalSetState, AppThemeTokens t) {
+    return SafeArea(
+      top: false,
+      child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
         decoration: BoxDecoration(
-          color: t.panel,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: t.accent.secondary.withValues(alpha: 0.35), width: 1.5),
-        ),
-        child: Center(
-          child: Text(
-            'Select an occasion above to see outfit ideas ?',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: t.mutedText.withValues(alpha: 0.6)),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter, end: Alignment.bottomCenter,
+            colors: [t.backgroundSecondary, t.phoneShell],
           ),
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(32), topRight: Radius.circular(32),
+          ),
+          border: Border(
+            top: BorderSide(color: Colors.white.withValues(alpha: 0.15), width: 1.5),
+          ),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 36, offset: const Offset(0, -8)),
+          ],
         ),
-      );
-    }
-
-    return SizedBox(
-      height: 130,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: outfits.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (context, i) {
-          final outfit = outfits[i];
-          final isPicked = _pickedOutfitIdx == i;
-          return _ScaleButton(
-            onTap: () => setState(() => _pickedOutfitIdx = i),
-            scaleTo: 1.02,
-            translateY: -3.0,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              width: 165,
-              padding: const EdgeInsets.all(13),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: const Alignment(-0.7, -0.7),
-                  end: const Alignment(0.7, 0.7),
-                  colors: isPicked
-                      ? [t.accent.secondary.withValues(alpha: 0.28), t.accent.primary.withValues(alpha: 0.18)]
-                      : [t.accent.primary.withValues(alpha: 0.15), t.accent.secondary.withValues(alpha: 0.10)],
-                ),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isPicked
-                      ? t.accent.secondary.withValues(alpha: 0.55)
-                      : t.cardBorder,
-                  width: isPicked ? 1.5 : 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: isPicked
-                        ? t.accent.secondary.withValues(alpha: 0.45)
-                        : Colors.black.withValues(alpha: 0.25),
-                    blurRadius: isPicked ? 22 : 10,
-                    offset: const Offset(0, 6),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min, 
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 42, height: 4,
+                  margin: const EdgeInsets.only(bottom: 18),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(99),
                   ),
-                ],
+                ),
               ),
-              child: Stack(
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        outfit['vibe'] ?? '',
-                        style: TextStyle(
-                          fontSize: 9, fontWeight: FontWeight.w800,
-                          letterSpacing: 1.2, color: t.accent.primary,
-                        ),
+                  Text('New Plan', style: TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w600, color: t.textPrimary,
+                  )),
+                  GestureDetector(
+                    onTap: () => Navigator.of(sheetContext).pop(), 
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: t.panel,
+                        borderRadius: BorderRadius.circular(11),
+                        border: Border.all(color: t.cardBorder),
                       ),
-                      const SizedBox(height: 5),
-                      Text(
-                        outfit['desc'] ?? '',
-                        style: TextStyle(
-                          fontSize: 12.5, fontWeight: FontWeight.w700,
-                          color: t.textPrimary, height: 1.5,
-                        ),
-                      ),
-                      const SizedBox(height: 7),
-                      Text(
-                        '💡 ${outfit['tip'] ?? ''}',
-                        style: TextStyle(fontSize: 11, color: t.mutedText, height: 1.5),
-                      ),
-                    ],
-                  ),
-                  Positioned(
-                    top: 0, right: 0,
-                    child: AnimatedScale(
-                      scale: isPicked ? 1.0 : 0.65,
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      child: AnimatedOpacity(
-                        opacity: isPicked ? 1.0 : 0.0,
-                        duration: const Duration(milliseconds: 220),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
-                            borderRadius: BorderRadius.circular(99),
-                          ),
-                          child: const Text('✓ Picked', style: TextStyle(
-                            fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white,
+                      child: Row(
+                        children: [
+                          Icon(Icons.close, size: 13, color: t.mutedText),
+                          const SizedBox(width: 5),
+                          Text('Close', style: TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600, color: t.mutedText,
                           )),
-                        ),
+                        ],
                       ),
                     ),
                   ),
                 ],
               ),
-            ),
-          );
-        },
+              const SizedBox(height: 24),
+              Text('1. SET TIME', style: TextStyle(
+                fontSize: 10.5, fontWeight: FontWeight.w700,
+                letterSpacing: 0.16 * 10.5, color: t.mutedText,
+              )),
+              const SizedBox(height: 10),
+              _buildTimeRow(t, modalSetState),
+              const SizedBox(height: 24),
+              Text('2. CHOOSE OCCASION', style: TextStyle(
+                fontSize: 10.5, fontWeight: FontWeight.w700,
+                letterSpacing: 0.16 * 10.5, color: t.mutedText,
+              )),
+              const SizedBox(height: 10),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 4, mainAxisSpacing: 8,
+                  crossAxisSpacing: 8, childAspectRatio: 0.9,
+                ),
+                itemCount: kEventTypes.length,
+                itemBuilder: (context, i) {
+                  final ev = kEventTypes[i];
+                  final isActive = _selectedEvent == ev['label'];
+                  return _ScaleButton(
+                    onTap: () {
+                      final hRaw = int.tryParse(_hourCtrl.text);
+                      final mRaw = int.tryParse(_minCtrl.text);
+                      if (hRaw == null || mRaw == null) {
+                        _showToast('Please set a valid time first.');
+                        return;
+                      }
+                      final hour = (_selectedAmPm == 'PM') ? (hRaw % 12) + 12 : (hRaw % 12);
+                      
+                      setState(() {
+                        _selectedEvent = ev['label']!;
+                        _selectedEventEmoji = ev['emoji']!;
+                        _pendingPlanDate = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day, hour, mRaw);
+                        _activeOccasion = ev['label']!;
+                        _activeEmoji = ev['emoji']!;
+                        _isCreatingPlan = true;
+                        _pendingOutfit = '';
+                        _showChat = true;
+                        _messages.clear();
+                        _messages.add({
+                          'role': 'ai', 
+                          'text': 'Great! Planning for $_activeOccasion at $hRaw:${mRaw.toString().padLeft(2, '0')} $_selectedAmPm. What kind of outfit vibe are you looking for?'
+                        });
+                        
+                        if (kOutfits.containsKey(_activeOccasion)) {
+                          _currentChatChips = kOutfits[_activeOccasion]!.map((o) => {'label': o['summary']!}).toList();
+                        } else {
+                          _currentChatChips = kSuggestionChips;
+                        }
+                        _chipsVisible = true;
+                      });
+                      
+                      Navigator.of(sheetContext).pop(); 
+                    },
+                    scaleTo: 1.06,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      decoration: BoxDecoration(
+                        gradient: _eventBg(ev['type']!, isActive, t),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: isActive
+                              ? _eventColor(ev['type']!, t).withValues(alpha: 0.55)
+                              : t.cardBorder,
+                          width: isActive ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(ev['emoji']!, style: const TextStyle(fontSize: 18)),
+                          const SizedBox(height: 5),
+                          Text(ev['label']!, style: TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.w700,
+                            color: _eventColor(ev['type']!, t),
+                          )),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildTimeRow(AppThemeTokens t, StateSetter modalSetState) {
+  Widget _buildTimeRow(AppThemeTokens t, StateSetter s) {
     return _FocusGlowContainer(
       focusNodes: [_hourFocus, _minFocus],
       t: t,
@@ -1704,9 +1598,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           ),
           Row(
             children: [
-              _buildAmPmBtn('AM', t, modalSetState),
+              _buildAmPmBtn('AM', t, s),
               const SizedBox(width: 4),
-              _buildAmPmBtn('PM', t, modalSetState),
+              _buildAmPmBtn('PM', t, s),
             ],
           ),
         ],
@@ -1714,10 +1608,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildAmPmBtn(String label, AppThemeTokens t, StateSetter modalSetState) {
+  Widget _buildAmPmBtn(String label, AppThemeTokens t, StateSetter s) {
     final isActive = _selectedAmPm == label;
     return GestureDetector(
-      onTap: () => modalSetState(() => _selectedAmPm = label),
+      onTap: () => s(() => _selectedAmPm = label),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -2306,7 +2200,6 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
   late DateTime _selectedDay;
   late DateTime _weekAnchor;
 
-  // ⬅️ START EMPTY: Fetches from Appwrite
   final Map<DateTime, List<Plan>> _plansData = {};
 
   String _selectedEvent = '';
@@ -2316,8 +2209,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
   final TextEditingController _minCtrl = TextEditingController();
   final FocusNode _hourFocus = FocusNode();
   final FocusNode _minFocus = FocusNode();
-  int _pickedOutfitIdx = -1;
-
+  bool _isSaving = false; 
   OverlayEntry? _toastOverlay;
 
   DateTime _normalizeDate(DateTime d) => DateTime(d.year, d.month, d.day);
@@ -2345,11 +2237,9 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
       }
     });
 
-    // ⬅️ FETCH DB ON LOAD
     _loadPlansFromAppwrite();
   }
 
-  // ── APPWRITE FETCH LOGIC ───────────────────────────────────────────
   Future<void> _loadPlansFromAppwrite() async {
     try {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
@@ -2366,7 +2256,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
           id: doc.$id,
           occasion: data['occasion'] ?? 'Event',
           emoji: data['emoji'] ?? '📅',
-          outfitDescription: data['outfitDescription'] ?? '',
+          outfitDescription: data['outfitDescription'] ?? 'Custom Outfit',
           dateTime: dt,
           reminder: data['reminder'] ?? true,
         );
@@ -2382,7 +2272,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
         _notifyCounts();
       }
     } catch (e) {
-      _showToast('Failed to load plans');
+      debugPrint('Failed to load plans: $e');
     }
   }
 
@@ -2405,7 +2295,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
   }
   
   DateTime _startOfWeek(DateTime d) {
-    final weekday = d.weekday; // 1=Mon
+    final weekday = d.weekday; 
     return d.subtract(Duration(days: weekday - 1));
   }
 
@@ -2441,73 +2331,68 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
   }
 
   void _openModal(AppThemeTokens t) {
+    final now = DateTime.now();
+    int h = now.hour % 12;
+    if (h == 0) h = 12;
+
     setState(() {
       _selectedEvent = '';
       _selectedEventEmoji = '📅';
-      _pickedOutfitIdx = -1;
-      _selectedAmPm = 'AM';
-      _hourCtrl.clear();
-      _minCtrl.clear();
+      _selectedAmPm = now.hour >= 12 ? 'PM' : 'AM';
+      _hourCtrl.text = h.toString();
+      _minCtrl.text = '00';
     });
+
     showModalBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
+      isScrollControlled: true, 
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withValues(alpha: 0.65),
       useRootNavigator: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, modalSetState) => Material(
-          color: Colors.transparent,
-          child: _buildModalSheet(modalSetState, t),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, modalSetState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: _buildModalSheet(sheetContext, modalSetState, t),
+          ),
         ),
       ),
     );
   }
 
-  // ── APPWRITE SAVE LOGIC ───────────────────────────────────────────
-  Future<void> _savePlan() async {
-    final hRaw = int.tryParse(_hourCtrl.text);
-    final mRaw = int.tryParse(_minCtrl.text);
-    if (_selectedEvent.isEmpty) {
-      _showToast('Please choose an occasion first.');
-      return;
-    }
-    if (hRaw == null || hRaw < 1 || hRaw > 12) {
-      _showToast('Enter a valid hour (1-12).');
-      return;
-    }
-    if (mRaw == null || mRaw < 0 || mRaw > 59) {
-      _showToast('Enter a valid minute (0-59).');
-      return;
-    }
+  Future<void> _savePlanDirectly(int hour, int min, String occasion, String emoji) async {
+    if (_isSaving) return; 
 
-    final selectedOutfit = (_pickedOutfitIdx >= 0 &&
-        kOutfits.containsKey(_selectedEvent) &&
-        _pickedOutfitIdx < kOutfits[_selectedEvent]!.length)
-        ? kOutfits[_selectedEvent]![_pickedOutfitIdx]['summary'] ?? ''
-        : '(no outfit selected)';
-
-    final hour = (_selectedAmPm == 'PM') ? (hRaw % 12) + 12 : (hRaw % 12);
+    setState(() => _isSaving = true); 
+    
     final planDateTime = DateTime(
-      _selectedDay.year, _selectedDay.month, _selectedDay.day, hour, mRaw,
+      _selectedDay.year, _selectedDay.month, _selectedDay.day, hour, min,
     );
 
     final appwrite = Provider.of<AppwriteService>(context, listen: false);
 
     try {
+      String defaultOutfit = 'A perfectly styled outfit for $occasion.';
+      if (kOutfits.containsKey(occasion) && kOutfits[occasion]!.isNotEmpty) {
+        defaultOutfit = kOutfits[occasion]!.first['summary']!;
+      }
+
       final doc = await appwrite.createPlan({
-        'occasion': _selectedEvent,
-        'emoji': _selectedEventEmoji,
-        'outfitDescription': selectedOutfit,
+        'occasion': occasion,
+        'emoji': emoji,
+        'outfitDescription': defaultOutfit,
         'dateTime': planDateTime.toUtc().toIso8601String(), 
         'reminder': true,
       });
 
       final plan = Plan(
         id: doc.$id,
-        emoji: _selectedEventEmoji,
-        occasion: _selectedEvent,
-        outfitDescription: selectedOutfit,
+        emoji: emoji,
+        occasion: occasion,
+        outfitDescription: defaultOutfit,
         dateTime: planDateTime,
         reminder: true,
       );
@@ -2518,9 +2403,11 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
       });
       _notifyCounts();
       _showToast('Plan saved!');
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) Navigator.of(context).pop(); 
     } catch (e) {
       _showToast('⚠ Failed to save plan. Check connection.');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -2589,6 +2476,154 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
     return LinearGradient(
       begin: Alignment.topLeft, end: Alignment.bottomRight,
       colors: [c.withValues(alpha: 0.16), c.withValues(alpha: 0.08)],
+    );
+  }
+
+  Color _planBorderTop(String colorType, AppThemeTokens t) {
+    final c = _eventColor(colorType, t);
+    return c.withValues(alpha: 0.30);
+  }
+
+  Future<void> _deletePlan(int index) async {
+    final list = _plansData[_selectedDayKey];
+    if (list == null || index >= list.length) return;
+    
+    final planToDelete = list[index];
+    
+    setState(() {
+      list.removeAt(index);
+      if (list.isEmpty) _plansData.remove(_selectedDayKey);
+    });
+    _notifyCounts();
+
+    if (planToDelete.id != null) {
+      try {
+        final appwrite = Provider.of<AppwriteService>(context, listen: false);
+        await appwrite.deletePlan(planToDelete.id!);
+        _showToast('Plan removed');
+      } catch (e) {
+        _showToast('⚠ Failed to remove from cloud');
+      }
+    }
+  }
+
+  void _toggleReminder(int index) {
+    final plans = _plansData[_selectedDayKey];
+    if (plans == null || index >= plans.length) return;
+    
+    final plan = plans[index];
+    setState(() {
+      plan.reminder = !plan.reminder;
+    });
+
+    if (plan.id != null) {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      appwrite.updatePlanReminder(plan.id!, plan.reminder);
+    }
+    
+    _showToast(plan.reminder ? '🔔 Reminder turned on!' : '🔕 Reminder turned off');
+  }
+
+  Widget _buildPlansGrid(List<Plan> plans, AppThemeTokens t) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 1.1,
+      ),
+      itemCount: plans.length,
+      itemBuilder: (context, i) {
+        return _buildPlanCard(plans[i], i, t);
+      },
+    );
+  }
+
+  Widget _buildPlanCard(Plan plan, int index, AppThemeTokens t) {
+    final colorType = _planTypeKey(plan);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: _planCardBg(colorType, t),
+          border: Border(
+            top: BorderSide(color: _planBorderTop(colorType, t), width: 1),
+            left: BorderSide(color: _planBorderTop(colorType, t).withValues(alpha: 0.45), width: 1),
+            right: BorderSide(color: t.cardBorder.withValues(alpha: 0.22), width: 1),
+            bottom: BorderSide(color: t.cardBorder.withValues(alpha: 0.22), width: 1),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              right: 0, top: 0, bottom: 0,
+              width: 80,
+              child: ShaderMask(
+                shaderCallback: (rect) {
+                  return const LinearGradient(
+                    begin: Alignment.centerLeft, end: Alignment.centerRight,
+                    colors: [Colors.transparent, Colors.black],
+                    stops: [0.0, 0.6],
+                  ).createShader(rect);
+                },
+                blendMode: BlendMode.dstIn,
+                child: Image.network(
+                  getOccasionImage(plan.occasion),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(plan.emoji, style: const TextStyle(fontSize: 20)),
+                  const SizedBox(height: 6),
+                  Text(plan.occasion, style: TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w700, color: t.textPrimary,
+                  )),
+                  const SizedBox(height: 2),
+                  Text(_formatPlanTime(plan), style: TextStyle(
+                    fontSize: 11, color: t.mutedText, height: 1.4,
+                  )),
+                  const SizedBox(height: 4),
+                  Flexible(
+                    child: Text(plan.outfitDescription, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(
+                      fontSize: 10.5, color: t.textPrimary.withValues(alpha: 0.8), height: 1.3,
+                    )),
+                  ),
+                ],
+              ),
+            ),
+            Positioned(
+              top: 0, right: 0,
+              child: _RotatingDeleteButton(
+                t: t,
+                onTap: () => _deletePlan(index),
+              ),
+            ),
+            Positioned(
+              bottom: 0, right: 0,
+              child: _BellButton(
+                t: t,
+                isOn: plan.reminder,
+                onTap: () => _toggleReminder(index),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2715,7 +2750,10 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      "TODAY'S PLANS",
+                      (_isToday(_selectedDay) 
+                          ? "TODAY'S PLANS" 
+                          : '${_weekdayShort(_selectedDay)}, ${kMonths[_selectedDay.month - 1].substring(0, 3)} ${_selectedDay.day}')
+                          .toUpperCase(),
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
@@ -2729,14 +2767,14 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                         padding: const EdgeInsets.symmetric(vertical: 18),
                         child: Center(
                           child: Text(
-                            'Nothing planned ??\nTap "Add a Plan" below',
+                            'Nothing planned 🤔\nTap "Add a Plan" below',
                             textAlign: TextAlign.center,
                             style: TextStyle(fontSize: 13, color: t.mutedText, height: 1.6),
                           ),
                         ),
                       )
                     else
-                      _buildPlansGrid(_todayPlans, t),
+                      _buildPlansGrid(_todayPlans, t), 
                     const SizedBox(height: 12),
                     _buildAddPlanButton(t),
                   ],
@@ -2750,52 +2788,6 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
   String _monthTitleFor(List<DateTime> week) {
     final m = week.first.month;
     return '${kMonths[m - 1]} ${week.first.year}';
-  }
-
-  Widget _buildPlansGrid(List<Plan> plans, AppThemeTokens t) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: 9,
-        crossAxisSpacing: 9,
-        childAspectRatio: 1.1,
-      ),
-      itemCount: plans.length,
-      itemBuilder: (context, i) {
-        final plan = plans[i];
-        return Container(
-          decoration: BoxDecoration(
-            gradient: _planCardBg(_planTypeKey(plan), t),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: t.cardBorder),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withValues(alpha: 0.40), blurRadius: 18, offset: const Offset(0, 6)),
-            ],
-          ),
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(plan.emoji, style: const TextStyle(fontSize: 20)),
-              const SizedBox(height: 6),
-              Text(plan.occasion, style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w700, color: t.textPrimary,
-              )),
-              const SizedBox(height: 4),
-              Text(_formatPlanTime(plan), style: TextStyle(
-                fontSize: 11.5, color: t.mutedText, height: 1.4,
-              )),
-              const SizedBox(height: 3),
-              Text(plan.outfitDescription, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(
-                fontSize: 10.5, color: t.mutedText.withValues(alpha: 0.6), height: 1.4,
-              )),
-            ],
-          ),
-        );
-      },
-    );
   }
 
   Widget _buildAddPlanButton(AppThemeTokens t) {
@@ -2822,12 +2814,11 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
     );
   }
 
-  Widget _buildModalSheet(StateSetter modalSetState, AppThemeTokens t) {
+  Widget _buildModalSheet(BuildContext sheetContext, StateSetter modalSetState, AppThemeTokens t) {
     return SafeArea(
       top: false,
       child: Container(
         width: double.infinity,
-        margin: const EdgeInsets.fromLTRB(14, 0, 14, 18),
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -2836,12 +2827,9 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
           ),
           borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(32), topRight: Radius.circular(32),
-            bottomLeft: Radius.circular(22), bottomRight: Radius.circular(22),
           ),
           border: Border(
             top: BorderSide(color: Colors.white.withValues(alpha: 0.15), width: 1.5),
-            left: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
-            right: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
           ),
           boxShadow: [
             BoxShadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 36, offset: const Offset(0, -8)),
@@ -2849,6 +2837,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
         ),
         child: SingleChildScrollView(
           child: Column(
+            mainAxisSize: MainAxisSize.min, 
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Center(
@@ -2868,7 +2857,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                     fontSize: 18, fontWeight: FontWeight.w600, color: t.textPrimary,
                   )),
                   GestureDetector(
-                  onTap: () => Navigator.of(context).pop(),
+                    onTap: () => Navigator.of(sheetContext).pop(), 
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
                       decoration: BoxDecoration(
@@ -2889,8 +2878,15 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                   ),
                 ],
               ),
-              const SizedBox(height: 18),
-              Text('CHOOSE OCCASION', style: TextStyle(
+              const SizedBox(height: 24),
+              Text('1. SET TIME', style: TextStyle(
+                fontSize: 10.5, fontWeight: FontWeight.w700,
+                letterSpacing: 0.16 * 10.5, color: t.mutedText,
+              )),
+              const SizedBox(height: 10),
+              _buildTimeRow(t, modalSetState),
+              const SizedBox(height: 24),
+              Text('2. CHOOSE OCCASION', style: TextStyle(
                 fontSize: 10.5, fontWeight: FontWeight.w700,
                 letterSpacing: 0.16 * 10.5, color: t.mutedText,
               )),
@@ -2908,10 +2904,21 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                   final isActive = _selectedEvent == ev['label'];
                   return _ScaleButton(
                     onTap: () {
+                      if (_isSaving) return; 
+                      final hRaw = int.tryParse(_hourCtrl.text);
+                      final mRaw = int.tryParse(_minCtrl.text);
+                      if (hRaw == null || mRaw == null) {
+                        _showToast('Please set a valid time first.');
+                        return;
+                      }
+                      final hour = (_selectedAmPm == 'PM') ? (hRaw % 12) + 12 : (hRaw % 12);
+                      
                       modalSetState(() {
                         _selectedEvent = ev['label']!;
                         _selectedEventEmoji = ev['emoji']!;
                       });
+                      
+                      _savePlanDirectly(hour, mRaw, ev['label']!, ev['emoji']!);
                     },
                     scaleTo: 1.06,
                     child: Container(
@@ -2929,7 +2936,10 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text(ev['emoji']!, style: const TextStyle(fontSize: 18)),
+                          if (_isSaving && isActive) 
+                            const CircularProgressIndicator(strokeWidth: 2)
+                          else
+                            Text(ev['emoji']!, style: const TextStyle(fontSize: 18)),
                           const SizedBox(height: 5),
                           Text(ev['label']!, style: TextStyle(
                             fontSize: 11, fontWeight: FontWeight.w700,
@@ -2941,55 +2951,6 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                   );
                 },
               ),
-              const SizedBox(height: 16),
-              Text(
-                _selectedEvent.isNotEmpty
-                    ? 'IDEAS FOR ${_selectedEvent.toUpperCase()}'
-                    : 'OUTFIT SUGGESTIONS',
-                style: TextStyle(
-                  fontSize: 10.5, fontWeight: FontWeight.w700,
-                  letterSpacing: 0.16 * 10.5, color: t.mutedText,
-                ),
-              ),
-              const SizedBox(height: 10),
-              _buildOutfitCarouselInsidePanel(t, modalSetState),
-              const SizedBox(height: 16),
-              Text('SET TIME', style: TextStyle(
-                fontSize: 10.5, fontWeight: FontWeight.w700,
-                letterSpacing: 0.16 * 10.5, color: t.mutedText,
-              )),
-              const SizedBox(height: 10),
-              _buildTimeRow(t, modalSetState),
-              const SizedBox(height: 16),
-              _ScaleButton(
-                onTap: () {
-                  _savePlan();
-                },
-                scaleTo: 1.015,
-                pressScale: 0.98,
-                translateY: -2.0,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
-                    borderRadius: BorderRadius.circular(18),
-                    boxShadow: [
-                      BoxShadow(color: t.accent.primary.withValues(alpha: 0.35), blurRadius: 22, offset: const Offset(0, 6)),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
-                      Icon(Icons.calendar_today, size: 16, color: Colors.white),
-                      SizedBox(width: 8),
-                      Text('Save to Calendar', style: TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white,
-                      )),
-                    ],
-                  ),
-                ),
-              ),
             ],
           ),
         ),
@@ -2997,129 +2958,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
     );
   }
 
-  Widget _buildOutfitCarouselInsidePanel(AppThemeTokens t, StateSetter modalSetState) {
-    final outfits = kOutfits[_selectedEvent];
-    if (outfits == null) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: t.panel,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: t.accent.secondary.withValues(alpha: 0.35), width: 1.5),
-        ),
-        child: Center(
-          child: Text(
-            'Select an occasion above to see outfit ideas ?',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: t.mutedText.withValues(alpha: 0.6)),
-          ),
-        ),
-      );
-    }
-
-    return SizedBox(
-      height: 130,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: outfits.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (context, i) {
-          final outfit = outfits[i];
-          final isPicked = _pickedOutfitIdx == i;
-          return _ScaleButton(
-            onTap: () => modalSetState(() => _pickedOutfitIdx = i),
-            scaleTo: 1.02,
-            translateY: -3.0,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              width: 165,
-              padding: const EdgeInsets.all(13),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: const Alignment(-0.7, -0.7),
-                  end: const Alignment(0.7, 0.7),
-                  colors: isPicked
-                      ? [t.accent.secondary.withValues(alpha: 0.28), t.accent.primary.withValues(alpha: 0.18)]
-                      : [t.accent.primary.withValues(alpha: 0.15), t.accent.secondary.withValues(alpha: 0.10)],
-                ),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isPicked
-                      ? t.accent.secondary.withValues(alpha: 0.55)
-                      : t.cardBorder,
-                  width: isPicked ? 1.5 : 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: isPicked
-                        ? t.accent.secondary.withValues(alpha: 0.45)
-                        : Colors.black.withValues(alpha: 0.25),
-                    blurRadius: isPicked ? 22 : 10,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Stack(
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        outfit['vibe'] ?? '',
-                        style: TextStyle(
-                          fontSize: 9, fontWeight: FontWeight.w800,
-                          letterSpacing: 1.2, color: t.accent.primary,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        outfit['desc'] ?? '',
-                        style: TextStyle(
-                          fontSize: 12.5, fontWeight: FontWeight.w700,
-                          color: t.textPrimary, height: 1.5,
-                        ),
-                      ),
-                      const SizedBox(height: 7),
-                      Text(
-                        '💡 ${outfit['tip'] ?? ''}',
-                        style: TextStyle(fontSize: 11, color: t.mutedText, height: 1.5),
-                      ),
-                    ],
-                  ),
-                  Positioned(
-                    top: 0, right: 0,
-                    child: AnimatedScale(
-                      scale: isPicked ? 1.0 : 0.65,
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      child: AnimatedOpacity(
-                        opacity: isPicked ? 1.0 : 0.0,
-                        duration: const Duration(milliseconds: 220),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
-                            borderRadius: BorderRadius.circular(99),
-                          ),
-                          child: const Text('✓ Picked', style: TextStyle(
-                            fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white,
-                          )),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildTimeRow(AppThemeTokens t, StateSetter modalSetState) {
+  Widget _buildTimeRow(AppThemeTokens t, StateSetter s) {
     return _FocusGlowContainer(
       focusNodes: [_hourFocus, _minFocus],
       t: t,
@@ -3178,9 +3017,9 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
           ),
           Row(
             children: [
-              _buildAmPmBtn('AM', t, modalSetState),
+              _buildAmPmBtn('AM', t, s),
               const SizedBox(width: 4),
-              _buildAmPmBtn('PM', t, modalSetState),
+              _buildAmPmBtn('PM', t, s),
             ],
           ),
         ],
@@ -3188,10 +3027,10 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
     );
   }
 
-  Widget _buildAmPmBtn(String label, AppThemeTokens t, StateSetter modalSetState) {
+  Widget _buildAmPmBtn(String label, AppThemeTokens t, StateSetter s) {
     final isActive = _selectedAmPm == label;
     return GestureDetector(
-      onTap: () => modalSetState(() => _selectedAmPm = label),
+      onTap: () => s(() => _selectedAmPm = label),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),

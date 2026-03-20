@@ -69,8 +69,8 @@ class MyApp extends StatelessWidget {
           create: (context) => ThemeController()..loadTheme(),
         ),
         ChangeNotifierProvider(create: (context) => ProfileController()),
-        // Appwrite Database & Auth Service
-        Provider<AppwriteService>(
+        // FIXED: AppwriteService extends ChangeNotifier, so it MUST use ChangeNotifierProvider
+        ChangeNotifierProvider<AppwriteService>(
           create: (_) => AppwriteService(),
         ),
         // Python AI Backend Service
@@ -1044,17 +1044,30 @@ class _AuthWrapperState extends State<AuthWrapper> {
     _checkAuth();
   }
 
+  // FIXED: Added Try-Catch block to ensure _isLoading is disabled even on error
   Future<void> _checkAuth() async {
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    
-    // Check if Appwrite has a saved session
-    final user = await appwrite.getCurrentUser();
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      
+      // Check if Appwrite has a saved session
+      final user = await appwrite.getCurrentUser();
 
-    if (mounted) {
-      setState(() {
-        _isLoggedIn = user != null; // True if user exists, False if null
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoggedIn = user != null; // True if user exists, False if null
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Auth Check Error: $e");
+      // Failsafe: if Appwrite initialization or provider lookup fails,
+      // we remove the spinner and default to the logged-out state.
+      if (mounted) {
+        setState(() {
+          _isLoggedIn = false;
+          _isLoading = false;
+        });
+      }
     }
   }
 

@@ -10,6 +10,7 @@ class Env {
   static String get outfitsCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_OUTFITS'] ?? '';
   static String get usersCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_USERS'] ?? '';
   static String get plansCollection => dotenv.env['PLANS_COLLECTION_ID'] ?? '';
+  static String get savedBoardsCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_SAVED_BOARDS'] ?? '';
 
   // ── Cloudflare R2 Credentials ──
   static String get r2AccountId => dotenv.env['EXPO_PUBLIC_R2_ACCOUNT_ID'] ?? '';

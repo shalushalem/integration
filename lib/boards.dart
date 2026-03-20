@@ -2,21 +2,20 @@
 // Implements all F1–F12 animations + haptics + iOS scroll + DRY refactor
 
 import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:myapp/bills_page.dart' as bills;
+
 import 'package:myapp/calendar.dart';
-import 'package:myapp/daily_wear.dart' as daily_wear;
+import 'package:myapp/theme/theme_tokens.dart';
+
+// ── Master Board Import ──
+import 'package:myapp/occasion.dart'; // Handles Daily Wear, Workout, Office, Party, Vacation, etc.
+
+// ── Specific Board Imports ──
 import 'package:myapp/everything_else.dart' as everything_else;
 import 'package:myapp/home_and_utilities.dart' as home_utils;
-import 'package:myapp/occasion.dart' as occasion;
-import 'package:myapp/office_fit.dart' as office_fit;
-import 'package:myapp/party_looks.dart' as party_looks;
+import 'package:myapp/bills_page.dart' as bills;
 import 'package:myapp/skincare.dart';
-import 'package:myapp/vacation.dart' as vacation;
-import 'package:myapp/workout.dart' as workout;
-import 'package:myapp/theme/theme_tokens.dart';
 
 class ShellBackNavigationNotification extends Notification {
   const ShellBackNavigationNotification();
@@ -619,7 +618,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                     begin: Alignment.topCenter, end: Alignment.bottomCenter,
                     colors: [Color(0xFFFFB08F), Color(0xFFFF8F72)],
                   ),
-                  shadowColor: Color(0xFFFF8F72).withValues(alpha: 0.30),
+                  shadowColor: const Color(0xFFFF8F72).withValues(alpha: 0.30),
                   badge: '12',
                   badgeTextColor: _accent,
                   badgeBg: _card,
@@ -633,7 +632,13 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _card,
                   arrowColor: lifeContentColor,
                   shellColor: _shell,
-                  onTap: () => _push(const daily_wear.Screen4()),
+                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
+                  onTap: () => _push(const OccasionBoard(
+                    occasion: 'Daily Wear',
+                    title: 'Daily Wear',
+                    subtitle: "Today's outfits",
+                    emptyEmoji: '👕',
+                  )),
                 ),
               ),
             ),
@@ -647,7 +652,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                     begin: Alignment.topCenter, end: Alignment.bottomCenter,
                     colors: [Color(0xFFFFE07E), Color(0xFFFFC956)],
                   ),
-                  shadowColor: Color(0xFFFFC956).withValues(alpha: 0.30),
+                  shadowColor: const Color(0xFFFFC956).withValues(alpha: 0.30),
                   badge: '5',
                   badgeTextColor: _accent2,
                   badgeBg: _card,
@@ -681,7 +686,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                     begin: Alignment.topCenter, end: Alignment.bottomCenter,
                     colors: [Color(0xFF9AF0D3), Color(0xFF58DCB0)],
                   ),
-                  shadowColor: Color(0xFF58DCB0).withValues(alpha: 0.30),
+                  shadowColor: const Color(0xFF58DCB0).withValues(alpha: 0.30),
                   badge: '3×/wk',
                   badgeTextColor: _accent,
                   badgeBg: _panelBorder,
@@ -695,7 +700,13 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _panel,
                   arrowColor: lifeContentColor,
                   shellColor: _shell,
-                  onTap: () => _push(const workout.Screen4()),
+                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
+                  onTap: () => _push(const OccasionBoard(
+                    occasion: 'Workout',
+                    title: 'Work Out',
+                    subtitle: 'Gym & yoga',
+                    emptyEmoji: '🏃',
+                  )),
                 ),
               ),
             ),
@@ -709,7 +720,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                     begin: Alignment.topCenter, end: Alignment.bottomCenter,
                     colors: [Color(0xFF9DCBFF), Color(0xFF77A8FF)],
                   ),
-                  shadowColor: Color(0xFF77A8FF).withValues(alpha: 0.30),
+                  shadowColor: const Color(0xFF77A8FF).withValues(alpha: 0.30),
                   badge: '8',
                   badgeTextColor: _accent,
                   badgeBg: _panelBorder,
@@ -740,7 +751,7 @@ class _BoardsScreenState extends State<BoardsScreen>
               begin: Alignment.topCenter, end: Alignment.bottomCenter,
               colors: [Color(0xFFFFBFDC), Color(0xFFFF96C7)],
             ),
-            shadowColor: Color(0xFFFF96C7).withValues(alpha: 0.30),
+            shadowColor: const Color(0xFFFF96C7).withValues(alpha: 0.30),
             badge: 'AM · PM',
             badgeTextColor: _accent,
             badgeBg: _panelBorder,
@@ -780,7 +791,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                     begin: Alignment.topLeft, end: Alignment.bottomRight,
                     colors: [Color(0xFFFFB08F), Color(0xFFFF8F72)],
                   ),
-                  shadowColor: Color(0xFFFF8F72).withValues(alpha: 0.30),
+                  shadowColor: const Color(0xFFFF8F72).withValues(alpha: 0.30),
                   badge: null,
                   badgeTextColor: Colors.transparent,
                   badgeBg: Colors.transparent,
@@ -795,7 +806,13 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _panel,
                   arrowColor: const Color(0xFFFF8F72),
                   shellColor: _shell,
-                  onTap: () => _push(const party_looks.Screen4()),
+                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
+                  onTap: () => _push(const OccasionBoard(
+                    occasion: 'Party',
+                    title: 'Party Looks',
+                    subtitle: 'Evening & cocktail',
+                    emptyEmoji: '🎊',
+                  )),
                 ),
               ),
             ),
@@ -810,7 +827,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                     begin: Alignment.topLeft, end: Alignment.bottomRight,
                     colors: [Color(0xFFFFE07E), Color(0xFFFFC956)],
                   ),
-                  shadowColor: Color(0xFFFFC956).withValues(alpha: 0.30),
+                  shadowColor: const Color(0xFFFFC956).withValues(alpha: 0.30),
                   badge: null,
                   badgeTextColor: Colors.transparent,
                   badgeBg: Colors.transparent,
@@ -825,7 +842,13 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _panel,
                   arrowColor: const Color(0xFFFFC956),
                   shellColor: _shell,
-                  onTap: () => _push(const office_fit.OfficeFitScreen()),
+                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
+                  onTap: () => _push(const OccasionBoard(
+                    occasion: 'Office',
+                    title: 'Office Fits',
+                    subtitle: 'Work-ready looks',
+                    emptyEmoji: '💼',
+                  )),
                 ),
               ),
             ),
@@ -846,7 +869,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                     begin: Alignment.topLeft, end: Alignment.bottomRight,
                     colors: [Color(0xFF9AF0D3), Color(0xFF58DCB0)],
                   ),
-                  shadowColor: Color(0xFF58DCB0).withValues(alpha: 0.25),
+                  shadowColor: const Color(0xFF58DCB0).withValues(alpha: 0.25),
                   badge: null,
                   badgeTextColor: Colors.transparent,
                   badgeBg: Colors.transparent,
@@ -861,7 +884,13 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _panel,
                   arrowColor: const Color(0xFF58DCB0),
                   shellColor: _shell,
-                  onTap: () => _push(const vacation.Screen4()),
+                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
+                  onTap: () => _push(const OccasionBoard(
+                    occasion: 'Vacation',
+                    title: 'Vacation',
+                    subtitle: 'Travel outfits',
+                    emptyEmoji: '✈️',
+                  )),
                 ),
               ),
             ),
@@ -876,7 +905,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                     begin: Alignment.topLeft, end: Alignment.bottomRight,
                     colors: [Color(0xFF9DCBFF), Color(0xFF77A8FF)],
                   ),
-                  shadowColor: Color(0xFF77A8FF).withValues(alpha: 0.28),
+                  shadowColor: const Color(0xFF77A8FF).withValues(alpha: 0.28),
                   badge: null,
                   badgeTextColor: Colors.transparent,
                   badgeBg: Colors.transparent,
@@ -891,7 +920,13 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _card,
                   arrowColor: const Color(0xFF77A8FF),
                   shellColor: _shell,
-                  onTap: () => _push(const occasion.Screen4()),
+                  // 🔥 CONNECTED TO OCCASION BOARD 🔥
+                  onTap: () => _push(const OccasionBoard(
+                    occasion: 'Occasion',
+                    title: 'Occasion',
+                    subtitle: 'Special events',
+                    emptyEmoji: '✨',
+                  )),
                 ),
               ),
             ),
