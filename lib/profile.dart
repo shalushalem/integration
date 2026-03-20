@@ -87,15 +87,6 @@ Color _accent4(AppThemeTokens t) =>
 Color _accent5(AppThemeTokens t) =>
     Color.lerp(t.accent.secondary, t.accent.tertiary, 0.55)!;
 
-Color _bagsChip(AppThemeTokens t) =>
-    Color.lerp(t.accent.primary, t.accent.secondary, 0.35)!;
-Color _jewelryChip(AppThemeTokens t) =>
-    Color.lerp(t.accent.secondary, t.accent.tertiary, 0.35)!;
-Color _makeupChip(AppThemeTokens t) =>
-    Color.lerp(t.accent.primary, t.accent.tertiary, 0.35)!;
-Color _skincareChip(AppThemeTokens t) =>
-    Color.lerp(t.accent.tertiary, t.accent.secondary, 0.55)!;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // _FadeSlide — Staggered fadeUp entrance widget
 // ─────────────────────────────────────────────────────────────────────────────
@@ -264,7 +255,7 @@ class _ProfileData {
 
   _ProfileData({
     this.name = 'New User',
-    this.username = '@username',
+    this.username = '',
     this.email = '',
     this.phone = '',
     this.dob = '',
@@ -336,7 +327,7 @@ class _AnimatedModalState extends State<_AnimatedModal>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ProfileScreen 
+// ProfileScreen
 // ─────────────────────────────────────────────────────────────────────────────
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -443,7 +434,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
         if (mounted) _ambBLCtrl.repeat(reverse: true);
       });
 
-      // 🚀 1. Load Data from Appwrite Backend
+      // Load Data from Appwrite Backend
       _fetchProfileFromAppwrite();
     });
   }
@@ -467,16 +458,22 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
 
       if (mounted) {
         setState(() {
+          // Parse DOB back to simple YYYY-MM-DD for the UI
+          String formattedDob = _profile.dob;
+          if (doc.data['dob'] != null && doc.data['dob'].toString().length >= 10) {
+            formattedDob = doc.data['dob'].toString().substring(0, 10);
+          }
+
           _profile = _ProfileData(
             name: doc.data['name'] ?? _profile.name,
             username: doc.data['username'] ?? _profile.username,
             email: doc.data['email'] ?? _profile.email,
             phone: doc.data['phone'] ?? _profile.phone,
-            dob: doc.data['dob'] ?? _profile.dob,
+            dob: formattedDob,
             gender: doc.data['gender'] ?? _profile.gender,
-            skinTone: doc.data['skinTone'] ?? _profile.skinTone,
+            skinTone: doc.data['skinTone'] ?? _profile.skinTone, 
             bodyShape: doc.data['bodyShape'] ?? _profile.bodyShape,
-            avatarUrl: doc.data['avatar_url'],
+            avatarUrl: doc.data['avatar_url'], 
           );
 
           if (doc.data['stylePreferences'] != null) {
@@ -569,7 +566,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
         final fileName = 'avatar_${userId}_${DateTime.now().millisecondsSinceEpoch}.png';
         
         await minio.putObject(
-          Env.rawBucketId, // Saving avatars to raw bucket
+          Env.rawBucketId, 
           fileName,
           Stream.fromIterable([_avatarBytes!]),
           size: _avatarBytes!.length,
@@ -579,20 +576,52 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
         newAvatarUrl = '${Env.r2UrlRaw}/$fileName';
       }
 
-      // 2. Prepare Database Payload
-      final Map<String, dynamic> docData = {
-        'name': _nameCtrl.text.trim(),
-        'username': _usernameCtrl.text.trim(),
-        'email': _emailCtrl.text.trim(),
-        'phone': _phoneCtrl.text.trim(),
-        'dob': _dobCtrl.text.trim(),
-        'gender': _editingGender,
-        'skinTone': _selectedSkinTone,
-        'bodyShape': _selectedBodyShape,
-        'stylePreferences': _selectedStyles.toList(),
-      };
+      // 2. Prepare Database Payload matching schema
+      // Only include required fields or fields we know are completely valid
+      final Map<String, dynamic> docData = {};
 
-      if (newAvatarUrl != null) {
+      if (_nameCtrl.text.trim().isNotEmpty) {
+        docData['name'] = _nameCtrl.text.trim();
+      }
+
+      if (_editingGender.isNotEmpty) {
+        docData['gender'] = _editingGender;
+      }
+      
+      docData['skinTone'] = _selectedSkinTone;
+      
+      if (_selectedBodyShape.isNotEmpty) {
+        docData['bodyShape'] = _selectedBodyShape;
+      }
+      
+      docData['stylePreferences'] = _selectedStyles.toList();
+
+      // Only add optional string fields if they are not empty to avoid strict validation errors
+      if (_usernameCtrl.text.trim().isNotEmpty) {
+        docData['username'] = _usernameCtrl.text.trim();
+      }
+      
+      // Email type MUST be valid. Empty string throws a 400 bad request error.
+      if (_emailCtrl.text.trim().isNotEmpty) {
+        docData['email'] = _emailCtrl.text.trim();
+      }
+      
+      if (_phoneCtrl.text.trim().isNotEmpty) {
+        docData['phone'] = _phoneCtrl.text.trim();
+      }
+
+      // Datetime type MUST be valid ISO-8601 string. Empty string throws error.
+      if (_dobCtrl.text.trim().isNotEmpty) {
+        try {
+          final parsedDate = DateTime.parse(_dobCtrl.text.trim());
+          docData['dob'] = parsedDate.toUtc().toIso8601String();
+        } catch (e) {
+          debugPrint("Skipping DOB: Invalid format");
+        }
+      }
+
+      // URL type MUST be a valid URL. Empty string throws error.
+      if (newAvatarUrl != null && newAvatarUrl.isNotEmpty) {
         docData['avatar_url'] = newAvatarUrl;
       }
 
@@ -624,7 +653,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
         username: _usernameCtrl.text.trim(),
         email: _emailCtrl.text.trim(),
         phone: _phoneCtrl.text.trim(),
-        dob: _dobCtrl.text.trim(),
+        dob: _dobCtrl.text.trim(), // Keep it simple for UI
         gender: _editingGender,
         skinTone: _selectedSkinTone,
         bodyShape: _selectedBodyShape,
@@ -1082,7 +1111,6 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
         cacheHeight: 128,
       );
     } else if (_profile.avatarUrl != null) {
-      // ✅ Fallback to R2 Network Image
       return Image.network(
         _profile.avatarUrl!,
         fit: BoxFit.cover,
@@ -2039,7 +2067,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                   style: TextStyle(fontSize: 42)),
               const SizedBox(height: 14),
               _PressScaleWidget(
-                onTap: _pickImage, 
+                onTap: () {}, // Future endpoint for Try-On photos
                 pressedScale: 0.97,
                 child: Text(
                   'Tap to upload a full-body photo\nto try on outfits virtually.',

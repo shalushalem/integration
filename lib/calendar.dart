@@ -3,24 +3,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 
-// ── Color Palette ──
-const Color kBg = Color(0xFF08111F);
-const Color kBg2 = Color(0xFF0F1A2D);
-const Color kPhoneShell = Color(0xFF192131);
-const Color kPhoneShell2 = Color(0xFF111723);
-const Color kText = Color(0xFFF5F7FF);
-const Color kMuted = Color(0xB8E6EBFF);
-const Color kTextDim = Color(0x66E6EBFF);
-const Color kTextLight = Color(0x80E6EBFF);
-const Color kAccent = Color(0xFF6B91FF);
-const Color kAccent2 = Color(0xFF8D7DFF);
-const Color kAccent3 = Color(0xFF04D7C8);
-const Color kAccent4 = Color(0xFFFF8EC7);
-const Color kAccent5 = Color(0xFFFFD86E);
-const Color kCardBorder = Color(0x1FFFFFFF);
-const Color kPanel = Color(0x14FFFFFF);
-const Color kPanel2 = Color(0x1FFFFFFF);
+// ── Theme Integration ──
+import 'package:myapp/theme/theme_tokens.dart';
+// ── Backend Services ──
+import 'package:myapp/services/appwrite_service.dart';
 
 // ── Sample Data ──
 const List<String> kMonths = [
@@ -28,22 +16,22 @@ const List<String> kMonths = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-// [PATCH B11/B27] Plan data model replaces static kSamplePlans
-class PlanItem {
+// Plan data model
+class Plan {
+  final String? id; // ⬅️ ADDED: To track the Appwrite Document ID
+  final String occasion;
   final String emoji;
-  final String title;
-  final String desc;
-  final String outfit;
-  final String color;
-  bool reminderOn;
+  final String outfitDescription;
+  final DateTime dateTime;
+  bool reminder;
 
-  PlanItem({
+  Plan({
+    this.id,
+    required this.occasion,
     required this.emoji,
-    required this.title,
-    required this.desc,
-    required this.outfit,
-    required this.color,
-    this.reminderOn = true,
+    required this.outfitDescription,
+    required this.dateTime,
+    this.reminder = true,
   });
 }
 
@@ -67,7 +55,6 @@ const List<Map<String, String>> kSuggestionChips = [
   {'label': 'Summer party outfit 🎉'},
 ];
 
-// [PATCH B34] Outfit data for modal carousel (mirrors HTML OUTFITS map)
 const Map<String, List<Map<String, String>>> kOutfits = {
   'Gym': [
     {'vibe': 'Cardio Day', 'desc': 'Leggings, Sports tank, Running shoes', 'tip': 'Go breathable — skip cotton.', 'summary': 'Leggings, sports tank & running shoes'},
@@ -100,17 +87,13 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   late int _viewMonth;
   late DateTime _selectedDay;
 
-  // [PATCH B11/B27] Replace static kSamplePlans with mutable per-day plans map
-  final Map<String, List<PlanItem>> _plansData = {
-    DateTime.now().toIso8601String().substring(0, 10): [
-      PlanItem(emoji: '💪', title: 'Gym', desc: 'Cardio Day · 7:00 AM', outfit: 'Leggings, sports tank & running shoes', color: 'teal'),
-      PlanItem(emoji: '💼', title: 'Office', desc: 'Formal Meeting · 10:30 AM', outfit: 'Dress shirt, dark trousers & leather shoes', color: 'purple'),
-      PlanItem(emoji: '🎊', title: 'Party', desc: 'Evening Out · 8:00 PM', outfit: 'Slip dress, heels & small bag', color: 'pink'),
-    ],
-  };
+  // ⬅️ START EMPTY: We will fetch from Appwrite
+  final Map<DateTime, List<Plan>> _plansData = {};
 
-  String get _selectedDayKey => _selectedDay.toIso8601String().substring(0, 10);
-  List<PlanItem> get _todayPlans => _plansData[_selectedDayKey] ?? [];
+  DateTime _normalizeDate(DateTime d) => DateTime(d.year, d.month, d.day);
+  DateTime get _selectedDayKey => _normalizeDate(_selectedDay);
+  List<Plan> _plansForDay(DateTime d) => _plansData[_normalizeDate(d)] ?? [];
+  List<Plan> get _todayPlans => _plansForDay(_selectedDay);
 
   // Modal state
   bool _modalOpen = false;
@@ -119,10 +102,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   String _selectedAmPm = 'AM';
   final TextEditingController _hourCtrl = TextEditingController();
   final TextEditingController _minCtrl = TextEditingController();
-  // [PATCH B23] FocusNodes for auto-advance hour→minute
   final FocusNode _hourFocus = FocusNode();
   final FocusNode _minFocus = FocusNode();
-  // [PATCH B21] Outfit carousel pick index
   int _pickedOutfitIdx = -1;
 
   // Chat state
@@ -131,37 +112,21 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   String _activeEmoji = '💪';
   final TextEditingController _chatCtrl = TextEditingController();
   final List<Map<String, String>> _messages = [];
-  // [PATCH B30] Typing indicator
   bool _isTyping = false;
-  // [PATCH B32] Chips visibility
   bool _chipsVisible = true;
-  // [PATCH B34] Awaiting time for reminder
-  bool _awaitingTime = false;
 
-  // [PATCH B29] Per-message animation controllers
+  // Animation controllers
   final List<AnimationController> _bubbleControllers = [];
-
-  // [PATCH B02] Pulse dot animation controller
   late AnimationController _pulseController;
   late Animation<double> _pulseAnim;
-
-  // [PATCH B15] Modal sheet animation controller
   late AnimationController _modalAnimController;
   late Animation<Offset> _modalSlideAnim;
   late Animation<double> _modalFadeAnim;
-
-  // [PATCH B07] Plan card stagger animation controllers
   final List<AnimationController> _cardControllers = [];
   final List<Animation<double>> _cardFadeAnims = [];
   final List<Animation<Offset>> _cardSlideAnims = [];
-
-  // [PATCH B37] Toast overlay
   OverlayEntry? _toastOverlay;
-
-  // [PATCH B36] Typing dot controller
   late AnimationController _typingController;
-
-  // ScrollController for chat auto-scroll
   final ScrollController _chatScrollController = ScrollController();
 
   @override
@@ -169,9 +134,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     super.initState();
     _viewYear = _today.year;
     _viewMonth = _today.month - 1;
-    _selectedDay = _today;
+    _selectedDay = _normalizeDate(_today);
 
-    // [PATCH B02] Pulse controller — 2500ms repeat
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2500),
@@ -180,7 +144,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       CurvedAnimation(parent: _pulseController, curve: Curves.easeOut),
     );
 
-    // [PATCH B15] Modal slide-up animation — 420ms spring
     _modalAnimController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 420),
@@ -196,13 +159,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       CurvedAnimation(parent: _modalAnimController, curve: Curves.easeOut),
     );
 
-    // [PATCH B30] Typing dot animation — 1200ms repeat
     _typingController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat();
 
-    // [PATCH B23] Hour auto-advance listener
     _hourCtrl.addListener(() {
       final v = int.tryParse(_hourCtrl.text);
       if (_hourCtrl.text.length >= 2) {
@@ -211,18 +172,53 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       }
     });
 
-    // [PATCH B24] Minute zero-pad on blur
     _minFocus.addListener(() {
       if (!_minFocus.hasFocus && _minCtrl.text.length == 1) {
         _minCtrl.text = '0${_minCtrl.text}';
       }
     });
 
-    // [PATCH B07] Initialize stagger controllers for initial plans
-    _initCardAnimations();
+    // ⬅️ FETCH FROM DB ON LOAD
+    _loadPlansFromAppwrite();
   }
 
-  /// [PATCH B07] Creates staggered entrance controllers for current day's plans
+  // ── APPWRITE FETCH LOGIC ───────────────────────────────────────────
+  Future<void> _loadPlansFromAppwrite() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final docs = await appwrite.getUserPlans();
+      
+      final newPlans = <DateTime, List<Plan>>{};
+      
+      for (var doc in docs) {
+        final data = doc.data;
+        final dt = DateTime.parse(data['dateTime']).toLocal(); 
+        final dateKey = _normalizeDate(dt);
+        
+        final plan = Plan(
+          id: doc.$id,
+          occasion: data['occasion'] ?? 'Event',
+          emoji: data['emoji'] ?? '📅',
+          outfitDescription: data['outfitDescription'] ?? '',
+          dateTime: dt,
+          reminder: data['reminder'] ?? true,
+        );
+        
+        newPlans.putIfAbsent(dateKey, () => []).add(plan);
+      }
+
+      if (mounted) {
+        setState(() {
+          _plansData.clear();
+          _plansData.addAll(newPlans);
+        });
+        _initCardAnimations();
+      }
+    } catch (e) {
+      _showToast('Failed to load plans');
+    }
+  }
+
   void _initCardAnimations() {
     for (final c in _cardControllers) {
       c.dispose();
@@ -249,7 +245,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           end: Offset.zero,
         ).animate(CurvedAnimation(parent: ctrl, curve: Curves.easeOutCubic)),
       );
-      // Stagger each card by 70ms
       Future.delayed(Duration(milliseconds: i * 70), () {
         if (mounted) ctrl.forward();
       });
@@ -292,87 +287,64 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           d.month == _selectedDay.month &&
           d.day == _selectedDay.day;
 
+  bool _hasPlans(DateTime d) => _plansForDay(d).isNotEmpty;
+
   String _weekdayShort(DateTime d) {
     const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return names[d.weekday - 1];
   }
 
-  Color _eventColor(String type) {
+  Color _eventColor(String type, AppThemeTokens t) {
     switch (type) {
-      case 'teal': return kAccent3;
-      case 'purple': return kAccent2;
-      case 'pink': return kAccent4;
-      case 'amber': return kAccent5;
-      case 'blue': return kAccent;
-      default: return kAccent;
+      case 'teal': return t.accent.tertiary;
+      case 'purple': return t.accent.secondary;
+      case 'pink': return Color.lerp(t.accent.primary, t.accent.tertiary, 0.5) ?? t.accent.tertiary;
+      case 'amber': return Color.lerp(t.accent.secondary, t.accent.tertiary, 0.5) ?? t.accent.secondary;
+      case 'blue': return t.accent.primary;
+      default: return t.accent.primary;
     }
   }
 
-  LinearGradient _eventBg(String type) {
-    switch (type) {
-      case 'teal':
-        return const LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [Color(0x3804D7C8), Color(0x1E04D7C8)],
-        );
-      case 'purple':
-        return const LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [Color(0x388D7DFF), Color(0x1E8D7DFF)],
-        );
-      case 'pink':
-        return const LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [Color(0x2EFF8EC7), Color(0x1AFF8EC7)],
-        );
-      case 'amber':
-        return const LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [Color(0x38FFD86E), Color(0x1EFFD86E)],
-        );
-      default:
-        return const LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [Color(0x286B91FF), Color(0x1A6B91FF)],
-        );
-    }
+  String _planTypeKey(Plan plan) {
+    final occ = plan.occasion.toLowerCase();
+    if (occ.contains('gym')) return 'teal';
+    if (occ.contains('office') || occ.contains('work')) return 'purple';
+    if (occ.contains('party') || occ.contains('date')) return 'pink';
+    if (occ.contains('shop')) return 'amber';
+    if (occ.contains('study')) return 'blue';
+    if (occ.contains('travel')) return 'teal';
+    return 'blue';
   }
 
-  LinearGradient _planCardBg(String color) {
-    switch (color) {
-      case 'teal':
-        return const LinearGradient(
-          begin: Alignment(-0.7, -0.7), end: Alignment(0.7, 0.7),
-          colors: [Color(0x3304D7C8), Color(0x1E04D7C8)],
-        );
-      case 'purple':
-        return const LinearGradient(
-          begin: Alignment(-0.7, -0.7), end: Alignment(0.7, 0.7),
-          colors: [Color(0x338D7DFF), Color(0x1E8D7DFF)],
-        );
-      case 'pink':
-        return const LinearGradient(
-          begin: Alignment(-0.7, -0.7), end: Alignment(0.7, 0.7),
-          colors: [Color(0x2EFF8EC7), Color(0x1AFF8EC7)],
-        );
-      default:
-        return const LinearGradient(
-          begin: Alignment(-0.7, -0.7), end: Alignment(0.7, 0.7),
-          colors: [Color(0x286B91FF), Color(0x1A6B91FF)],
-        );
-    }
+  String _formatPlanTime(Plan plan) {
+    final t = TimeOfDay.fromDateTime(plan.dateTime);
+    final hour = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
+    final mm = t.minute.toString().padLeft(2, '0');
+    final ampm = t.period == DayPeriod.am ? 'AM' : 'PM';
+    return '$hour:$mm $ampm';
   }
 
-  Color _planBorderTop(String color) {
-    switch (color) {
-      case 'teal': return const Color(0x4D04D7C8);
-      case 'purple': return const Color(0x4D8D7DFF);
-      case 'pink': return const Color(0x47FF8EC7);
-      default: return const Color(0x336B91FF);
-    }
+  LinearGradient _eventBg(String type, AppThemeTokens t) {
+    final c = _eventColor(type, t);
+    return LinearGradient(
+      begin: Alignment.topLeft, end: Alignment.bottomRight,
+      colors: [c.withValues(alpha: 0.22), c.withValues(alpha: 0.12)],
+    );
   }
 
-  // ── [PATCH B37] Toast system ──────────────────────────────────────────────
+  LinearGradient _planCardBg(String colorType, AppThemeTokens t) {
+    final c = _eventColor(colorType, t);
+    return LinearGradient(
+      begin: const Alignment(-0.7, -0.7), end: const Alignment(0.7, 0.7),
+      colors: [c.withValues(alpha: 0.20), c.withValues(alpha: 0.10)],
+    );
+  }
+
+  Color _planBorderTop(String colorType, AppThemeTokens t) {
+    final c = _eventColor(colorType, t);
+    return c.withValues(alpha: 0.30);
+  }
+
   void _showToast(String message) {
     _toastOverlay?.remove();
     _toastOverlay = null;
@@ -394,27 +366,51 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     overlay.insert(entry);
   }
 
-  // ── [PATCH B11] Delete plan ───────────────────────────────────────────────
-  void _deletePlan(int index) {
+  // ── APPWRITE DELETE LOGIC ───────────────────────────────────────────
+  Future<void> _deletePlan(int index) async {
+    final list = _plansData[_selectedDayKey];
+    if (list == null || index >= list.length) return;
+    
+    final planToDelete = list[index];
+    
+    // Optimistic UI update
     setState(() {
-      _plansData[_selectedDayKey]?.removeAt(index);
+      list.removeAt(index);
+      if (list.isEmpty) _plansData.remove(_selectedDayKey);
     });
     _initCardAnimations();
-    _showToast('Plan removed');
+
+    if (planToDelete.id != null) {
+      try {
+        final appwrite = Provider.of<AppwriteService>(context, listen: false);
+        await appwrite.deletePlan(planToDelete.id!);
+        _showToast('Plan removed');
+      } catch (e) {
+        _showToast('⚠ Failed to remove from cloud');
+      }
+    }
   }
 
-  // ── [PATCH B13] Toggle reminder ───────────────────────────────────────────
+  // ── APPWRITE REMINDER LOGIC ───────────────────────────────────────────
   void _toggleReminder(int index) {
     final plans = _plansData[_selectedDayKey];
     if (plans == null || index >= plans.length) return;
+    
+    final plan = plans[index];
     setState(() {
-      plans[index].reminderOn = !plans[index].reminderOn;
+      plan.reminder = !plan.reminder;
     });
-    _showToast(plans[index].reminderOn ? '🔔 Reminder turned on!' : '🔕 Reminder turned off');
+
+    if (plan.id != null) {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      appwrite.updatePlanReminder(plan.id!, plan.reminder);
+    }
+    
+    _showToast(plan.reminder ? '🔔 Reminder turned on!' : '🔕 Reminder turned off');
   }
 
-  // ── [PATCH B27] Save plan from modal ─────────────────────────────────────
-  void _savePlan() {
+  // ── APPWRITE SAVE LOGIC ───────────────────────────────────────────
+  Future<void> _savePlan() async {
     final hRaw = int.tryParse(_hourCtrl.text);
     final mRaw = int.tryParse(_minCtrl.text);
     if (_selectedEvent.isEmpty) {
@@ -430,33 +426,49 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       return;
     }
 
-    final hh = hRaw.toString().padLeft(2, '0');
-    final mm = mRaw.toString().padLeft(2, '0');
-    final timeDisplay = '$hh:$mm $_selectedAmPm';
-
     final selectedOutfit = (_pickedOutfitIdx >= 0 &&
         kOutfits.containsKey(_selectedEvent) &&
         _pickedOutfitIdx < kOutfits[_selectedEvent]!.length)
         ? kOutfits[_selectedEvent]![_pickedOutfitIdx]['summary'] ?? ''
         : '(no outfit selected)';
 
-    final newPlan = PlanItem(
-      emoji: _selectedEventEmoji,
-      title: _selectedEvent,
-      desc: '$timeDisplay',
-      outfit: selectedOutfit,
-      color: ['teal', 'purple', 'pink'][DateTime.now().millisecondsSinceEpoch % 3],
+    final hour = (_selectedAmPm == 'PM') ? (hRaw % 12) + 12 : (hRaw % 12);
+    final planDateTime = DateTime(
+      _selectedDay.year, _selectedDay.month, _selectedDay.day, hour, mRaw,
     );
 
-    setState(() {
-      _plansData[_selectedDayKey] = [...(_plansData[_selectedDayKey] ?? []), newPlan];
-      _modalOpen = false;
-    });
-    _initCardAnimations();
-    _showToast('📅 Plan saved!');
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+
+    try {
+      final doc = await appwrite.createPlan({
+        'occasion': _selectedEvent,
+        'emoji': _selectedEventEmoji,
+        'outfitDescription': selectedOutfit,
+        'dateTime': planDateTime.toUtc().toIso8601String(), 
+        'reminder': true,
+      });
+
+      final newPlan = Plan(
+        id: doc.$id,
+        emoji: _selectedEventEmoji,
+        occasion: _selectedEvent,
+        outfitDescription: selectedOutfit,
+        dateTime: planDateTime,
+        reminder: true,
+      );
+
+      setState(() {
+        _plansData[_selectedDayKey] = [...(_plansData[_selectedDayKey] ?? []), newPlan];
+        _plansData[_selectedDayKey]!.sort((a, b) => a.dateTime.compareTo(b.dateTime));
+        _modalOpen = false;
+      });
+      _initCardAnimations();
+      _showToast('📅 Plan saved!');
+    } catch (e) {
+      _showToast('⚠ Failed to save plan. Check connection.');
+    }
   }
 
-  // ── [PATCH B15] Open modal with animation ────────────────────────────────
   void _openModal() {
     setState(() {
       _modalOpen = true;
@@ -470,7 +482,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _modalAnimController.forward(from: 0);
   }
 
-  // ── [PATCH B34] Real AI API call ─────────────────────────────────────────
   Future<String> _getAIReply(String userText) async {
     const systemPrompt =
         'You are a friendly personal style assistant. When asked about outfits, '
@@ -506,7 +517,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     }
   }
 
-  // ── [PATCH B29] Add bubble with entrance animation ────────────────────────
   AnimationController _createBubbleController() {
     final ctrl = AnimationController(
       vsync: this,
@@ -517,12 +527,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     return ctrl;
   }
 
-  // ── [PATCH B34] Send message with real API + B30 typing indicator ─────────
   Future<void> _sendMessage() async {
     final text = _chatCtrl.text.trim();
     if (text.isEmpty) return;
 
-    // [PATCH B32] Hide chips after first send
     setState(() {
       _messages.add({'role': 'user', 'text': text});
       _chatCtrl.clear();
@@ -530,7 +538,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       _isTyping = true;
     });
 
-    // Scroll to bottom
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_chatScrollController.hasClients) {
         _chatScrollController.animateTo(
@@ -541,7 +548,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       }
     });
 
-    // [PATCH B34] Real API call
     final reply = await _getAIReply(
         '$text — I am planning for $_activeOccasion $_activeEmoji');
 
@@ -550,7 +556,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       _messages.add({'role': 'ai', 'text': reply});
     });
 
-    // Scroll to bottom again after AI reply
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_chatScrollController.hasClients) {
         _chatScrollController.animateTo(
@@ -564,36 +569,30 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.themeTokens;
+
     return Scaffold(
-      backgroundColor: kBg,
+      backgroundColor: t.backgroundPrimary,
       body: Stack(
         children: [
-          // Background gradient
           Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                stops: [0.0, 0.5, 1.0],
-                colors: [kBg, kBg2, kPhoneShell],
+                stops: const [0.0, 0.5, 1.0],
+                colors: [t.backgroundPrimary, t.backgroundSecondary, t.phoneShell],
               ),
             ),
           ),
-
-          // Main content or chat page
-          _showChat ? _buildChatPage() : _buildMainContent(),
-
-          // [PATCH B15] Modal overlay with slide-up animation
-          if (_modalOpen) _buildModal(),
+          _showChat ? _buildChatPage(t) : _buildMainContent(t),
+          if (_modalOpen) _buildModal(t),
         ],
       ),
     );
   }
 
-  // ══════════════════════════════════════════
-  // MAIN CONTENT
-  // ══════════════════════════════════════════
-  Widget _buildMainContent() {
+  Widget _buildMainContent(AppThemeTokens t) {
     return SafeArea(
       child: Column(
         children: [
@@ -603,9 +602,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildPageHeader(),
+                  _buildPageHeader(t),
                   const SizedBox(height: 18),
-                  _buildCalendarBox(),
+                  _buildCalendarBox(t),
                 ],
               ),
             ),
@@ -615,48 +614,45 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildPageHeader() {
+  Widget _buildPageHeader(AppThemeTokens t) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // [PATCH B01] Back button with scale animation on tap
         _ScaleButton(
-          onTap: () {},
+          onTap: () => Navigator.of(context).maybePop(),
           child: Container(
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: kPanel2,
+              color: t.panelBorder,
               shape: BoxShape.circle,
-              border: Border.all(color: kCardBorder),
-              boxShadow: const [
-                BoxShadow(color: Color(0x4D000000), blurRadius: 14, offset: Offset(0, 4)),
+              border: Border.all(color: t.cardBorder),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 14, offset: const Offset(0, 4)),
               ],
             ),
-            child: const Icon(Icons.chevron_left, color: kText, size: 22),
+            child: Icon(Icons.chevron_left, color: t.textPrimary, size: 22),
           ),
         ),
         const SizedBox(width: 12),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Schedule / Calendar',
               style: TextStyle(
-                fontFamily: 'SF Pro Display', fontSize: 18,
-                fontWeight: FontWeight.w700, color: kText, height: 1.1,
+                fontFamily: 'Inter', fontSize: 18,
+                fontWeight: FontWeight.w700, color: t.textPrimary, height: 1.1,
               ),
             ),
             const SizedBox(height: 3),
             Row(
               children: [
-                // [PATCH B02] Animated pulse dot replacing static container
-                _PulseDot(controller: _pulseController, animation: _pulseAnim),
+                _PulseDot(controller: _pulseController, animation: _pulseAnim, t: t),
                 const SizedBox(width: 6),
-                // [PATCH B41] Dynamic plan count text
                 Text(
                   _buildSubtitleText(),
-                  style: const TextStyle(fontSize: 12, color: kMuted),
+                  style: TextStyle(fontSize: 12, color: t.mutedText),
                 ),
               ],
             ),
@@ -666,42 +662,40 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  // [PATCH B41] Compute subtitle dynamically
   String _buildSubtitleText() {
     int total = 0;
     _plansData.forEach((_, list) => total += list.length);
-    final todayKey = _today.toIso8601String().substring(0, 10);
+    final todayKey = _normalizeDate(_today);
     final todayCount = _plansData[todayKey]?.length ?? 0;
     return '$total outfit plan${total != 1 ? 's' : ''} · $todayCount today';
   }
 
-  Widget _buildCalendarBox() {
+  Widget _buildCalendarBox(AppThemeTokens t) {
     return Container(
       decoration: BoxDecoration(
-        color: kPhoneShell,
+        color: t.phoneShell,
         borderRadius: BorderRadius.circular(24),
-        boxShadow: const [
-          BoxShadow(color: Color(0x73000000), blurRadius: 24, offset: Offset(0, 4)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 24, offset: const Offset(0, 4)),
         ],
       ),
       child: Column(
         children: [
-          _buildMonthNav(),
-          _buildWeekStrip(),
-          _buildPlansDivider(),
-          _buildPlansSection(),
+          _buildMonthNav(t),
+          _buildWeekStrip(t),
+          _buildPlansDivider(t),
+          _buildPlansSection(t),
         ],
       ),
     );
   }
 
-  Widget _buildMonthNav() {
+  Widget _buildMonthNav(AppThemeTokens t) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // [PATCH B04] Nav arrows with scale animation
           _ScaleButton(
             onTap: () {
               setState(() {
@@ -710,19 +704,19 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               });
             },
             scaleTo: 1.1,
+            hoverScale: 1.1,
             child: Container(
               width: 32, height: 32,
-              decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.chevron_left, color: kText, size: 18),
+              decoration: BoxDecoration(color: t.panel, borderRadius: BorderRadius.circular(12)),
+              child: Icon(Icons.chevron_left, color: t.textPrimary, size: 18),
             ),
           ),
           Text(
             _monthTitle,
-            style: const TextStyle(
-              fontSize: 16, fontWeight: FontWeight.w700, color: kText, letterSpacing: -0.2,
+            style: TextStyle(
+              fontSize: 16, fontWeight: FontWeight.w700, color: t.textPrimary, letterSpacing: -0.2,
             ),
           ),
-          // [PATCH B04] Nav arrow right
           _ScaleButton(
             onTap: () {
               setState(() {
@@ -731,10 +725,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               });
             },
             scaleTo: 1.1,
+            hoverScale: 1.1,
             child: Container(
               width: 32, height: 32,
-              decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.chevron_right, color: kText, size: 18),
+              decoration: BoxDecoration(color: t.panel, borderRadius: BorderRadius.circular(12)),
+              child: Icon(Icons.chevron_right, color: t.textPrimary, size: 18),
             ),
           ),
         ],
@@ -742,7 +737,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildWeekStrip() {
+  Widget _buildWeekStrip(AppThemeTokens t) {
     final days = _daysInMonth;
     return SizedBox(
       height: 88,
@@ -757,17 +752,16 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           final isToday = _isToday(day);
           return GestureDetector(
             onTap: () {
-              setState(() => _selectedDay = day);
+              setState(() => _selectedDay = _normalizeDate(day));
               _initCardAnimations();
             },
-            // [PATCH B05/B06] Day pill with animated lift on selection
             child: _AnimatedDayPill(
               day: day,
               isActive: isActive,
               isToday: isToday,
               weekdayShort: _weekdayShort(day),
-              // [PATCH B42] Show event dot if day has plans
-              hasEvents: (_plansData[day.toIso8601String().substring(0, 10)] ?? []).isNotEmpty,
+              hasEvents: _hasPlans(day),
+              t: t,
             ),
           );
         },
@@ -775,19 +769,19 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildPlansDivider() {
+  Widget _buildPlansDivider(AppThemeTokens t) {
     return Container(
       height: 1,
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [Colors.transparent, Color(0x1FFFFFFF), Colors.transparent],
+          colors: [Colors.transparent, t.panelBorder, Colors.transparent],
         ),
       ),
     );
   }
 
-  Widget _buildPlansSection() {
+  Widget _buildPlansSection(AppThemeTokens t) {
     final isToday = _isToday(_selectedDay);
     final label = isToday
         ? "Today's Plans"
@@ -800,36 +794,34 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            label,
-            style: const TextStyle(
+            label.toUpperCase(),
+            style: TextStyle(
               fontSize: 11, fontWeight: FontWeight.w700,
-              letterSpacing: 0.12 * 11, color: kMuted,
+              letterSpacing: 0.12 * 11, color: t.mutedText,
             ),
           ),
           const SizedBox(height: 12),
-          // [PATCH B07/B11] Plans grid with staggered animations + live data
           if (plans.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 20),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
               child: Center(
                 child: Text(
                   'Nothing planned ??\nTap "Add a Plan" below',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13, color: kMuted, height: 1.6),
+                  style: TextStyle(fontSize: 13, color: t.mutedText, height: 1.6),
                 ),
               ),
             )
           else
-            _buildPlansGrid(plans),
+            _buildPlansGrid(plans, t),
           const SizedBox(height: 12),
-          _buildAddPlanButton(),
+          _buildAddPlanButton(t),
         ],
       ),
     );
   }
 
-  // [PATCH B07] Staggered grid
-  Widget _buildPlansGrid(List<PlanItem> plans) {
+  Widget _buildPlansGrid(List<Plan> plans, AppThemeTokens t) {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -841,38 +833,36 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       ),
       itemCount: plans.length,
       itemBuilder: (context, i) {
-        // [PATCH B07] Wrap each card in staggered FadeTransition + SlideTransition
         if (i < _cardControllers.length) {
           return FadeTransition(
             opacity: _cardFadeAnims[i],
             child: SlideTransition(
               position: _cardSlideAnims[i],
-              child: _buildPlanCard(plans[i], i),
+              child: _buildPlanCard(plans[i], i, t),
             ),
           );
         }
-        return _buildPlanCard(plans[i], i);
+        return _buildPlanCard(plans[i], i, t);
       },
     );
   }
 
-  Widget _buildPlanCard(PlanItem plan, int index) {
-    final color = plan.color;
+  Widget _buildPlanCard(Plan plan, int index, AppThemeTokens t) {
+    final colorType = _planTypeKey(plan);
     return GestureDetector(
       onTap: () {
         setState(() {
-          _activeOccasion = plan.title;
+          _activeOccasion = plan.occasion;
           _activeEmoji = plan.emoji;
           _showChat = true;
           _messages.clear();
-          _chipsVisible = true; // [PATCH B32] Reset chips on new chat
+          _chipsVisible = true;
         });
       },
-      // [PATCH B08] Plan card lift on hover/tap via _ScaleButton wrapper
       child: _ScaleButton(
         onTap: () {
           setState(() {
-            _activeOccasion = plan.title;
+            _activeOccasion = plan.occasion;
             _activeEmoji = plan.emoji;
             _showChat = true;
             _messages.clear();
@@ -881,19 +871,21 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         },
         scaleTo: 1.02,
         translateY: -4.0,
+        hoverScale: 1.02,
+        hoverTranslateY: -4.0,
         child: Container(
           decoration: BoxDecoration(
-            gradient: _planCardBg(color),
+            gradient: _planCardBg(colorType, t),
             borderRadius: BorderRadius.circular(18),
             border: Border(
-              top: BorderSide(color: _planBorderTop(color), width: 1),
-              left: BorderSide(color: _planBorderTop(color).withOpacity(0.5), width: 1),
-              right: BorderSide(color: kCardBorder.withOpacity(0.3), width: 1),
-              bottom: BorderSide(color: kCardBorder.withOpacity(0.2), width: 1),
+              top: BorderSide(color: _planBorderTop(colorType, t), width: 1),
+              left: BorderSide(color: _planBorderTop(colorType, t).withValues(alpha: 0.45), width: 1),
+              right: BorderSide(color: t.cardBorder.withValues(alpha: 0.22), width: 1),
+              bottom: BorderSide(color: t.cardBorder.withValues(alpha: 0.22), width: 1),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.35),
+                color: Colors.black.withValues(alpha: 0.35),
                 blurRadius: 16,
                 offset: const Offset(0, 6),
               ),
@@ -907,27 +899,31 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                 children: [
                   Text(plan.emoji, style: const TextStyle(fontSize: 20)),
                   const SizedBox(height: 6),
-                  Text(plan.title, style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700, color: kText,
+                  Text(plan.occasion, style: TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w700, color: t.textPrimary,
                   )),
                   const SizedBox(height: 4),
-                  Text(plan.desc, style: const TextStyle(
-                    fontSize: 11.5, color: kMuted, height: 1.5,
+                  Text(_formatPlanTime(plan), style: TextStyle(
+                    fontSize: 11.5, color: t.mutedText, height: 1.4,
+                  )),
+                  const SizedBox(height: 3),
+                  Text(plan.outfitDescription, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(
+                    fontSize: 10.5, color: t.mutedText.withValues(alpha: 0.6), height: 1.4,
                   )),
                 ],
               ),
-              // [PATCH B10/B11] Delete button with rotate animation + functional delete
               Positioned(
                 top: 0, right: 0,
                 child: _RotatingDeleteButton(
+                  t: t,
                   onTap: () => _deletePlan(index),
                 ),
               ),
-              // [PATCH B12/B13] Bell button with scale animation + toggle logic
               Positioned(
                 bottom: 0, right: 0,
                 child: _BellButton(
-                  isOn: plan.reminderOn,
+                  t: t,
+                  isOn: plan.reminder,
                   onTap: () => _toggleReminder(index),
                 ),
               ),
@@ -938,8 +934,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildAddPlanButton() {
-    // [PATCH B14] Add plan button with lift animation
+  Widget _buildAddPlanButton(AppThemeTokens t) {
     return _ScaleButton(
       onTap: _openModal,
       translateY: -2.0,
@@ -947,22 +942,22 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: kPanel,
+          color: t.panel,
           borderRadius: BorderRadius.circular(16),
           border: Border(
-            top: const BorderSide(color: Color(0x1AFFFFFF)),
-            left: const BorderSide(color: Color(0x14FFFFFF)),
-            right: const BorderSide(color: Color(0x0AFFFFFF)),
-            bottom: BorderSide(color: kAccent2.withOpacity(0.35), width: 1.5),
+            top: BorderSide(color: t.panelBorder),
+            left: BorderSide(color: t.panelBorder.withValues(alpha: 0.5)),
+            right: BorderSide(color: t.panelBorder.withValues(alpha: 0.3)),
+            bottom: BorderSide(color: t.accent.secondary.withValues(alpha: 0.35), width: 1.5),
           ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.add_circle_outline, size: 14, color: kMuted),
-            SizedBox(width: 8),
+          children: [
+            Icon(Icons.add_circle_outline, size: 14, color: t.mutedText),
+            const SizedBox(width: 8),
             Text('Add a Plan', style: TextStyle(
-              fontSize: 13.5, fontWeight: FontWeight.w600, color: kMuted,
+              fontSize: 13.5, fontWeight: FontWeight.w600, color: t.mutedText,
             )),
           ],
         ),
@@ -970,42 +965,38 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  // ══════════════════════════════════════════
-  // CHAT PAGE
-  // ══════════════════════════════════════════
-  Widget _buildChatPage() {
+  Widget _buildChatPage(AppThemeTokens t) {
     return SafeArea(
       child: Column(
         children: [
-          _buildChatHeader(),
-          Expanded(child: _buildChatMessages()),
-          _buildChatInputBar(),
+          _buildChatHeader(t),
+          Expanded(child: _buildChatMessages(t)),
+          _buildChatInputBar(t),
         ],
       ),
     );
   }
 
-  Widget _buildChatHeader() {
+  Widget _buildChatHeader(AppThemeTokens t) {
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: kCardBorder)),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: t.cardBorder)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // [PATCH B28] Chat back button with scale + translate animation
           _ScaleButton(
             onTap: () => setState(() => _showChat = false),
             scaleTo: 1.08,
             child: Container(
               width: 36, height: 36,
               decoration: BoxDecoration(
-                color: kPanel,
+                color: t.panel,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: kCardBorder),
+                border: Border.all(color: t.cardBorder),
               ),
-              child: const Icon(Icons.chevron_left, color: kText, size: 20),
+              child: Icon(Icons.chevron_left, color: t.textPrimary, size: 20),
             ),
           ),
           const SizedBox(width: 12),
@@ -1014,8 +1005,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             children: [
               Text(
                 '$_activeOccasion — Style Chat',
-                style: const TextStyle(
-                  fontSize: 17, fontWeight: FontWeight.w700, color: kText,
+                style: TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.w700, color: t.textPrimary,
                 ),
               ),
               const SizedBox(height: 3),
@@ -1023,13 +1014,13 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                 children: [
                   Container(
                     width: 7, height: 7,
-                    decoration: const BoxDecoration(
-                      color: kAccent3, shape: BoxShape.circle,
+                    decoration: BoxDecoration(
+                      color: t.accent.tertiary, shape: BoxShape.circle,
                     ),
                   ),
                   const SizedBox(width: 6),
-                  const Text('Ask anything about your outfit.',
-                      style: TextStyle(fontSize: 12, color: kMuted)),
+                  Text('Ask anything about your outfit.',
+                      style: TextStyle(fontSize: 12, color: t.mutedText)),
                 ],
               ),
             ],
@@ -1039,27 +1030,27 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildChatMessages() {
+  Widget _buildChatMessages(AppThemeTokens t) {
     final allItems = <Widget>[];
 
     if (_messages.isEmpty) {
       allItems.add(_buildAIBubble(
         'Hi! I\'m your style assistant for $_activeOccasion $_activeEmoji '
             'Ask me what to wear and I\'ll put together a complete outfit for you! 👗',
+        t,
       ));
     } else {
       for (final msg in _messages) {
         if (msg['role'] == 'user') {
-          allItems.add(_buildUserBubble(msg['text']!));
+          allItems.add(_buildUserBubble(msg['text']!, t));
         } else {
-          allItems.add(_buildAIBubble(msg['text']!));
+          allItems.add(_buildAIBubble(msg['text']!, t));
         }
       }
     }
 
-    // [PATCH B30] Show typing indicator when waiting for AI
     if (_isTyping) {
-      allItems.add(_buildTypingIndicator());
+      allItems.add(_buildTypingIndicator(t));
     }
 
     return ListView(
@@ -1069,8 +1060,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  // [PATCH B29] AI bubble with entrance animation
-  Widget _buildAIBubble(String text) {
+  Widget _buildAIBubble(String text, AppThemeTokens t) {
     final ctrl = _createBubbleController();
     return FadeTransition(
       opacity: Tween<double>(begin: 0, end: 1).animate(
@@ -1087,9 +1077,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             children: [
               Container(
                 width: 32, height: 32,
-                decoration: const BoxDecoration(
-                  color: kPanel, shape: BoxShape.circle,
-                  border: Border.fromBorderSide(BorderSide(color: kCardBorder)),
+                decoration: BoxDecoration(
+                  color: t.panel, shape: BoxShape.circle,
+                  border: Border.all(color: t.cardBorder),
                 ),
                 child: const Center(child: Text('👗', style: TextStyle(fontSize: 14))),
               ),
@@ -1101,22 +1091,22 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     Container(
                       padding: const EdgeInsets.all(13),
                       decoration: BoxDecoration(
-                        color: kPanel,
+                        color: t.panel,
                         borderRadius: const BorderRadius.only(
                           topLeft: Radius.circular(18), topRight: Radius.circular(18),
                           bottomRight: Radius.circular(18), bottomLeft: Radius.circular(5),
                         ),
-                        border: Border.all(color: kCardBorder),
-                        boxShadow: const [
-                          BoxShadow(color: Color(0x40000000), blurRadius: 14, offset: Offset(0, 3)),
+                        border: Border.all(color: t.cardBorder),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 14, offset: const Offset(0, 3)),
                         ],
                       ),
-                      child: Text(text, style: const TextStyle(
-                        fontSize: 13.5, color: kText, height: 1.55,
+                      child: Text(text, style: TextStyle(
+                        fontSize: 13.5, color: t.textPrimary, height: 1.55,
                       )),
                     ),
                     const SizedBox(height: 3),
-                    const Text('Now', style: TextStyle(fontSize: 10, color: kTextDim)),
+                    Text('Now', style: TextStyle(fontSize: 10, color: t.mutedText.withValues(alpha: 0.6))),
                   ],
                 ),
               ),
@@ -1127,8 +1117,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  // [PATCH B29] User bubble with entrance animation
-  Widget _buildUserBubble(String text) {
+  Widget _buildUserBubble(String text, AppThemeTokens t) {
     final ctrl = _createBubbleController();
     return FadeTransition(
       opacity: Tween<double>(begin: 0, end: 1).animate(
@@ -1151,24 +1140,24 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     Container(
                       padding: const EdgeInsets.all(13),
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0x476B91FF), Color(0x338D7DFF)],
+                        gradient: LinearGradient(
+                          colors: [t.accent.primary.withValues(alpha: 0.28), t.accent.secondary.withValues(alpha: 0.20)],
                         ),
                         borderRadius: const BorderRadius.only(
                           topLeft: Radius.circular(18), topRight: Radius.circular(18),
                           bottomLeft: Radius.circular(18), bottomRight: Radius.circular(5),
                         ),
-                        border: Border.all(color: const Color(0x596B91FF)),
-                        boxShadow: const [
-                          BoxShadow(color: Color(0x266B91FF), blurRadius: 14, offset: Offset(0, 3)),
+                        border: Border.all(color: t.accent.primary.withValues(alpha: 0.35)),
+                        boxShadow: [
+                          BoxShadow(color: t.accent.primary.withValues(alpha: 0.15), blurRadius: 14, offset: const Offset(0, 3)),
                         ],
                       ),
-                      child: Text(text, style: const TextStyle(
-                        fontSize: 13.5, color: kText, height: 1.55,
+                      child: Text(text, style: TextStyle(
+                        fontSize: 13.5, color: t.textPrimary, height: 1.55,
                       )),
                     ),
                     const SizedBox(height: 3),
-                    const Text('Now', style: TextStyle(fontSize: 10, color: kTextDim)),
+                    Text('Now', style: TextStyle(fontSize: 10, color: t.mutedText.withValues(alpha: 0.6))),
                   ],
                 ),
               ),
@@ -1179,8 +1168,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  // [PATCH B30] Typing indicator with animated bouncing dots
-  Widget _buildTypingIndicator() {
+  Widget _buildTypingIndicator(AppThemeTokens t) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
@@ -1188,9 +1176,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         children: [
           Container(
             width: 32, height: 32,
-            decoration: const BoxDecoration(
-              color: kPanel, shape: BoxShape.circle,
-              border: Border.fromBorderSide(BorderSide(color: kCardBorder)),
+            decoration: BoxDecoration(
+              color: t.panel, shape: BoxShape.circle,
+              border: Border.all(color: t.cardBorder),
             ),
             child: Center(child: Text(_activeEmoji, style: const TextStyle(fontSize: 14))),
           ),
@@ -1198,12 +1186,12 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
             decoration: BoxDecoration(
-              color: kPanel,
+              color: t.panel,
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(18), topRight: Radius.circular(18),
                 bottomRight: Radius.circular(18), bottomLeft: Radius.circular(5),
               ),
-              border: Border.all(color: kCardBorder),
+              border: Border.all(color: t.cardBorder),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1211,10 +1199,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                 return AnimatedBuilder(
                   animation: _typingController,
                   builder: (context, _) {
-                    // Staggered: dot i peaks at phase offset (i * 0.15)
                     final phase = (_typingController.value + i * 0.15) % 1.0;
-                    final t = (phase < 0.5) ? phase * 2 : (1 - phase) * 2;
-                    final offset = Curves.easeInOut.transform(t) * -5.0;
+                    final animT = (phase < 0.5) ? phase * 2 : (1 - phase) * 2;
+                    final offset = Curves.easeInOut.transform(animT) * -5.0;
                     return Container(
                       margin: const EdgeInsets.symmetric(horizontal: 2.5),
                       child: Transform.translate(
@@ -1223,7 +1210,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                           width: 6, height: 6,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: t > 0.5 ? kAccent : kTextDim,
+                            color: animT > 0.5 ? t.accent.primary : t.mutedText.withValues(alpha: 0.6),
                           ),
                         ),
                       ),
@@ -1238,12 +1225,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildChatInputBar() {
+  Widget _buildChatInputBar(AppThemeTokens t) {
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 10, 18, 24),
       child: Column(
         children: [
-          // [PATCH B31/B32] Suggestion chips with visibility + animation + auto-send
           if (_chipsVisible)
             SizedBox(
               height: 38,
@@ -1254,7 +1240,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                 itemBuilder: (context, i) {
                   return _ScaleButton(
                     onTap: () {
-                      // [PATCH B32] Fill AND auto-send, hide chips
                       _chatCtrl.text = kSuggestionChips[i]['label']!;
                       _sendMessage();
                     },
@@ -1263,15 +1248,15 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                       decoration: BoxDecoration(
-                        color: kPanel,
+                        color: t.panel,
                         borderRadius: BorderRadius.circular(50),
-                        border: Border.all(color: const Color(0x4D6B91FF), width: 1.5),
-                        boxShadow: const [BoxShadow(color: Color(0x1A6B91FF), blurRadius: 8)],
+                        border: Border.all(color: t.accent.primary.withValues(alpha: 0.3), width: 1.5),
+                        boxShadow: [BoxShadow(color: t.accent.primary.withValues(alpha: 0.1), blurRadius: 8)],
                       ),
                       child: Text(
                         kSuggestionChips[i]['label']!,
-                        style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600, color: kAccent,
+                        style: TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w600, color: t.accent.primary,
                         ),
                       ),
                     ),
@@ -1280,48 +1265,45 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               ),
             ),
           const SizedBox(height: 10),
-          // Input bar
           Container(
             padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
             decoration: BoxDecoration(
-              color: kPanel2,
+              color: t.panelBorder,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: kCardBorder),
-              boxShadow: const [
-                BoxShadow(color: Color(0x59000000), blurRadius: 24, offset: Offset(0, 6)),
+              border: Border.all(color: t.cardBorder),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 24, offset: const Offset(0, 6)),
               ],
             ),
             child: Row(
               children: [
-                const Icon(Icons.chat_bubble_outline, size: 17, color: kTextDim),
+                Icon(Icons.chat_bubble_outline, size: 17, color: t.mutedText.withValues(alpha: 0.6)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: _chatCtrl,
-                    style: const TextStyle(fontSize: 14, color: kText),
-                    decoration: const InputDecoration(
+                    style: TextStyle(fontSize: 14, color: t.textPrimary),
+                    decoration: InputDecoration(
                       hintText: 'Ask about your outfit…',
-                      hintStyle: TextStyle(color: kTextDim),
+                      hintStyle: TextStyle(color: t.mutedText.withValues(alpha: 0.6)),
                       border: InputBorder.none,
                       isDense: true,
-                      contentPadding: EdgeInsets.symmetric(vertical: 5),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 5),
                     ),
                     onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
                 const SizedBox(width: 8),
-                // Mic button — no voice recognition yet, placeholder
                 Container(
                   width: 36, height: 36,
                   decoration: BoxDecoration(
-                    color: kPanel,
+                    color: t.panel,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0x408D7DFF)),
+                    border: Border.all(color: t.accent.secondary.withValues(alpha: 0.25)),
                   ),
-                  child: const Icon(Icons.mic_none, size: 16, color: kAccent2),
+                  child: Icon(Icons.mic_none, size: 16, color: t.accent.secondary),
                 ),
                 const SizedBox(width: 8),
-                // [PATCH B33] Send button with scale animation
                 _ScaleButton(
                   onTap: _sendMessage,
                   scaleTo: 1.08,
@@ -1329,13 +1311,13 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                   child: Container(
                     width: 36, height: 36,
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(colors: [kAccent, kAccent2]),
+                      gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
                       borderRadius: BorderRadius.circular(12),
-                      boxShadow: const [
+                      boxShadow: [
                         BoxShadow(
-                          color: Color(0x666B91FF),
+                          color: t.accent.primary.withValues(alpha: 0.4),
                           blurRadius: 12,
-                          offset: Offset(0, 3),
+                          offset: const Offset(0, 3),
                         ),
                       ],
                     ),
@@ -1350,84 +1332,76 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  // ══════════════════════════════════════════
-  // MODAL — Add Plan
-  // ══════════════════════════════════════════
-  Widget _buildModal() {
+  Widget _buildModal(AppThemeTokens t) {
     return GestureDetector(
-      // [PATCH B16] Backdrop dismiss
       onTap: () => setState(() => _modalOpen = false),
       child: FadeTransition(
-        // [PATCH B15] Fade in overlay
         opacity: _modalFadeAnim,
         child: Container(
-          color: const Color(0xA608111F),
+          color: Colors.black.withValues(alpha: 0.65),
           child: Align(
             alignment: Alignment.bottomCenter,
             child: GestureDetector(
               onTap: () {},
               child: SlideTransition(
-                // [PATCH B15] Sheet slide-up
                 position: _modalSlideAnim,
                 child: Container(
                   width: double.infinity,
                   margin: const EdgeInsets.fromLTRB(14, 0, 14, 18),
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
+                    gradient: LinearGradient(
                       begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                      colors: [kBg2, kPhoneShell],
+                      colors: [t.backgroundSecondary, t.phoneShell],
                     ),
                     borderRadius: const BorderRadius.only(
                       topLeft: Radius.circular(32), topRight: Radius.circular(32),
                       bottomLeft: Radius.circular(22), bottomRight: Radius.circular(22),
                     ),
-                    border: const Border(
-                      top: BorderSide(color: Color(0x24FFFFFF), width: 1.5),
-                      left: BorderSide(color: Color(0x1AFFFFFF)),
-                      right: BorderSide(color: Color(0x0FFFFFFF)),
+                    border: Border(
+                      top: BorderSide(color: Colors.white.withValues(alpha: 0.15), width: 1.5),
+                      left: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+                      right: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
                     ),
-                    boxShadow: const [
-                      BoxShadow(color: Color(0x8C000000), blurRadius: 36, offset: Offset(0, -8)),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 36, offset: const Offset(0, -8)),
                     ],
                   ),
                   child: SingleChildScrollView(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Handle
                         Center(
                           child: Container(
                             width: 42, height: 4,
                             margin: const EdgeInsets.only(bottom: 18),
                             decoration: BoxDecoration(
-                              color: const Color(0x2EFFFFFF),
+                              color: Colors.white.withValues(alpha: 0.18),
                               borderRadius: BorderRadius.circular(99),
                             ),
                           ),
                         ),
-                        // Header
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('New Plan', style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.w600, color: kText,
+                            Text('New Plan', style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.w600, color: t.textPrimary,
                             )),
                             GestureDetector(
                               onTap: () => setState(() => _modalOpen = false),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
                                 decoration: BoxDecoration(
-                                  color: kPanel,
+                                  color: t.panel,
                                   borderRadius: BorderRadius.circular(11),
-                                  border: Border.all(color: kCardBorder),
+                                  border: Border.all(color: t.cardBorder),
                                 ),
                                 child: Row(
-                                  children: const [
-                                    Icon(Icons.close, size: 13, color: kMuted),
-                                    SizedBox(width: 5),
+                                  children: [
+                                    Icon(Icons.close, size: 13, color: t.mutedText),
+                                    const SizedBox(width: 5),
                                     Text('Close', style: TextStyle(
-                                      fontSize: 13, fontWeight: FontWeight.w600, color: kMuted,
+                                      fontSize: 13, fontWeight: FontWeight.w600, color: t.mutedText,
                                     )),
                                   ],
                                 ),
@@ -1436,12 +1410,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                           ],
                         ),
                         const SizedBox(height: 18),
-                        const Text('CHOOSE OCCASION', style: TextStyle(
+                        Text('CHOOSE OCCASION', style: TextStyle(
                           fontSize: 10.5, fontWeight: FontWeight.w700,
-                          letterSpacing: 0.16 * 10.5, color: kMuted,
+                          letterSpacing: 0.16 * 10.5, color: t.mutedText,
                         )),
                         const SizedBox(height: 10),
-                        // [PATCH B17/B18] Event grid with press animation + navigation to chat
                         GridView.builder(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
@@ -1455,28 +1428,21 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                             final isActive = _selectedEvent == ev['label'];
                             return _ScaleButton(
                               onTap: () {
-                                // [PATCH B18] Select event AND navigate to chat
                                 setState(() {
                                   _selectedEvent = ev['label']!;
                                   _selectedEventEmoji = ev['emoji']!;
-                                  _modalOpen = false;
-                                  _activeOccasion = ev['label']!;
-                                  _activeEmoji = ev['emoji']!;
-                                  _showChat = true;
-                                  _messages.clear();
-                                  _chipsVisible = true;
                                 });
                               },
                               scaleTo: 1.06,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(vertical: 11),
                                 decoration: BoxDecoration(
-                                  gradient: _eventBg(ev['type']!),
+                                  gradient: _eventBg(ev['type']!, t),
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(
                                     color: isActive
-                                        ? _eventColor(ev['type']!).withOpacity(0.55)
-                                        : kCardBorder,
+                                        ? _eventColor(ev['type']!, t).withValues(alpha: 0.55)
+                                        : t.cardBorder,
                                     width: isActive ? 1.5 : 1,
                                   ),
                                 ),
@@ -1487,7 +1453,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                     const SizedBox(height: 5),
                                     Text(ev['label']!, style: TextStyle(
                                       fontSize: 11, fontWeight: FontWeight.w700,
-                                      color: _eventColor(ev['type']!),
+                                      color: _eventColor(ev['type']!, t),
                                     )),
                                   ],
                                 ),
@@ -1496,27 +1462,25 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                           },
                         ),
                         const SizedBox(height: 16),
-                        // [PATCH B20/B21] Outfit suggestions carousel
                         Text(
                           _selectedEvent.isNotEmpty
-                              ? 'IDEAS FOR $_selectedEvent'
+                              ? 'IDEAS FOR ${_selectedEvent.toUpperCase()}'
                               : 'OUTFIT SUGGESTIONS',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 10.5, fontWeight: FontWeight.w700,
-                            letterSpacing: 0.16 * 10.5, color: kMuted,
+                            letterSpacing: 0.16 * 10.5, color: t.mutedText,
                           ),
                         ),
                         const SizedBox(height: 10),
-                        _buildOutfitCarousel(),
+                        _buildOutfitCarousel(t),
                         const SizedBox(height: 16),
-                        const Text('SET TIME', style: TextStyle(
+                        Text('SET TIME', style: TextStyle(
                           fontSize: 10.5, fontWeight: FontWeight.w700,
-                          letterSpacing: 0.16 * 10.5, color: kMuted,
+                          letterSpacing: 0.16 * 10.5, color: t.mutedText,
                         )),
                         const SizedBox(height: 10),
-                        _buildTimeRow(),
+                        _buildTimeRow(t, setState),
                         const SizedBox(height: 16),
-                        // [PATCH B26] Save button with press animation
                         _ScaleButton(
                           onTap: _savePlan,
                           scaleTo: 1.015,
@@ -1526,12 +1490,12 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                             width: double.infinity,
                             padding: const EdgeInsets.symmetric(vertical: 15),
                             decoration: BoxDecoration(
-                              gradient: const LinearGradient(colors: [kAccent, kAccent2]),
+                              gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
                               borderRadius: BorderRadius.circular(18),
-                              boxShadow: const [
+                              boxShadow: [
                                 BoxShadow(
-                                  color: Color(0x596B91FF),
-                                  blurRadius: 22, offset: Offset(0, 6),
+                                  color: t.accent.primary.withValues(alpha: 0.35),
+                                  blurRadius: 22, offset: const Offset(0, 6),
                                 ),
                               ],
                             ),
@@ -1559,23 +1523,22 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  // [PATCH B20/B21] Outfit carousel for modal
-  Widget _buildOutfitCarousel() {
+  Widget _buildOutfitCarousel(AppThemeTokens t) {
     final outfits = kOutfits[_selectedEvent];
     if (outfits == null) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: kPanel,
+          color: t.panel,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: kAccent2.withOpacity(0.28), width: 1.5),
+          border: Border.all(color: t.accent.secondary.withValues(alpha: 0.35), width: 1.5),
         ),
-        child: const Center(
+        child: Center(
           child: Text(
             'Select an occasion above to see outfit ideas ?',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: kTextDim),
+            style: TextStyle(fontSize: 13, color: t.mutedText.withValues(alpha: 0.6)),
           ),
         ),
       );
@@ -1590,7 +1553,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         itemBuilder: (context, i) {
           final outfit = outfits[i];
           final isPicked = _pickedOutfitIdx == i;
-          // [PATCH B20/B21] Outfit card with scale + picked badge animation
           return _ScaleButton(
             onTap: () => setState(() => _pickedOutfitIdx = i),
             scaleTo: 1.02,
@@ -1605,21 +1567,21 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                   begin: const Alignment(-0.7, -0.7),
                   end: const Alignment(0.7, 0.7),
                   colors: isPicked
-                      ? [const Color(0x478D7DFF), const Color(0x2E6B91FF)]
-                      : [const Color(0x286B91FF), const Color(0x1A8D7DFF)],
+                      ? [t.accent.secondary.withValues(alpha: 0.28), t.accent.primary.withValues(alpha: 0.18)]
+                      : [t.accent.primary.withValues(alpha: 0.15), t.accent.secondary.withValues(alpha: 0.10)],
                 ),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: isPicked
-                      ? kAccent2.withOpacity(0.55)
-                      : kCardBorder,
+                      ? t.accent.secondary.withValues(alpha: 0.55)
+                      : t.cardBorder,
                   width: isPicked ? 1.5 : 1,
                 ),
                 boxShadow: [
                   BoxShadow(
                     color: isPicked
-                        ? kAccent2.withOpacity(0.35)
-                        : Colors.black.withOpacity(0.25),
+                        ? t.accent.secondary.withValues(alpha: 0.45)
+                        : Colors.black.withValues(alpha: 0.25),
                     blurRadius: isPicked ? 22 : 10,
                     offset: const Offset(0, 6),
                   ),
@@ -1632,27 +1594,26 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     children: [
                       Text(
                         outfit['vibe'] ?? '',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 9, fontWeight: FontWeight.w800,
-                          letterSpacing: 1.2, color: kAccent,
+                          letterSpacing: 1.2, color: t.accent.primary,
                         ),
                       ),
                       const SizedBox(height: 5),
                       Text(
                         outfit['desc'] ?? '',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12.5, fontWeight: FontWeight.w700,
-                          color: kText, height: 1.5,
+                          color: t.textPrimary, height: 1.5,
                         ),
                       ),
                       const SizedBox(height: 7),
                       Text(
                         '💡 ${outfit['tip'] ?? ''}',
-                        style: const TextStyle(fontSize: 11, color: kMuted, height: 1.5),
+                        style: TextStyle(fontSize: 11, color: t.mutedText, height: 1.5),
                       ),
                     ],
                   ),
-                  // [PATCH B21] Picked badge with scale animation
                   Positioned(
                     top: 0, right: 0,
                     child: AnimatedScale(
@@ -1665,7 +1626,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                           decoration: BoxDecoration(
-                            gradient: const LinearGradient(colors: [kAccent, kAccent2]),
+                            gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
                             borderRadius: BorderRadius.circular(99),
                           ),
                           child: const Text('✓ Picked', style: TextStyle(
@@ -1684,13 +1645,13 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildTimeRow() {
-    // [PATCH B22] Focus-aware time row with animated border glow
+  Widget _buildTimeRow(AppThemeTokens t, StateSetter modalSetState) {
     return _FocusGlowContainer(
       focusNodes: [_hourFocus, _minFocus],
+      t: t,
       child: Row(
         children: [
-          const Icon(Icons.access_time_outlined, size: 18, color: kTextDim),
+          Icon(Icons.access_time_outlined, size: 18, color: t.mutedText.withValues(alpha: 0.6)),
           const SizedBox(width: 8),
           SizedBox(
             width: 44,
@@ -1698,21 +1659,20 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               controller: _hourCtrl,
               focusNode: _hourFocus,
               keyboardType: TextInputType.number,
-              // [PATCH B23] Max-length of 2 for auto-advance
               inputFormatters: [LengthLimitingTextInputFormatter(2)],
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 22, fontWeight: FontWeight.w500, color: kText,
+              style: TextStyle(
+                fontSize: 22, fontWeight: FontWeight.w500, color: t.textPrimary,
               ),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'HH',
-                hintStyle: TextStyle(color: Color(0x38E6EBFF)),
+                hintStyle: TextStyle(color: t.mutedText.withValues(alpha: 0.2)),
                 border: InputBorder.none, isDense: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 9),
+                contentPadding: const EdgeInsets.symmetric(vertical: 9),
               ),
             ),
           ),
-          const Text(':', style: TextStyle(fontSize: 22, color: kTextDim)),
+          Text(':', style: TextStyle(fontSize: 22, color: t.mutedText.withValues(alpha: 0.6))),
           SizedBox(
             width: 44,
             child: TextField(
@@ -1721,32 +1681,32 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               keyboardType: TextInputType.number,
               inputFormatters: [LengthLimitingTextInputFormatter(2)],
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 22, fontWeight: FontWeight.w500, color: kText,
+              style: TextStyle(
+                fontSize: 22, fontWeight: FontWeight.w500, color: t.textPrimary,
               ),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'MM',
-                hintStyle: TextStyle(color: Color(0x38E6EBFF)),
+                hintStyle: TextStyle(color: t.mutedText.withValues(alpha: 0.2)),
                 border: InputBorder.none, isDense: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 9),
+                contentPadding: const EdgeInsets.symmetric(vertical: 9),
               ),
             ),
           ),
           Container(
             width: 1, height: 26,
             margin: const EdgeInsets.symmetric(horizontal: 7),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                colors: [kCardBorder, Color(0x0FFFFFFF)],
+                colors: [t.cardBorder, Colors.white.withValues(alpha: 0.05)],
               ),
             ),
           ),
           Row(
             children: [
-              _buildAmPmBtn('AM'),
+              _buildAmPmBtn('AM', t, modalSetState),
               const SizedBox(width: 4),
-              _buildAmPmBtn('PM'),
+              _buildAmPmBtn('PM', t, modalSetState),
             ],
           ),
         ],
@@ -1754,22 +1714,21 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildAmPmBtn(String label) {
+  Widget _buildAmPmBtn(String label, AppThemeTokens t, StateSetter modalSetState) {
     final isActive = _selectedAmPm == label;
     return GestureDetector(
-      onTap: () => setState(() => _selectedAmPm = label),
+      onTap: () => modalSetState(() => _selectedAmPm = label),
       child: AnimatedContainer(
-        // [PATCH B25] Animated AM/PM toggle
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           gradient: isActive
-              ? const LinearGradient(colors: [kAccent, kAccent2])
+              ? LinearGradient(colors: [t.accent.primary, t.accent.secondary])
               : null,
           color: isActive ? null : Colors.transparent,
           borderRadius: BorderRadius.circular(9),
           boxShadow: isActive
-              ? [BoxShadow(color: kAccent.withOpacity(0.4), blurRadius: 10, offset: const Offset(0, 3))]
+              ? [BoxShadow(color: t.accent.primary.withValues(alpha: 0.4), blurRadius: 10, offset: const Offset(0, 3))]
               : [],
         ),
         child: Text(
@@ -1777,7 +1736,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           style: TextStyle(
             fontSize: 12, fontWeight: FontWeight.w800,
             letterSpacing: 0.06 * 12,
-            color: isActive ? Colors.white : kMuted,
+            color: isActive ? Colors.white : t.mutedText,
           ),
         ),
       ),
@@ -1789,13 +1748,15 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 // HELPER WIDGETS
 // ══════════════════════════════════════════
 
-/// [PATCH B01/B04/B08/B14/B26/B28/B33] Universal scale+translate press button
 class _ScaleButton extends StatefulWidget {
   final Widget child;
   final VoidCallback onTap;
   final double scaleTo;
   final double pressScale;
   final double translateY;
+  final double hoverScale;
+  final double hoverTranslateY;
+  final bool enableHover;
 
   const _ScaleButton({
     required this.child,
@@ -1803,6 +1764,9 @@ class _ScaleButton extends StatefulWidget {
     this.scaleTo = 1.0,
     this.pressScale = 0.96,
     this.translateY = 0.0,
+    this.hoverScale = 1.0,
+    this.hoverTranslateY = 0.0,
+    this.enableHover = true,
   });
 
   @override
@@ -1815,6 +1779,7 @@ class _ScaleButtonState extends State<_ScaleButton>
   late Animation<double> _scaleAnim;
   late Animation<double> _yAnim;
   bool _pressed = false;
+  bool _hovered = false;
 
   @override
   void initState() {
@@ -1855,17 +1820,22 @@ class _ScaleButtonState extends State<_ScaleButton>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final hoverScale = _hovered ? widget.hoverScale : 1.0;
+    final hoverY = _hovered ? widget.hoverTranslateY : 0.0;
+
+    Widget content = GestureDetector(
       onTapDown: _onTapDown,
       onTapUp: _onTapUp,
       onTapCancel: _onTapCancel,
       child: AnimatedBuilder(
         animation: _ctrl,
         builder: (context, child) {
+          final scale = (_pressed ? _scaleAnim.value : 1.0) * hoverScale;
+          final y = (_pressed ? _yAnim.value : 0.0) + hoverY;
           return Transform.translate(
-            offset: Offset(0, _yAnim.value),
+            offset: Offset(0, y),
             child: Transform.scale(
-              scale: _pressed ? _scaleAnim.value : 1.0,
+              scale: scale,
               child: child,
             ),
           );
@@ -1873,16 +1843,24 @@ class _ScaleButtonState extends State<_ScaleButton>
         child: widget.child,
       ),
     );
+
+    if (!widget.enableHover) return content;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: content,
+    );
   }
 }
 
-/// [PATCH B05/B06] Animated day pill with lift on selection
 class _AnimatedDayPill extends StatefulWidget {
   final DateTime day;
   final bool isActive;
   final bool isToday;
   final bool hasEvents;
   final String weekdayShort;
+  final AppThemeTokens t;
 
   const _AnimatedDayPill({
     required this.day,
@@ -1890,6 +1868,7 @@ class _AnimatedDayPill extends StatefulWidget {
     required this.isToday,
     required this.hasEvents,
     required this.weekdayShort,
+    required this.t,
   });
 
   @override
@@ -1897,106 +1876,112 @@ class _AnimatedDayPill extends StatefulWidget {
 }
 
 class _AnimatedDayPillState extends State<_AnimatedDayPill> {
+  bool _hovered = false;
+
   @override
   Widget build(BuildContext context) {
+    final isHover = _hovered && !widget.isActive;
+    final hoverLift = isHover ? -2.0 : 0.0;
+    final hoverScale = isHover ? 1.02 : 1.0;
+    final t = widget.t;
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
       transform: Matrix4.translationValues(
         0,
-        widget.isActive ? -3.0 : 0.0,
+        (widget.isActive ? -3.0 : 0.0) + hoverLift,
         0,
       ),
       transformAlignment: Alignment.center,
       child: AnimatedScale(
-        scale: widget.isActive ? 1.05 : 1.0,
+        scale: widget.isActive ? 1.05 : hoverScale,
         duration: const Duration(milliseconds: 260),
         curve: Curves.easeOutCubic,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              width: 50, height: 76,
-              decoration: BoxDecoration(
-                gradient: widget.isActive
-                    ? const LinearGradient(
-                  begin: Alignment.topLeft, end: Alignment.bottomRight,
-                  colors: [Color(0x4D6B91FF), Color(0x388D7DFF), Color(0x266B91FF)],
-                )
-                    : null,
-                color: widget.isActive ? null : kPanel,
-                borderRadius: BorderRadius.circular(16),
-                border: Border(
-                  top: BorderSide(
-                    color: widget.isActive ? const Color(0x33FFFFFF) : const Color(0x1FFFFFFF),
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 50, height: 76,
+                decoration: BoxDecoration(
+                  gradient: widget.isActive
+                      ? LinearGradient(
+                    begin: Alignment.topLeft, end: Alignment.bottomRight,
+                    colors: [t.accent.primary.withValues(alpha: 0.3), t.accent.secondary.withValues(alpha: 0.22), t.accent.primary.withValues(alpha: 0.15)],
+                  )
+                      : null,
+                  color: widget.isActive ? null : (isHover ? t.panelBorder : t.panel),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: widget.isActive ? Colors.white.withValues(alpha: 0.2) : t.cardBorder,
                   ),
-                  left: BorderSide(
-                    color: widget.isActive ? const Color(0x596B91FF) : const Color(0x14FFFFFF),
-                  ),
-                  right: const BorderSide(color: Color(0x0DFFFFFF)),
-                  bottom: const BorderSide(color: Color(0x0AFFFFFF)),
+                  boxShadow: widget.isActive
+                      ? [BoxShadow(color: t.accent.primary.withValues(alpha: 0.35), blurRadius: 24, offset: const Offset(0, 8))]
+                      : (isHover
+                          ? [BoxShadow(color: t.accent.primary.withValues(alpha: 0.35), blurRadius: 14, offset: const Offset(0, 4))]
+                          : [BoxShadow(color: t.accent.primary.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 3))]),
                 ),
-                boxShadow: widget.isActive
-                    ? const [BoxShadow(color: Color(0x596B91FF), blurRadius: 24, offset: Offset(0, 8))]
-                    : const [BoxShadow(color: Color(0x596B91FF), blurRadius: 10, offset: Offset(0, 3))],
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    widget.weekdayShort,
-                    style: TextStyle(
-                      fontSize: 9.5, fontWeight: FontWeight.w700,
-                      letterSpacing: 0.08 * 9.5,
-                      color: widget.isActive ? kAccent : kTextDim,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      widget.weekdayShort,
+                      style: TextStyle(
+                        fontSize: 9.5, fontWeight: FontWeight.w700,
+                        letterSpacing: 0.08 * 9.5,
+                        color: widget.isActive ? t.accent.primary : t.mutedText.withValues(alpha: 0.6),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    '${widget.day.day}',
-                    style: const TextStyle(
-                      fontSize: 19, fontWeight: FontWeight.w700, color: kText, height: 1,
+                    const SizedBox(height: 3),
+                    Text(
+                      '${widget.day.day}',
+                      style: TextStyle(
+                        fontSize: 19, fontWeight: FontWeight.w700, color: t.textPrimary, height: 1,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            if (widget.isToday)
-              Positioned(
-                top: 7, right: 7,
-                child: Container(
-                  width: 5, height: 5,
-                  decoration: const BoxDecoration(
-                    color: kAccent3, shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: Color(0xBF04D7C8), blurRadius: 7)],
-                  ),
+                  ],
                 ),
               ),
-            // [PATCH B42] Event dot only if has plans
-            if (widget.hasEvents)
-              Positioned(
-                bottom: 17, left: 0, right: 0,
-                child: Center(
+              if (widget.isToday)
+                Positioned(
+                  top: 7, right: 7,
                   child: Container(
                     width: 5, height: 5,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(colors: [kAccent, kAccent2]),
+                    decoration: BoxDecoration(
+                      color: t.accent.tertiary, shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: t.accent.tertiary.withValues(alpha: 0.75), blurRadius: 7)],
                     ),
                   ),
                 ),
-              ),
-          ],
+              if (widget.hasEvents)
+                Positioned(
+                  bottom: 17, left: 0, right: 0,
+                  child: Center(
+                    child: Container(
+                      width: 5, height: 5,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// [PATCH B10/B11] Delete button with rotate-on-press animation
 class _RotatingDeleteButton extends StatefulWidget {
   final VoidCallback onTap;
-  const _RotatingDeleteButton({required this.onTap});
+  final AppThemeTokens t;
+
+  const _RotatingDeleteButton({required this.onTap, required this.t});
 
   @override
   State<_RotatingDeleteButton> createState() => _RotatingDeleteButtonState();
@@ -2015,7 +2000,7 @@ class _RotatingDeleteButtonState extends State<_RotatingDeleteButton>
       vsync: this,
       duration: const Duration(milliseconds: 200),
     );
-    _rotateAnim = Tween<double>(begin: 0, end: 0.25) // 90 degrees = 0.25 turns
+    _rotateAnim = Tween<double>(begin: 0, end: 0.25)
         .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
     _scaleAnim = Tween<double>(begin: 1.0, end: 1.18)
         .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
@@ -2029,6 +2014,7 @@ class _RotatingDeleteButtonState extends State<_RotatingDeleteButton>
 
   @override
   Widget build(BuildContext context) {
+    final t = widget.t;
     return GestureDetector(
       onTapDown: (_) => _ctrl.forward(),
       onTapUp: (_) { _ctrl.reverse(); widget.onTap(); },
@@ -2045,21 +2031,22 @@ class _RotatingDeleteButtonState extends State<_RotatingDeleteButton>
         child: Container(
           width: 22, height: 22,
           decoration: BoxDecoration(
-            color: kPanel, shape: BoxShape.circle,
-            border: Border.all(color: kCardBorder),
+            color: t.panel, shape: BoxShape.circle,
+            border: Border.all(color: t.cardBorder),
           ),
-          child: const Icon(Icons.close, size: 9, color: kAccent4),
+          child: Icon(Icons.close, size: 9, color: t.accent.tertiary), 
         ),
       ),
     );
   }
 }
 
-/// [PATCH B12/B13] Bell button with scale animation and toggle state
 class _BellButton extends StatefulWidget {
   final bool isOn;
   final VoidCallback onTap;
-  const _BellButton({required this.isOn, required this.onTap});
+  final AppThemeTokens t;
+
+  const _BellButton({required this.isOn, required this.onTap, required this.t});
 
   @override
   State<_BellButton> createState() => _BellButtonState();
@@ -2089,6 +2076,7 @@ class _BellButtonState extends State<_BellButton>
 
   @override
   Widget build(BuildContext context) {
+    final t = widget.t;
     return GestureDetector(
       onTapDown: (_) => _ctrl.forward(),
       onTapUp: (_) { _ctrl.reverse(); widget.onTap(); },
@@ -2102,19 +2090,19 @@ class _BellButtonState extends State<_BellButton>
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             gradient: widget.isOn
-                ? const LinearGradient(
-              colors: [Color(0x386B91FF), Color(0x236B91FF)],
+                ? LinearGradient(
+              colors: [t.accent.primary.withValues(alpha: 0.22), t.accent.primary.withValues(alpha: 0.14)],
             )
                 : null,
-            color: widget.isOn ? null : kPanel,
+            color: widget.isOn ? null : t.panel,
             border: widget.isOn
-                ? Border.all(color: const Color(0x666B91FF), width: 1.5)
+                ? Border.all(color: t.accent.primary.withValues(alpha: 0.40), width: 1.5)
                 : null,
           ),
           child: Icon(
             widget.isOn ? Icons.notifications : Icons.notifications_off_outlined,
             size: 13,
-            color: widget.isOn ? kAccent : kTextDim,
+            color: widget.isOn ? t.accent.primary : t.mutedText.withValues(alpha: 0.6),
           ),
         ),
       ),
@@ -2122,19 +2110,18 @@ class _BellButtonState extends State<_BellButton>
   }
 }
 
-/// [PATCH B02] Animated pulse dot
 class _PulseDot extends StatelessWidget {
   final AnimationController controller;
   final Animation<double> animation;
+  final AppThemeTokens t;
 
-  const _PulseDot({required this.controller, required this.animation});
+  const _PulseDot({required this.controller, required this.animation, required this.t});
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
-        // Pulse: box-shadow spread grows from 0→8 then back to 0
         final spread = Curves.easeOut.transform(
           (animation.value < 0.7)
               ? animation.value / 0.7
@@ -2144,10 +2131,10 @@ class _PulseDot extends StatelessWidget {
           width: 8, height: 8,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            gradient: const LinearGradient(colors: [kAccent, kAccent2]),
+            gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
             boxShadow: [
               BoxShadow(
-                color: kAccent.withOpacity(0.6),
+                color: t.accent.primary.withValues(alpha: 0.5),
                 blurRadius: spread,
                 spreadRadius: spread * 0.5,
               ),
@@ -2159,12 +2146,12 @@ class _PulseDot extends StatelessWidget {
   }
 }
 
-/// [PATCH B22] Focus-aware container with animated glow border
 class _FocusGlowContainer extends StatefulWidget {
   final Widget child;
   final List<FocusNode> focusNodes;
+  final AppThemeTokens t;
 
-  const _FocusGlowContainer({required this.child, required this.focusNodes});
+  const _FocusGlowContainer({required this.child, required this.focusNodes, required this.t});
 
   @override
   State<_FocusGlowContainer> createState() => _FocusGlowContainerState();
@@ -2198,17 +2185,18 @@ class _FocusGlowContainerState extends State<_FocusGlowContainer> {
 
   @override
   Widget build(BuildContext context) {
+    final t = widget.t;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       padding: const EdgeInsets.fromLTRB(16, 4, 6, 4),
       decoration: BoxDecoration(
-        color: kPanel,
+        color: t.panel,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: _isFocused ? kAccent2.withOpacity(0.5) : kCardBorder,
+          color: _isFocused ? t.accent.secondary.withValues(alpha: 0.55) : t.cardBorder,
         ),
         boxShadow: _isFocused
-            ? [BoxShadow(color: kAccent2.withOpacity(0.18), blurRadius: 10, spreadRadius: 2)]
+            ? [BoxShadow(color: t.accent.secondary.withValues(alpha: 0.35), blurRadius: 10, spreadRadius: 2)]
             : [],
       ),
       child: widget.child,
@@ -2216,7 +2204,6 @@ class _FocusGlowContainerState extends State<_FocusGlowContainer> {
   }
 }
 
-/// [PATCH B37] Toast overlay widget
 class _ToastWidget extends StatefulWidget {
   final String message;
   final VoidCallback onDismissed;
@@ -2267,6 +2254,7 @@ class _ToastWidgetState extends State<_ToastWidget>
 
   @override
   Widget build(BuildContext context) {
+    final t = context.themeTokens;
     return Positioned(
       bottom: 80,
       left: 0, right: 0,
@@ -2278,17 +2266,17 @@ class _ToastWidgetState extends State<_ToastWidget>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               decoration: BoxDecoration(
-                color: const Color(0xEC0F1A2D),
+                color: t.backgroundSecondary.withValues(alpha: 0.92),
                 borderRadius: BorderRadius.circular(30),
-                border: Border.all(color: kCardBorder),
-                boxShadow: const [
-                  BoxShadow(color: Color(0x66000000), blurRadius: 20),
+                border: Border.all(color: t.cardBorder),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 20),
                 ],
               ),
               child: Text(
                 widget.message,
-                style: const TextStyle(
-                  fontSize: 13.5, fontWeight: FontWeight.w500, color: kText,
+                style: TextStyle(
+                  fontSize: 13.5, fontWeight: FontWeight.w500, color: t.textPrimary,
                 ),
               ),
             ),
@@ -2298,9 +2286,10 @@ class _ToastWidgetState extends State<_ToastWidget>
     );
   }
 }
-// Inline, reusable calendar panel for Boards screen.
 
-// Inline, reusable calendar panel for Boards screen.
+// ══════════════════════════════════════════
+// EXPANDABLE CALENDAR PANEL (For Boards)
+// ══════════════════════════════════════════
 typedef PlanCountsCallback = void Function(int totalPlans, int todayPlans);
 
 class ExpandableCalendarPanel extends StatefulWidget {
@@ -2317,12 +2306,8 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
   late DateTime _selectedDay;
   late DateTime _weekAnchor;
 
-  final Map<String, List<PlanItem>> _plansData = {
-    DateTime.now().toIso8601String().substring(0, 10): [
-      PlanItem(emoji: '💪', title: 'Gym', desc: 'Cardio Day · 7:00 AM', outfit: '', color: 'blue'),
-      PlanItem(emoji: '💼', title: 'Office', desc: 'Formal Meeting · 10:30 AM', outfit: '', color: 'purple'),
-    ],
-  };
+  // ⬅️ START EMPTY: Fetches from Appwrite
+  final Map<DateTime, List<Plan>> _plansData = {};
 
   String _selectedEvent = '';
   String _selectedEventEmoji = '📅';
@@ -2331,16 +2316,19 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
   final TextEditingController _minCtrl = TextEditingController();
   final FocusNode _hourFocus = FocusNode();
   final FocusNode _minFocus = FocusNode();
+  int _pickedOutfitIdx = -1;
 
   OverlayEntry? _toastOverlay;
 
-  String get _selectedDayKey => _selectedDay.toIso8601String().substring(0, 10);
-  List<PlanItem> get _todayPlans => _plansData[_selectedDayKey] ?? [];
+  DateTime _normalizeDate(DateTime d) => DateTime(d.year, d.month, d.day);
+  DateTime get _selectedDayKey => _normalizeDate(_selectedDay);
+  List<Plan> _plansForDay(DateTime d) => _plansData[_normalizeDate(d)] ?? [];
+  List<Plan> get _todayPlans => _plansForDay(_selectedDay);
 
   @override
   void initState() {
     super.initState();
-    _selectedDay = DateTime(_today.year, _today.month, _today.day);
+    _selectedDay = _normalizeDate(_today);
     _weekAnchor = _startOfWeek(_selectedDay);
 
     _hourCtrl.addListener(() {
@@ -2357,7 +2345,45 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
       }
     });
 
-    _notifyCounts();
+    // ⬅️ FETCH DB ON LOAD
+    _loadPlansFromAppwrite();
+  }
+
+  // ── APPWRITE FETCH LOGIC ───────────────────────────────────────────
+  Future<void> _loadPlansFromAppwrite() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final docs = await appwrite.getUserPlans();
+      
+      final newPlans = <DateTime, List<Plan>>{};
+      
+      for (var doc in docs) {
+        final data = doc.data;
+        final dt = DateTime.parse(data['dateTime']).toLocal(); 
+        final dateKey = _normalizeDate(dt);
+        
+        final plan = Plan(
+          id: doc.$id,
+          occasion: data['occasion'] ?? 'Event',
+          emoji: data['emoji'] ?? '📅',
+          outfitDescription: data['outfitDescription'] ?? '',
+          dateTime: dt,
+          reminder: data['reminder'] ?? true,
+        );
+        
+        newPlans.putIfAbsent(dateKey, () => []).add(plan);
+      }
+
+      if (mounted) {
+        setState(() {
+          _plansData.clear();
+          _plansData.addAll(newPlans);
+        });
+        _notifyCounts();
+      }
+    } catch (e) {
+      _showToast('Failed to load plans');
+    }
   }
 
   @override
@@ -2373,10 +2399,11 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
     if (widget.onCountsChanged == null) return;
     int total = 0;
     _plansData.forEach((_, list) => total += list.length);
-    final todayKey = _today.toIso8601String().substring(0, 10);
+    final todayKey = _normalizeDate(_today);
     final todayCount = _plansData[todayKey]?.length ?? 0;
     widget.onCountsChanged!(total, todayCount);
   }
+  
   DateTime _startOfWeek(DateTime d) {
     final weekday = d.weekday; // 1=Mon
     return d.subtract(Duration(days: weekday - 1));
@@ -2397,7 +2424,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
   }
 
   void _selectDay(DateTime d) {
-    setState(() => _selectedDay = d);
+    setState(() => _selectedDay = _normalizeDate(d));
   }
 
   bool _isToday(DateTime d) =>
@@ -2406,15 +2433,18 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
   bool _isSelected(DateTime d) =>
       d.year == _selectedDay.year && d.month == _selectedDay.month && d.day == _selectedDay.day;
 
+  bool _hasPlans(DateTime d) => _plansForDay(d).isNotEmpty;
+
   String _weekdayShort(DateTime d) {
     const names = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
     return names[d.weekday - 1];
   }
 
-  void _openModal() {
+  void _openModal(AppThemeTokens t) {
     setState(() {
       _selectedEvent = '';
       _selectedEventEmoji = '📅';
+      _pickedOutfitIdx = -1;
       _selectedAmPm = 'AM';
       _hourCtrl.clear();
       _minCtrl.clear();
@@ -2423,14 +2453,19 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      barrierColor: const Color(0xA608111F),
+      barrierColor: Colors.black.withValues(alpha: 0.65),
+      useRootNavigator: true,
       builder: (context) => StatefulBuilder(
-        builder: (context, modalSetState) => _buildModalSheet(modalSetState),
+        builder: (context, modalSetState) => Material(
+          color: Colors.transparent,
+          child: _buildModalSheet(modalSetState, t),
+        ),
       ),
     );
   }
 
-  void _savePlan() {
+  // ── APPWRITE SAVE LOGIC ───────────────────────────────────────────
+  Future<void> _savePlan() async {
     final hRaw = int.tryParse(_hourCtrl.text);
     final mRaw = int.tryParse(_minCtrl.text);
     if (_selectedEvent.isEmpty) {
@@ -2446,24 +2481,47 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
       return;
     }
 
-    final hh = hRaw.toString().padLeft(2, '0');
-    final mm = mRaw.toString().padLeft(2, '0');
-    final timeDisplay = '$hh:$mm $_selectedAmPm';
+    final selectedOutfit = (_pickedOutfitIdx >= 0 &&
+        kOutfits.containsKey(_selectedEvent) &&
+        _pickedOutfitIdx < kOutfits[_selectedEvent]!.length)
+        ? kOutfits[_selectedEvent]![_pickedOutfitIdx]['summary'] ?? ''
+        : '(no outfit selected)';
 
-    final plan = PlanItem(
-      emoji: _selectedEventEmoji,
-      title: _selectedEvent,
-      desc: timeDisplay,
-      outfit: '',
-      color: ['blue', 'purple', 'pink'][DateTime.now().millisecondsSinceEpoch % 3],
+    final hour = (_selectedAmPm == 'PM') ? (hRaw % 12) + 12 : (hRaw % 12);
+    final planDateTime = DateTime(
+      _selectedDay.year, _selectedDay.month, _selectedDay.day, hour, mRaw,
     );
 
-    setState(() {
-      _plansData[_selectedDayKey] = [...(_plansData[_selectedDayKey] ?? []), plan];
-    });
-    _notifyCounts();
-    _showToast('Plan saved!');
-    if (mounted) Navigator.of(context).pop();
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+
+    try {
+      final doc = await appwrite.createPlan({
+        'occasion': _selectedEvent,
+        'emoji': _selectedEventEmoji,
+        'outfitDescription': selectedOutfit,
+        'dateTime': planDateTime.toUtc().toIso8601String(), 
+        'reminder': true,
+      });
+
+      final plan = Plan(
+        id: doc.$id,
+        emoji: _selectedEventEmoji,
+        occasion: _selectedEvent,
+        outfitDescription: selectedOutfit,
+        dateTime: planDateTime,
+        reminder: true,
+      );
+
+      setState(() {
+        _plansData[_selectedDayKey] = [...(_plansData[_selectedDayKey] ?? []), plan];
+        _plansData[_selectedDayKey]!.sort((a, b) => a.dateTime.compareTo(b.dateTime));
+      });
+      _notifyCounts();
+      _showToast('Plan saved!');
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      _showToast('⚠ Failed to save plan. Check connection.');
+    }
   }
 
   void _showToast(String message) {
@@ -2486,91 +2544,70 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
     _toastOverlay = entry;
     overlay.insert(entry);
   }
-  LinearGradient _eventBg(String type, bool active) {
+
+  Color _eventColor(String type, AppThemeTokens t) {
     switch (type) {
-      case 'teal':
-        return LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: active
-              ? const [Color(0x6004D7C8), Color(0x3004D7C8)]
-              : const [Color(0x3804D7C8), Color(0x1E04D7C8)],
-        );
-      case 'purple':
-        return LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: active
-              ? const [Color(0x608D7DFF), Color(0x308D7DFF)]
-              : const [Color(0x388D7DFF), Color(0x1E8D7DFF)],
-        );
-      case 'pink':
-        return LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: active
-              ? const [Color(0x60FF8EC7), Color(0x30FF8EC7)]
-              : const [Color(0x2EFF8EC7), Color(0x1AFF8EC7)],
-        );
-      case 'amber':
-        return LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: active
-              ? const [Color(0x60FFD86E), Color(0x30FFD86E)]
-              : const [Color(0x38FFD86E), Color(0x1EFFD86E)],
-        );
-      default:
-        return LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: active
-              ? const [Color(0x606B91FF), Color(0x306B91FF)]
-              : const [Color(0x286B91FF), Color(0x1A6B91FF)],
-        );
+      case 'teal': return t.accent.tertiary;
+      case 'purple': return t.accent.secondary;
+      case 'pink': return Color.lerp(t.accent.primary, t.accent.tertiary, 0.5) ?? t.accent.tertiary;
+      case 'amber': return Color.lerp(t.accent.secondary, t.accent.tertiary, 0.5) ?? t.accent.secondary;
+      default: return t.accent.primary;
     }
   }
 
-  Color _eventColor(String type) {
-    switch (type) {
-      case 'teal': return kAccent3;
-      case 'purple': return kAccent2;
-      case 'pink': return kAccent4;
-      case 'amber': return kAccent5;
-      default: return kAccent;
-    }
+  LinearGradient _eventBg(String type, bool active, AppThemeTokens t) {
+    final c = _eventColor(type, t);
+    return LinearGradient(
+      begin: Alignment.topLeft, end: Alignment.bottomRight,
+      colors: active
+          ? [c.withValues(alpha: 0.35), c.withValues(alpha: 0.18)]
+          : [c.withValues(alpha: 0.22), c.withValues(alpha: 0.11)],
+    );
   }
 
-  LinearGradient _planCardBg(String color) {
-    switch (color) {
-      case 'pink':
-        return const LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [Color(0x28FF8EC7), Color(0x14FF8EC7)],
-        );
-      case 'purple':
-        return const LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [Color(0x2A8D7DFF), Color(0x148D7DFF)],
-        );
-      default:
-        return const LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [Color(0x2A6B91FF), Color(0x146B91FF)],
-        );
-    }
+  String _planTypeKey(Plan plan) {
+    final occ = plan.occasion.toLowerCase();
+    if (occ.contains('gym')) return 'teal';
+    if (occ.contains('office') || occ.contains('work')) return 'purple';
+    if (occ.contains('party') || occ.contains('date')) return 'pink';
+    if (occ.contains('shop')) return 'amber';
+    if (occ.contains('study')) return 'blue';
+    if (occ.contains('travel')) return 'teal';
+    return 'blue';
+  }
+
+  String _formatPlanTime(Plan plan) {
+    final t = TimeOfDay.fromDateTime(plan.dateTime);
+    final hour = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
+    final mm = t.minute.toString().padLeft(2, '0');
+    final ampm = t.period == DayPeriod.am ? 'AM' : 'PM';
+    return '$hour:$mm $ampm';
+  }
+
+  LinearGradient _planCardBg(String colorType, AppThemeTokens t) {
+    final c = _eventColor(colorType, t);
+    return LinearGradient(
+      begin: Alignment.topLeft, end: Alignment.bottomRight,
+      colors: [c.withValues(alpha: 0.16), c.withValues(alpha: 0.08)],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final week = _weekDays(_weekAnchor);
+    final t = context.themeTokens;
 
     return Container(
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
+            gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [kPanel, kPanel2],
+              colors: [t.panel, t.panelBorder],
             ),
             borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: kCardBorder),
-            boxShadow: const [
-              BoxShadow(color: Color(0x73000000), blurRadius: 32, offset: Offset(0, 8)),
+            border: Border.all(color: t.cardBorder),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 32, offset: const Offset(0, 8)),
             ],
           ),
           child: Column(
@@ -2583,42 +2620,44 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                     _ScaleButton(
                       onTap: () => _shiftWeek(-1),
                       scaleTo: 1.1,
+                      hoverScale: 1.1,
                       child: Container(
                         width: 32,
                         height: 32,
                         decoration: BoxDecoration(
-                          color: kPanel,
+                          color: t.panel,
                           borderRadius: BorderRadius.circular(10),
-                          boxShadow: const [
-                            BoxShadow(color: Color(0x33000000), blurRadius: 8, offset: Offset(0, 2)),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withValues(alpha: 0.20), blurRadius: 8, offset: const Offset(0, 2)),
                           ],
                         ),
-                        child: const Icon(Icons.chevron_left, color: kText, size: 18),
+                        child: Icon(Icons.chevron_left, color: t.textPrimary, size: 18),
                       ),
                     ),
                     Text(
                       _monthTitleFor(week),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
-                        color: kText,
+                        color: t.textPrimary,
                         letterSpacing: -0.2,
                       ),
                     ),
                     _ScaleButton(
                       onTap: () => _shiftWeek(1),
                       scaleTo: 1.1,
+                      hoverScale: 1.1,
                       child: Container(
                         width: 32,
                         height: 32,
                         decoration: BoxDecoration(
-                          color: kPanel,
+                          color: t.panel,
                           borderRadius: BorderRadius.circular(10),
-                          boxShadow: const [
-                            BoxShadow(color: Color(0x33000000), blurRadius: 8, offset: Offset(0, 2)),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withValues(alpha: 0.20), blurRadius: 8, offset: const Offset(0, 2)),
                           ],
                         ),
-                        child: const Icon(Icons.chevron_right, color: kText, size: 18),
+                        child: Icon(Icons.chevron_right, color: t.textPrimary, size: 18),
                       ),
                     ),
                   ],
@@ -2638,77 +2677,13 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                     final isToday = _isToday(day);
                     return GestureDetector(
                       onTap: () => _selectDay(day),
-                      child: Container(
-                        width: 50,
-                        decoration: BoxDecoration(
-                          gradient: isActive
-                              ? const LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [Color(0x4D6B91FF), Color(0x388D7DFF), Color(0x266B91FF)],
-                                )
-                              : null,
-                          color: isActive ? null : kPanel,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border(
-                            top: BorderSide(color: isActive ? const Color(0x33FFFFFF) : kCardBorder),
-                            left: BorderSide(color: isActive ? const Color(0x596B91FF) : const Color(0x14FFFFFF)),
-                            right: const BorderSide(color: Color(0x0DFFFFFF)),
-                            bottom: const BorderSide(color: Color(0x0AFFFFFF)),
-                          ),
-                          boxShadow: isActive
-                              ? const [BoxShadow(color: Color(0x596B91FF), blurRadius: 24, offset: Offset(0, 8))]
-                              : const [BoxShadow(color: Color(0x596B91FF), blurRadius: 10, offset: Offset(0, 3))],
-                        ),
-                        child: Stack(
-                          children: [
-                            Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(
-                                  _weekdayShort(day),
-                                  style: TextStyle(
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.08 * 9.5,
-                                    color: isActive ? kAccent : kTextDim,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  '${day.day}',
-                                  style: const TextStyle(
-                                    fontSize: 19,
-                                    fontWeight: FontWeight.w700,
-                                    color: kText,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            if (isToday)
-                              const Positioned(
-                                top: 7,
-                                right: 7,
-                                child: _TodayDot(),
-                              ),
-                            if (isActive)
-                              Positioned(
-                                bottom: 8,
-                                left: 0,
-                                right: 0,
-                                child: Center(
-                                  child: Container(
-                                    width: 5,
-                                    height: 5,
-                                    decoration: const BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      gradient: LinearGradient(colors: [kAccent, kAccent2]),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
+                      child: _AnimatedDayPill(
+                        day: day,
+                        isActive: isActive,
+                        isToday: isToday,
+                        hasEvents: _hasPlans(day),
+                        weekdayShort: _weekdayShort(day),
+                        t: t,
                       ),
                     );
                   },
@@ -2717,21 +2692,21 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
               Container(
                 height: 1,
                 margin: const EdgeInsets.fromLTRB(14, 4, 14, 0),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Colors.transparent, kCardBorder, Colors.transparent],
+                    colors: [Colors.transparent, t.cardBorder, Colors.transparent],
                   ),
                 ),
               ),
               Container(
                 padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0x0F6B91FF), Color(0x0A8D7DFF)],
+                    colors: [t.accent.primary.withValues(alpha: 0.06), t.accent.secondary.withValues(alpha: 0.04)],
                   ),
-                  borderRadius: BorderRadius.only(
+                  borderRadius: const BorderRadius.only(
                     bottomLeft: Radius.circular(22),
                     bottomRight: Radius.circular(22),
                   ),
@@ -2739,31 +2714,31 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       "TODAY'S PLANS",
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 1.8,
-                        color: kMuted,
+                        color: t.mutedText,
                       ),
                     ),
                     const SizedBox(height: 10),
                     if (_todayPlans.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 18),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 18),
                         child: Center(
                           child: Text(
                             'Nothing planned ??\nTap "Add a Plan" below',
                             textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 13, color: kMuted, height: 1.6),
+                            style: TextStyle(fontSize: 13, color: t.mutedText, height: 1.6),
                           ),
                         ),
                       )
                     else
-                      _buildPlansGrid(_todayPlans),
+                      _buildPlansGrid(_todayPlans, t),
                     const SizedBox(height: 12),
-                    _buildAddPlanButton(),
+                    _buildAddPlanButton(t),
                   ],
                 ),
               ),
@@ -2777,7 +2752,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
     return '${kMonths[m - 1]} ${week.first.year}';
   }
 
-  Widget _buildPlansGrid(List<PlanItem> plans) {
+  Widget _buildPlansGrid(List<Plan> plans, AppThemeTokens t) {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -2792,11 +2767,11 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
         final plan = plans[i];
         return Container(
           decoration: BoxDecoration(
-            gradient: _planCardBg(plan.color),
+            gradient: _planCardBg(_planTypeKey(plan), t),
             borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: kCardBorder),
-            boxShadow: const [
-              BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 6)),
+            border: Border.all(color: t.cardBorder),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.40), blurRadius: 18, offset: const Offset(0, 6)),
             ],
           ),
           padding: const EdgeInsets.all(14),
@@ -2805,12 +2780,16 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
             children: [
               Text(plan.emoji, style: const TextStyle(fontSize: 20)),
               const SizedBox(height: 6),
-              Text(plan.title, style: const TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w700, color: kText,
+              Text(plan.occasion, style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w700, color: t.textPrimary,
               )),
               const SizedBox(height: 4),
-              Text(plan.desc, style: const TextStyle(
-                fontSize: 11.5, color: kMuted, height: 1.5,
+              Text(_formatPlanTime(plan), style: TextStyle(
+                fontSize: 11.5, color: t.mutedText, height: 1.4,
+              )),
+              const SizedBox(height: 3),
+              Text(plan.outfitDescription, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(
+                fontSize: 10.5, color: t.mutedText.withValues(alpha: 0.6), height: 1.4,
               )),
             ],
           ),
@@ -2819,18 +2798,18 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
     );
   }
 
-  Widget _buildAddPlanButton() {
+  Widget _buildAddPlanButton(AppThemeTokens t) {
     return _ScaleButton(
-      onTap: _openModal,
+      onTap: () => _openModal(t),
       translateY: -2.0,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 14),
         decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [kAccent, kAccent2]),
+          gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
           borderRadius: BorderRadius.circular(18),
-          boxShadow: const [
-            BoxShadow(color: Color(0x596B91FF), blurRadius: 20, offset: Offset(0, 6)),
+          boxShadow: [
+            BoxShadow(color: t.accent.primary.withValues(alpha: 0.35), blurRadius: 20, offset: const Offset(0, 6)),
           ],
         ),
         child: const Center(
@@ -2843,7 +2822,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
     );
   }
 
-  Widget _buildModalSheet(StateSetter modalSetState) {
+  Widget _buildModalSheet(StateSetter modalSetState, AppThemeTokens t) {
     return SafeArea(
       top: false,
       child: Container(
@@ -2851,21 +2830,21 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
         margin: const EdgeInsets.fromLTRB(14, 0, 14, 18),
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
+          gradient: LinearGradient(
             begin: Alignment.topCenter, end: Alignment.bottomCenter,
-            colors: [kBg2, kPhoneShell],
+            colors: [t.backgroundSecondary, t.phoneShell],
           ),
           borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(32), topRight: Radius.circular(32),
             bottomLeft: Radius.circular(22), bottomRight: Radius.circular(22),
           ),
-          border: const Border(
-            top: BorderSide(color: Color(0x24FFFFFF), width: 1.5),
-            left: BorderSide(color: Color(0x1AFFFFFF)),
-            right: BorderSide(color: Color(0x0FFFFFFF)),
+          border: Border(
+            top: BorderSide(color: Colors.white.withValues(alpha: 0.15), width: 1.5),
+            left: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+            right: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
           ),
-          boxShadow: const [
-            BoxShadow(color: Color(0x8C000000), blurRadius: 36, offset: Offset(0, -8)),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 36, offset: const Offset(0, -8)),
           ],
         ),
         child: SingleChildScrollView(
@@ -2877,7 +2856,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                   width: 42, height: 4,
                   margin: const EdgeInsets.only(bottom: 18),
                   decoration: BoxDecoration(
-                    color: const Color(0x2EFFFFFF),
+                    color: Colors.white.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(99),
                   ),
                 ),
@@ -2885,24 +2864,24 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('New Plan', style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.w600, color: kText,
+                  Text('New Plan', style: TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w600, color: t.textPrimary,
                   )),
                   GestureDetector(
                   onTap: () => Navigator.of(context).pop(),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
                       decoration: BoxDecoration(
-                        color: kPanel,
+                        color: t.panel,
                         borderRadius: BorderRadius.circular(11),
-                        border: Border.all(color: kCardBorder),
+                        border: Border.all(color: t.cardBorder),
                       ),
                       child: Row(
-                        children: const [
-                          Icon(Icons.close, size: 13, color: kMuted),
-                          SizedBox(width: 5),
+                        children: [
+                          Icon(Icons.close, size: 13, color: t.mutedText),
+                          const SizedBox(width: 5),
                           Text('Close', style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600, color: kMuted,
+                            fontSize: 13, fontWeight: FontWeight.w600, color: t.mutedText,
                           )),
                         ],
                       ),
@@ -2911,9 +2890,9 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                 ],
               ),
               const SizedBox(height: 18),
-              const Text('CHOOSE OCCASION', style: TextStyle(
+              Text('CHOOSE OCCASION', style: TextStyle(
                 fontSize: 10.5, fontWeight: FontWeight.w700,
-                letterSpacing: 0.16 * 10.5, color: kMuted,
+                letterSpacing: 0.16 * 10.5, color: t.mutedText,
               )),
               const SizedBox(height: 10),
               GridView.builder(
@@ -2938,12 +2917,12 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 11),
                       decoration: BoxDecoration(
-                        gradient: _eventBg(ev['type']!, isActive),
+                        gradient: _eventBg(ev['type']!, isActive, t),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
                           color: isActive
-                              ? _eventColor(ev['type']!).withOpacity(0.55)
-                              : kCardBorder,
+                              ? _eventColor(ev['type']!, t).withValues(alpha: 0.55)
+                              : t.cardBorder,
                           width: isActive ? 1.5 : 1,
                         ),
                       ),
@@ -2954,7 +2933,7 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                           const SizedBox(height: 5),
                           Text(ev['label']!, style: TextStyle(
                             fontSize: 11, fontWeight: FontWeight.w700,
-                            color: _eventColor(ev['type']!),
+                            color: _eventColor(ev['type']!, t),
                           )),
                         ],
                       ),
@@ -2963,39 +2942,28 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                 },
               ),
               const SizedBox(height: 16),
-              const Text('OUTFIT SUGGESTIONS', style: TextStyle(
-                fontSize: 10.5, fontWeight: FontWeight.w700,
-                letterSpacing: 0.16 * 10.5, color: kMuted,
-              )),
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: kPanel,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: kAccent2.withOpacity(0.28), width: 1.5),
-                ),
-                child: const Center(
-                  child: Text(
-                    'Select an occasion above to see outfit ideas ?',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, color: kTextDim),
-                  ),
+              Text(
+                _selectedEvent.isNotEmpty
+                    ? 'IDEAS FOR ${_selectedEvent.toUpperCase()}'
+                    : 'OUTFIT SUGGESTIONS',
+                style: TextStyle(
+                  fontSize: 10.5, fontWeight: FontWeight.w700,
+                  letterSpacing: 0.16 * 10.5, color: t.mutedText,
                 ),
               ),
+              const SizedBox(height: 10),
+              _buildOutfitCarouselInsidePanel(t, modalSetState),
               const SizedBox(height: 16),
-              const Text('SET TIME', style: TextStyle(
+              Text('SET TIME', style: TextStyle(
                 fontSize: 10.5, fontWeight: FontWeight.w700,
-                letterSpacing: 0.16 * 10.5, color: kMuted,
+                letterSpacing: 0.16 * 10.5, color: t.mutedText,
               )),
               const SizedBox(height: 10),
-              _buildTimeRow(modalSetState),
+              _buildTimeRow(t, modalSetState),
               const SizedBox(height: 16),
               _ScaleButton(
                 onTap: () {
                   _savePlan();
-                  Navigator.of(context).pop();
                 },
                 scaleTo: 1.015,
                 pressScale: 0.98,
@@ -3004,10 +2972,10 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 15),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [kAccent, kAccent2]),
+                    gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
                     borderRadius: BorderRadius.circular(18),
-                    boxShadow: const [
-                      BoxShadow(color: Color(0x596B91FF), blurRadius: 22, offset: Offset(0, 6)),
+                    boxShadow: [
+                      BoxShadow(color: t.accent.primary.withValues(alpha: 0.35), blurRadius: 22, offset: const Offset(0, 6)),
                     ],
                   ),
                   child: Row(
@@ -3029,12 +2997,135 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
     );
   }
 
-  Widget _buildTimeRow(StateSetter modalSetState) {
+  Widget _buildOutfitCarouselInsidePanel(AppThemeTokens t, StateSetter modalSetState) {
+    final outfits = kOutfits[_selectedEvent];
+    if (outfits == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: t.panel,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: t.accent.secondary.withValues(alpha: 0.35), width: 1.5),
+        ),
+        child: Center(
+          child: Text(
+            'Select an occasion above to see outfit ideas ?',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: t.mutedText.withValues(alpha: 0.6)),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 130,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: outfits.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, i) {
+          final outfit = outfits[i];
+          final isPicked = _pickedOutfitIdx == i;
+          return _ScaleButton(
+            onTap: () => modalSetState(() => _pickedOutfitIdx = i),
+            scaleTo: 1.02,
+            translateY: -3.0,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              width: 165,
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: const Alignment(-0.7, -0.7),
+                  end: const Alignment(0.7, 0.7),
+                  colors: isPicked
+                      ? [t.accent.secondary.withValues(alpha: 0.28), t.accent.primary.withValues(alpha: 0.18)]
+                      : [t.accent.primary.withValues(alpha: 0.15), t.accent.secondary.withValues(alpha: 0.10)],
+                ),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isPicked
+                      ? t.accent.secondary.withValues(alpha: 0.55)
+                      : t.cardBorder,
+                  width: isPicked ? 1.5 : 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: isPicked
+                        ? t.accent.secondary.withValues(alpha: 0.45)
+                        : Colors.black.withValues(alpha: 0.25),
+                    blurRadius: isPicked ? 22 : 10,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Stack(
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        outfit['vibe'] ?? '',
+                        style: TextStyle(
+                          fontSize: 9, fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2, color: t.accent.primary,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        outfit['desc'] ?? '',
+                        style: TextStyle(
+                          fontSize: 12.5, fontWeight: FontWeight.w700,
+                          color: t.textPrimary, height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        '💡 ${outfit['tip'] ?? ''}',
+                        style: TextStyle(fontSize: 11, color: t.mutedText, height: 1.5),
+                      ),
+                    ],
+                  ),
+                  Positioned(
+                    top: 0, right: 0,
+                    child: AnimatedScale(
+                      scale: isPicked ? 1.0 : 0.65,
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      child: AnimatedOpacity(
+                        opacity: isPicked ? 1.0 : 0.0,
+                        duration: const Duration(milliseconds: 220),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(colors: [t.accent.primary, t.accent.secondary]),
+                            borderRadius: BorderRadius.circular(99),
+                          ),
+                          child: const Text('✓ Picked', style: TextStyle(
+                            fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white,
+                          )),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildTimeRow(AppThemeTokens t, StateSetter modalSetState) {
     return _FocusGlowContainer(
       focusNodes: [_hourFocus, _minFocus],
+      t: t,
       child: Row(
         children: [
-          const Icon(Icons.access_time_outlined, size: 18, color: kTextDim),
+          Icon(Icons.access_time_outlined, size: 18, color: t.mutedText.withValues(alpha: 0.6)),
           const SizedBox(width: 8),
           SizedBox(
             width: 44,
@@ -3044,18 +3135,18 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
               keyboardType: TextInputType.number,
               inputFormatters: [LengthLimitingTextInputFormatter(2)],
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 22, fontWeight: FontWeight.w500, color: kText,
+              style: TextStyle(
+                fontSize: 22, fontWeight: FontWeight.w500, color: t.textPrimary,
               ),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'HH',
-                hintStyle: TextStyle(color: Color(0x38E6EBFF)),
+                hintStyle: TextStyle(color: t.mutedText.withValues(alpha: 0.2)),
                 border: InputBorder.none, isDense: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 9),
+                contentPadding: const EdgeInsets.symmetric(vertical: 9),
               ),
             ),
           ),
-          const Text(':', style: TextStyle(fontSize: 22, color: kTextDim)),
+          Text(':', style: TextStyle(fontSize: 22, color: t.mutedText.withValues(alpha: 0.6))),
           SizedBox(
             width: 44,
             child: TextField(
@@ -3064,32 +3155,32 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
               keyboardType: TextInputType.number,
               inputFormatters: [LengthLimitingTextInputFormatter(2)],
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 22, fontWeight: FontWeight.w500, color: kText,
+              style: TextStyle(
+                fontSize: 22, fontWeight: FontWeight.w500, color: t.textPrimary,
               ),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'MM',
-                hintStyle: TextStyle(color: Color(0x38E6EBFF)),
+                hintStyle: TextStyle(color: t.mutedText.withValues(alpha: 0.2)),
                 border: InputBorder.none, isDense: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 9),
+                contentPadding: const EdgeInsets.symmetric(vertical: 9),
               ),
             ),
           ),
           Container(
             width: 1, height: 26,
             margin: const EdgeInsets.symmetric(horizontal: 7),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                colors: [kCardBorder, Color(0x0FFFFFFF)],
+                colors: [t.cardBorder, Colors.white.withValues(alpha: 0.05)],
               ),
             ),
           ),
           Row(
             children: [
-              _buildAmPmBtn('AM', modalSetState),
+              _buildAmPmBtn('AM', t, modalSetState),
               const SizedBox(width: 4),
-              _buildAmPmBtn('PM', modalSetState),
+              _buildAmPmBtn('PM', t, modalSetState),
             ],
           ),
         ],
@@ -3097,23 +3188,21 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
     );
   }
 
-  Widget _buildAmPmBtn(String label, StateSetter modalSetState) {
+  Widget _buildAmPmBtn(String label, AppThemeTokens t, StateSetter modalSetState) {
     final isActive = _selectedAmPm == label;
     return GestureDetector(
-      onTap: () {
-        modalSetState(() {
-          _selectedAmPm = label;
-        });
-      },
+      onTap: () => modalSetState(() => _selectedAmPm = label),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          gradient: isActive ? const LinearGradient(colors: [kAccent, kAccent2]) : null,
+          gradient: isActive
+              ? LinearGradient(colors: [t.accent.primary, t.accent.secondary])
+              : null,
           color: isActive ? null : Colors.transparent,
           borderRadius: BorderRadius.circular(9),
           boxShadow: isActive
-              ? [BoxShadow(color: kAccent.withOpacity(0.4), blurRadius: 10, offset: const Offset(0, 3))]
+              ? [BoxShadow(color: t.accent.primary.withValues(alpha: 0.4), blurRadius: 10, offset: const Offset(0, 3))]
               : [],
         ),
         child: Text(
@@ -3121,26 +3210,9 @@ class _ExpandableCalendarPanelState extends State<ExpandableCalendarPanel>
           style: TextStyle(
             fontSize: 12, fontWeight: FontWeight.w800,
             letterSpacing: 0.06 * 12,
-            color: isActive ? Colors.white : kMuted,
+            color: isActive ? Colors.white : t.mutedText,
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _TodayDot extends StatelessWidget {
-  const _TodayDot();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 5,
-      height: 5,
-      decoration: const BoxDecoration(
-        color: kAccent3,
-        shape: BoxShape.circle,
-        boxShadow: [BoxShadow(color: Color(0xBF04D7C8), blurRadius: 7)],
       ),
     );
   }

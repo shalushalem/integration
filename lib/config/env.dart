@@ -9,6 +9,7 @@ class Env {
   // ── Collections ──
   static String get outfitsCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_OUTFITS'] ?? '';
   static String get usersCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_USERS'] ?? '';
+  static String get plansCollection => dotenv.env['PLANS_COLLECTION_ID'] ?? '';
 
   // ── Cloudflare R2 Credentials ──
   static String get r2AccountId => dotenv.env['EXPO_PUBLIC_R2_ACCOUNT_ID'] ?? '';
@@ -23,7 +24,8 @@ class Env {
   // ── Wardrobe R2 Bucket Details ──
   static String get wardrobeBucketId => dotenv.env['EXPO_PUBLIC_R2_BUCKET_WARDROBE'] ?? '';
   static String get r2UrlWardrobe => dotenv.env['EXPO_PUBLIC_R2_URL_WARDROBE'] ?? '';
+  
 
   // ── AI Python Backend ──
-  static String get backendApiUrl => dotenv.env['EXPO_PUBLIC_BACKEND_API_URL'] ?? 'http://10.0.2.2:8000';
+  static String get backendApiUrl => dotenv.env['EXPO_PUBLIC_BACKEND_API_URL'] ?? '';
 }

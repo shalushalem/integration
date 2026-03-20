@@ -2,7 +2,6 @@
 // Implements all F1–F12 animations + haptics + iOS scroll + DRY refactor
 
 import 'dart:math' as math;
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,7 +10,6 @@ import 'package:myapp/calendar.dart';
 import 'package:myapp/daily_wear.dart' as daily_wear;
 import 'package:myapp/everything_else.dart' as everything_else;
 import 'package:myapp/home_and_utilities.dart' as home_utils;
-import 'package:myapp/meal_planner.dart' as meal_planner;
 import 'package:myapp/occasion.dart' as occasion;
 import 'package:myapp/office_fit.dart' as office_fit;
 import 'package:myapp/party_looks.dart' as party_looks;
@@ -39,6 +37,7 @@ class CalendarCard extends StatefulWidget {
   final Color shellColor;
 
   const CalendarCard({
+    super.key,
     required this.cardColor,
     required this.borderColor,
     required this.panelColor,
@@ -177,10 +176,9 @@ class _GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+    return RepaintBoundary(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -207,8 +205,6 @@ class _GlassCard extends StatelessWidget {
     );
   }
 }
-
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SPACING CONSTANTS  (4-pt grid)
@@ -265,7 +261,6 @@ class _BoardsScreenState extends State<BoardsScreen>
   Color get _muted       => _theme.mutedText;
   Color get _accent      => _theme.accent.primary;
   Color get _accent2     => _theme.accent.secondary;
-  Color get _accent3     => _theme.accent.tertiary;
   Color get _shell       => _theme.phoneShell;
 
   bool _isLifeTab = true;
