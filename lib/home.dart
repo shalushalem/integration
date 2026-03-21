@@ -486,12 +486,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         if (!mounted) return;
         
         if (query.isNotEmpty) {
-          setState(() {
-            _overlayState = _OverlayState.thinking;
-          });
+          // Send to handler which safely sets state to thinking
           _overlayFadeCtrl.animateTo(1.0,
               duration: const Duration(milliseconds: 380),
               curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+          
           _handleQuery(query, 'chat');
         } else {
           setState(() {
@@ -522,50 +521,58 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       _tagsRevealed = false;
     });
 
-    _ResponseData? resp = _responseMap[question];
+    _ResponseData? resp;
 
-    if (resp == null) {
-      try {
-        final backend = Provider.of<BackendService>(context, listen: false);
-        final apiResult = await backend.sendChatQuery(question, 'user_$_userName');
-        
-        String aiText = "Could not parse response.";
-        if (apiResult.containsKey('message') && apiResult['message'] != null) {
-             aiText = apiResult['message']['content']?.toString() ?? "No content";
-        } else if (apiResult.containsKey('error')) {
-             aiText = apiResult['error']?.toString() ?? "Unknown error occurred";
-        }
-
-        aiText = aiText.replaceAll(RegExp(r'\[CHIPS:.*?\]', caseSensitive: false, dotAll: true), '');
-        aiText = aiText.replaceAll(RegExp(r'\[STYLE_BOARD:.*?\]', caseSensitive: false, dotAll: true), '');
-        aiText = aiText.replaceAll(RegExp(r'\[PACK_LIST:.*?\]', caseSensitive: false, dotAll: true), '');
-        aiText = aiText.trim();
-
-        if (apiResult.containsKey('chips') && apiResult['chips'] != null && apiResult['chips'] is List) {
-          final List<dynamic> rawChips = apiResult['chips'];
-          if (rawChips.isNotEmpty) {
-            _responseTags = rawChips.map((e) => e.toString()).toList();
-          }
-        }
-
-        resp = _ResponseData(
-          type: 'text',
-          question: question,
-          intro: aiText,
-        );
-      } catch (e) {
-        // 🚀 FIX: Prevent massive HTML error dumps from breaking the RenderFlex!
-        String errorMsg = e.toString();
-        if (errorMsg.length > 200) {
-          errorMsg = errorMsg.substring(0, 200) + '... (Check Server Logs)';
-        }
-        
-        resp = _ResponseData(
-          type: 'text',
-          question: question,
-          intro: "Sorry, I couldn't reach the Python backend. Make sure the server is running.\n\nError: $errorMsg",
-        );
+    try {
+      final backend = Provider.of<BackendService>(context, listen: false);
+      
+      // REAL API CALL
+      final apiResult = await backend.sendChatQuery(question, 'user_$_userName');
+      
+      String aiText = "Could not parse response.";
+      
+      if (apiResult.containsKey('message') && apiResult['message'] != null) {
+           aiText = apiResult['message']['content']?.toString() ?? "No content";
+      } else if (apiResult.containsKey('error')) {
+           aiText = apiResult['error']?.toString() ?? "Unknown error occurred";
       }
+
+      // Cleanup tags perfectly using dotAll for multiline tags
+      aiText = aiText.replaceAll(RegExp(r'\[CHIPS:.*?\]', caseSensitive: false, dotAll: true), '');
+      aiText = aiText.replaceAll(RegExp(r'\[STYLE_BOARD:.*?\]', caseSensitive: false, dotAll: true), '');
+      aiText = aiText.replaceAll(RegExp(r'\[PACK_LIST:.*?\]', caseSensitive: false, dotAll: true), '');
+      aiText = aiText.trim();
+
+      // Protect against gigantic text returns
+      if (aiText.length > 1500) {
+          aiText = aiText.substring(0, 1500) + '... \n\n[Text truncated to prevent UI crash]';
+      }
+
+      if (apiResult.containsKey('chips') && apiResult['chips'] != null && apiResult['chips'] is List) {
+        final List<dynamic> rawChips = apiResult['chips'];
+        if (rawChips.isNotEmpty) {
+          _responseTags = rawChips.map((e) => e.toString()).toList();
+        }
+      }
+
+      resp = _ResponseData(
+        type: 'text',
+        question: question,
+        intro: aiText,
+      );
+      
+    } catch (e) {
+      // Protect against 99,000px RenderFlex errors from HTML dumps
+      String errorMsg = e.toString();
+      if (errorMsg.length > 150) {
+        errorMsg = errorMsg.substring(0, 150) + '... [Error Truncated]';
+      }
+      
+      resp = _ResponseData(
+        type: 'text',
+        question: question,
+        intro: "Backend Connection Failed.\n\n$errorMsg",
+      );
     }
 
     if (!mounted) return;
@@ -2206,10 +2213,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       ]),
       const SizedBox(height: 10),
       
-      // 🚀 FIX: Placed inside a strict bounding box to physically prevent the `99,000` pixel overflow!
       if (resp.intro.isNotEmpty) ...[
-        SizedBox(
-          width: MediaQuery.of(context).size.width - 40,
+        Container(
+          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 40),
           child: Text(
             resp.intro,
             style: TextStyle(
@@ -3302,155 +3308,6 @@ const _intentPlaceholder = {
   'style': 'Describe your vibe or occasion…',
   'organize': 'What would you like to organize?',
   'prepare': 'What are you planning for?',
-};
-
-final _responseMap = <String, _ResponseData>{
-  'What should I wear today?': _ResponseData(
-      type: 'outfits',
-      question: 'What should I wear today?',
-      intro:
-          "Based on today's 14°C partly cloudy weather, here are 3 looks curated for you:",
-      outfits: [
-        _Outfit(
-            'Layered Minimal',
-            ['Casual', 'Today'],
-            'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=220&h=260&fit=crop&crop=top&auto=format'),
-        _Outfit(
-            'Smart Casual',
-            ['Office', 'Versatile'],
-            'https://images.unsplash.com/photo-1591369822096-ffd140ec948f?w=220&h=260&fit=crop&crop=top&auto=format'),
-        _Outfit(
-            'Street Edit',
-            ['Urban', 'Fresh'],
-            'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=220&h=260&fit=crop&crop=top&auto=format'),
-      ]),
-  'Build a rooftop party outfit': _ResponseData(
-      type: 'outfits',
-      question: 'Build a rooftop party outfit',
-      intro: "Rooftop energy calls for elevated looks. Here's what works perfectly:",
-      outfits: [
-        _Outfit(
-            'Evening Glow',
-            ['Party', 'Night'],
-            'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=220&h=260&fit=crop&crop=top&auto=format'),
-        _Outfit(
-            'Rooftop Chic',
-            ['Elevated', 'Cool'],
-            'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=220&h=260&fit=crop&crop=top&auto=format'),
-        _Outfit(
-            'Bold Statement',
-            ['Trendy', 'Standout'],
-            'https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=220&h=260&fit=crop&crop=top&auto=format'),
-      ]),
-  'Show trending casual looks': _ResponseData(
-      type: 'outfits',
-      question: 'Show trending casual looks',
-      intro: 'Quiet luxury and clean lines are having a moment. Top trending now:',
-      outfits: [
-        _Outfit(
-            'Quiet Luxury',
-            ['Trending', 'Minimal'],
-            'https://images.unsplash.com/photo-1538805060514-97d9cc17730c?w=220&h=260&fit=crop&crop=top&auto=format'),
-        _Outfit(
-            'Soft Tones',
-            ['Casual', 'Neutral'],
-            'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=220&h=260&fit=crop&crop=top&auto=format'),
-        _Outfit(
-            'Classic Ease',
-            ['Everyday', 'Fresh'],
-            'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=220&h=260&fit=crop&crop=top&auto=format'),
-      ]),
-  'What tasks are urgent?': _ResponseData(
-      type: 'tasks',
-      question: 'What tasks are urgent?',
-      intro: 'You have 3 urgent items that need attention today:',
-      tasks: [
-        _Task('Submit Q1 report', 'Due 5pm today', 'high', false),
-        _Task('Reply to Meera re: proposal', 'Overdue · 2h ago', 'high', false),
-        _Task('Book hotel for Bangalore trip', 'Due tomorrow', 'mid', false),
-        _Task('Review design feedback', 'Due Friday', 'low', true),
-      ]),
-  'Show this week overview': _ResponseData(
-      type: 'week',
-      question: 'Show this week overview',
-      intro: "Here's your week at a glance:",
-      weekDays: [
-        _WeekDay('Mon', 'Mar 3', ['9am Standup', '2pm Design'], done: true),
-        _WeekDay('Tue', 'Mar 4', ['10am Client call', 'Submit draft'], done: true),
-        _WeekDay('Wed', 'Mar 5', ['Free morning', '4pm Gym'], done: true),
-        _WeekDay('Thu', 'Mar 6', ['9am Standup', '2pm Board meeting'], isToday: true),
-        _WeekDay('Fri', 'Mar 7', ['11am 1:1', 'Team lunch']),
-        _WeekDay('Sat', 'Mar 8', ['Personal day', 'Yoga 8am']),
-        _WeekDay('Sun', 'Mar 9', ['Rest & prep']),
-      ]),
-  'Plan my gym schedule': _ResponseData(
-      type: 'tasks',
-      question: 'Plan my gym schedule',
-      intro: '4 optimised sessions this week based on your routine:',
-      tasks: [
-        _Task('Monday — Push (Chest + Shoulders)', 'Morning · 7am', 'high', true),
-        _Task('Wednesday — Pull (Back + Biceps)', 'Evening · 6pm', 'high', true),
-        _Task('Friday — Legs', 'Morning · 7am', 'mid', false),
-        _Task('Sunday — Active Recovery + Core', 'Flexible', 'low', false),
-      ]),
-  'Plan a 3-day Goa trip': _ResponseData(
-      type: 'plan',
-      question: 'Plan a 3-day Goa trip',
-      intro: "Here's your expert-curated 3-day Goa itinerary:",
-      planSections: [
-        _PlanSection(
-            'Day 1 — Arrival & North Goa',
-            _accent,
-            ['☀️ Arrive & check in', '🏖️ Baga Beach', '🍽️ Dinner at Thalassa', '🍹 Night — Tito\'s Lane']),
-        _PlanSection(
-            'Day 2 — Culture & South Goa',
-            _accentSecondary,
-            ['🏛️ Old Goa churches', '🚗 Drive to Palolem', '🏄 Kayaking', '🌅 Sunset at Cabo de Rama']),
-        _PlanSection(
-            'Day 3 — Relax & Depart',
-            _accentTertiary,
-            ['🧘 Morning yoga', '🛍️ Anjuna flea market', '🥥 Beachside lunch', '✈️ Airport by 4pm']),
-      ]),
-  'Pack for business travel': _ResponseData(
-      type: 'plan',
-      question: 'Pack for business travel',
-      intro: 'Smart packing list — nothing missing, nothing extra:',
-      planSections: [
-        _PlanSection(
-            '👔 Clothing',
-            _accent,
-            ['2× formal shirts (navy, white)', '1× blazer (charcoal)', '2× trousers', '1× casual outfit']),
-        _PlanSection(
-            '💼 Work Essentials',
-            _accent,
-            ['Laptop + charger + adapter', 'Notebook + 2 pens', 'Business cards', 'Portable battery']),
-        _PlanSection(
-            '🧴 Toiletries',
-            _accentSecondary,
-            ['Moisturiser, deodorant, perfume', 'Toothbrush + paste', 'Face wash + razor']),
-      ]),
-  'Create a wedding checklist': _ResponseData(
-      type: 'plan',
-      question: 'Create a wedding checklist',
-      intro: 'Complete wedding checklist — 24 items across 4 categories:',
-      planSections: [
-        _PlanSection(
-            '📅 6–12 Months Before',
-            _accent,
-            ['Set budget & guest list', 'Book venue & caterer', 'Book photographer', 'Send save-the-dates']),
-        _PlanSection(
-            '🎨 3–6 Months Before',
-            _accentTertiary,
-            ['Send invitations', 'Finalise menu & cake', 'Book hair & makeup', 'Order wedding outfits']),
-        _PlanSection(
-            '📋 1 Month Before',
-            _accentSecondary,
-            ['Confirm all vendor bookings', 'Finalise seating', 'Collect RSVPs']),
-        _PlanSection(
-            '✅ Week Of',
-            _accentTertiary,
-            ['Final dress fitting', 'Prepare wedding day kit', 'Brief photographer & MC', 'Rest & enjoy 🎉']),
-      ]),
 };
 
 class _GradientText extends StatelessWidget {
