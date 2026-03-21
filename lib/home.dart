@@ -12,6 +12,7 @@ import 'package:myapp/theme/theme_tokens.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/services/appwrite_service.dart'; 
 import 'package:myapp/services/backend_service.dart'; 
+import 'package:myapp/chat.dart'; // 🚀 Added Chat Screen Integration
 
 // ─── Colors ──────────────────────────────────────────────
 
@@ -91,9 +92,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   double _suggestionOpacity = 1.0;
   Timer? _suggestionTimer;
 
-  bool _micActive = false;
-  late AnimationController _micGlowCtrl;
-
   bool _lensSheetOpen = false;
   late AnimationController _lensSheetCtrl;
 
@@ -114,10 +112,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   String _dateString = '';
   Timer? _clockTimer;
 
-  final TextEditingController _chatController = TextEditingController();
-  final FocusNode _chatFocusNode = FocusNode();
-  bool _chatHasText = false;
-
   _OverlayState _overlayState = _OverlayState.idle;
   String? _activeIntent;
   String _chatPlaceholder = 'Ask AHVI anything…';
@@ -128,7 +122,13 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   late AnimationController _tagsRevealCtrl;
   List<String> _overlaySuggestions = [];
   String _overlayBrandSub = '';
-  _ResponseData? _responseData;
+  
+  // 🚀 STATE FIX: We now use a list to stack messages + tracking variables
+  List<_ResponseData> _responses = [];
+  List<Map<String, String>> _chatHistory = [];
+  String _runningMemory = "";
+  final ScrollController _overlayScrollCtrl = ScrollController();
+
   List<String> _responseTags = [];
   bool _tagsRevealed = false;
 
@@ -171,11 +171,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         vsync: this,
         duration: const Duration(milliseconds: 380),
       ),
-    );
-
-    _micGlowCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1100),
     );
 
     _pickSheetCtrl = AnimationController(
@@ -222,11 +217,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       ..repeat();
     _tagsRevealCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 380));
-
-    _chatController.addListener(() {
-      final hasText = _chatController.text.trim().isNotEmpty;
-      if (hasText != _chatHasText) setState(() => _chatHasText = hasText);
-    });
 
     _updateClock();
     _clockTimer =
@@ -286,7 +276,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     for (final c in _heartPopCtrls) {
       c.dispose();
     }
-    _micGlowCtrl.dispose();
     _pickSheetCtrl.dispose();
     _seeAllCtrl.dispose();
     _lensSheetCtrl.dispose();
@@ -297,11 +286,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _overlayFadeCtrl.dispose();
     _thinkingCtrl.dispose();
     _tagsRevealCtrl.dispose();
-    _chatController.dispose();
-    _chatFocusNode.dispose();
     _suggestionTimer?.cancel();
     _toastTimer?.cancel();
     _clockTimer?.cancel();
+    _overlayScrollCtrl.dispose(); 
     super.dispose();
   }
 
@@ -313,14 +301,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     });
   }
 
+  // 🚀 FIXED: Chat Navigation logic for the Bottom Nav Bar
   void _handleNavTap(int idx) {
     if (idx == 0) {
-      if (idx == _activeNavIdx) return;
-      _navRiseCtrls[_activeNavIdx]
-          .animateTo(0.0, curve: const Cubic(0.4, 0.0, 0.2, 1.0));
-      _navRiseCtrls[idx]
-          .animateTo(1.0, curve: const Cubic(0.34, 1.56, 0.64, 1.0));
-      setState(() => _activeNavIdx = idx);
+      _openNavScreen(const ChatScreen());
       return;
     }
     if (idx == 1) {
@@ -451,7 +435,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       setState(() {
         _overlayState = _OverlayState.suggestions;
         _overlaySuggestions = cfg.suggestions;
-        _responseData = null;
+        _responses.clear(); 
         _tagsRevealed = false;
       });
       _overlayFadeCtrl.animateTo(1.0,
@@ -461,8 +445,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   void _submitQuery(String query) {
-    _chatFocusNode.unfocus(); 
-
     if (query.isEmpty && _overlayState == _OverlayState.idle) {
       _triggerIntent('chat');
       return;
@@ -486,7 +468,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         if (!mounted) return;
         
         if (query.isNotEmpty) {
-          // Send to handler which safely sets state to thinking
           _overlayFadeCtrl.animateTo(1.0,
               duration: const Duration(milliseconds: 380),
               curve: const Cubic(0.16, 1.0, 0.3, 1.0));
@@ -496,7 +477,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           setState(() {
             _overlayState = _OverlayState.suggestions;
             _overlaySuggestions = cfg.suggestions;
-            _responseData = null;
+            _responses.clear();
             _tagsRevealed = false;
           });
           _overlayFadeCtrl.animateTo(1.0,
@@ -509,6 +490,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     }
   }
 
+  // 🚀 FIXED FUNCTION: REAL API CALL WITH HISTORY & MEMORY
   Future<void> _handleQuery(String question, String intent) async {
     if (_overlayState == _OverlayState.thinking) return;
 
@@ -519,6 +501,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       _overlaySuggestions = [];
       _responseTags = cfg.responseTags;
       _tagsRevealed = false;
+      // We DO NOT clear _responses here so the old messages stay on screen!
     });
 
     _ResponseData? resp;
@@ -526,9 +509,23 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     try {
       final backend = Provider.of<BackendService>(context, listen: false);
       
-      // REAL API CALL
-      final apiResult = await backend.sendChatQuery(question, 'user_$_userName');
+      // Grab the history payload we've been secretly storing
+      final historyPayload = List<Map<String, String>>.from(_chatHistory);
       
+      final apiResult = await backend.sendChatQuery(
+        question, 
+        'user_$_userName', 
+        historyPayload, 
+        _runningMemory
+      );
+      
+      // Store user's question into history
+      _chatHistory.add({"role": "user", "content": question});
+      
+      if (apiResult['updated_memory'] != null) {
+        _runningMemory = apiResult['updated_memory'];
+      }
+
       String aiText = "Could not parse response.";
       
       if (apiResult.containsKey('message') && apiResult['message'] != null) {
@@ -537,13 +534,15 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
            aiText = apiResult['error']?.toString() ?? "Unknown error occurred";
       }
 
-      // Cleanup tags perfectly using dotAll for multiline tags
+      // Store AHVI's response into history
+      _chatHistory.add({"role": "assistant", "content": aiText});
+
+      // Cleanup tags perfectly
       aiText = aiText.replaceAll(RegExp(r'\[CHIPS:.*?\]', caseSensitive: false, dotAll: true), '');
       aiText = aiText.replaceAll(RegExp(r'\[STYLE_BOARD:.*?\]', caseSensitive: false, dotAll: true), '');
       aiText = aiText.replaceAll(RegExp(r'\[PACK_LIST:.*?\]', caseSensitive: false, dotAll: true), '');
       aiText = aiText.trim();
 
-      // Protect against gigantic text returns
       if (aiText.length > 1500) {
           aiText = aiText.substring(0, 1500) + '... \n\n[Text truncated to prevent UI crash]';
       }
@@ -562,7 +561,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       );
       
     } catch (e) {
-      // Protect against 99,000px RenderFlex errors from HTML dumps
       String errorMsg = e.toString();
       if (errorMsg.length > 150) {
         errorMsg = errorMsg.substring(0, 150) + '... [Error Truncated]';
@@ -579,7 +577,17 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
     setState(() {
       _overlayState = _OverlayState.response;
-      _responseData = resp;
+      _responses.add(resp!); // 🚀 Add the new message to the list!
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_overlayScrollCtrl.hasClients) {
+        _overlayScrollCtrl.animateTo(
+          _overlayScrollCtrl.position.maxScrollExtent + 200,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
 
     final tagDelay = 150; 
@@ -600,13 +608,12 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _homeCollapseCtrl.animateTo(0.0,
         duration: const Duration(milliseconds: 500),
         curve: const Cubic(0.16, 1.0, 0.3, 1.0));
-    _chatFocusNode.unfocus();
     setState(() {
       _overlayState = _OverlayState.idle;
       _activeIntent = null;
       _homeCollapsed = false;
       _overlaySuggestions = [];
-      _responseData = null;
+      _responses.clear(); 
       _tagsRevealed = false;
       _chatPlaceholder = 'Ask AHVI anything…';
     });
@@ -1675,153 +1682,69 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
+  // 🚀 FIXED: Reroutes perfectly to the dedicated Chat Screen
   Widget _buildChatWrap() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      child: Container(
-        decoration: BoxDecoration(
-          color: _surface.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: _border, width: 1),
-          boxShadow: [
-            BoxShadow(
-                color: _accent.withValues(alpha: 0.10),
-                blurRadius: 28,
-                offset: const Offset(0, 6)),
-            BoxShadow(
-                color: _shadowMedium, blurRadius: 8, offset: Offset(0, 2)),
-          ],
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-        child: Row(
-          children: [
-            GestureDetector(
-              onTap: () {},
-              child: SizedBox(
-                width: 26,
-                height: 26,
-                child: Center(
-                    child: Icon(Icons.add_rounded, color: _textMuted, size: 20)),
-              ),
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          Navigator.of(context).push(
+            PageRouteBuilder<void>(
+              transitionDuration: const Duration(milliseconds: 350),
+              reverseTransitionDuration: const Duration(milliseconds: 350),
+              pageBuilder: (context, animation, secondary) => const ChatScreen(),
+              transitionsBuilder: (context, animation, secondary, child) {
+                final curved = CurvedAnimation(
+                  parent: animation,
+                  curve: const Cubic(0.22, 1.0, 0.36, 1.0),
+                );
+                return FadeTransition(
+                  opacity: curved,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0.04, 0),
+                      end: Offset.zero,
+                    ).animate(curved),
+                    child: child,
+                  ),
+                );
+              },
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _chatController,
-                focusNode: _chatFocusNode,
-                style: TextStyle(
-                  color: _textHeading,
-                  fontSize: 14.5,
-                  fontWeight: FontWeight.w400,
-                  height: 1.3,
-                ),
-                decoration: InputDecoration(
-                  isDense: true,
-                  contentPadding: EdgeInsets.zero,
-                  border: InputBorder.none,
-                  hintText: _chatPlaceholder,
-                  hintStyle: TextStyle(
+          );
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: _surface.withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _border, width: 1),
+            boxShadow: [
+              BoxShadow(
+                  color: _accent.withValues(alpha: 0.10),
+                  blurRadius: 28,
+                  offset: const Offset(0, 6)),
+            ],
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Icon(Icons.auto_awesome, color: _accent, size: 18),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  "Ask AHVI anything...",
+                  style: TextStyle(
                     color: _textMuted,
                     fontSize: 14.5,
-                    fontWeight: FontWeight.w300,
+                    fontWeight: FontWeight.w400,
                   ),
                 ),
-                textInputAction: TextInputAction.send,
-                cursorColor: _accent,
-                cursorWidth: 1.5,
-                cursorRadius: const Radius.circular(1),
-                onSubmitted: (value) {
-                  if (value.trim().isNotEmpty) {
-                    _submitQuery(value.trim());
-                    _chatController.clear();
-                  }
-                },
               ),
-            ),
-            const SizedBox(width: 8),
-            _buildMicButton(),
-            const SizedBox(width: 8),
-            _AnimatedPressable(
-              liftY: -1.5,
-              scalePressed: 0.90,
-              onTap: () {
-                final text = _chatController.text.trim();
-                if (text.isNotEmpty) {
-                  _submitQuery(text);
-                  _chatController.clear();
-                } else {
-                  _submitQuery('');
-                }
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: const Cubic(0.34, 1.56, 0.64, 1),
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  gradient: _chatHasText
-                      ? _accentGradient2
-                      : LinearGradient(colors: [
-                          _accent.withValues(alpha: 0.35),
-                          _accentSecondary.withValues(alpha: 0.35),
-                        ]),
-                  borderRadius: BorderRadius.circular(13),
-                  boxShadow: _chatHasText
-                      ? [
-                          BoxShadow(
-                              color: _accent.withValues(alpha: 0.45),
-                              blurRadius: 22,
-                              offset: const Offset(0, 6)),
-                          BoxShadow(
-                              color: _accentSecondary.withValues(alpha: 0.28),
-                              blurRadius: 8,
-                              offset: const Offset(0, 3)),
-                        ]
-                      : null,
-                ),
-                child: Icon(Icons.arrow_forward_rounded,
-                    color: _onAccent, size: 16),
-              ),
-            ),
-          ],
+              Icon(Icons.arrow_forward_ios_rounded, color: _textMuted, size: 14),
+            ],
+          ),
         ),
       ),
-    );
-  }
-
-  Widget _buildMicButton() {
-    return AnimatedBuilder(
-      animation: _micGlowCtrl,
-      builder: (context, _) {
-        final glowScale = _micActive
-            ? 1.0 + 0.18 * math.sin(_micGlowCtrl.value * math.pi * 2)
-            : 1.0;
-        return GestureDetector(
-          onTap: () {
-            setState(() => _micActive = !_micActive);
-            if (_micActive) {
-              _micGlowCtrl.repeat();
-            } else {
-              _micGlowCtrl.stop();
-              _micGlowCtrl.reset();
-            }
-          },
-          child: SizedBox(
-            width: 26,
-            height: 26,
-            child: Center(
-              child: Transform.scale(
-                scale: glowScale,
-                child: Icon(
-                  Icons.mic_none_rounded,
-                  color: _micActive ? _accent : _textMuted,
-                  size: 18,
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -1994,6 +1917,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     const SizedBox(height: 16),
                     Expanded(
                       child: SingleChildScrollView(
+                        controller: _overlayScrollCtrl, 
                         padding: const EdgeInsets.symmetric(horizontal: 20),
                         child: _EntryFadeSlide(
                           key: ValueKey(
@@ -2133,31 +2057,15 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         );
 
       case _OverlayState.response:
-        if (_responseData == null) return const SizedBox();
-        return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 100), 
-          switchInCurve: const Cubic(0.16, 1.0, 0.3, 1.0),
-          switchOutCurve: const Cubic(0.4, 0.0, 1.0, 1.0),
-          transitionBuilder: (child, anim) {
-            final curved = CurvedAnimation(
-              parent: anim,
-              curve: const Cubic(0.16, 1.0, 0.3, 1.0),
+        if (_responses.isEmpty) return const SizedBox();
+        return Column(
+          children: _responses.map((resp) {
+            final isLast = resp == _responses.last;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 24),
+              child: _buildResponseContent(resp, showTags: isLast && _tagsRevealed),
             );
-            return FadeTransition(
-              opacity: curved,
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0, 0.06),
-                  end: Offset.zero,
-                ).animate(curved),
-                child: child,
-              ),
-            );
-          },
-          child: KeyedSubtree(
-            key: ValueKey(_responseData!.question),
-            child: _buildResponseContent(_responseData!),
-          ),
+          }).toList(),
         );
 
       default:
@@ -2165,7 +2073,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     }
   }
 
-  Widget _buildResponseContent(_ResponseData resp) {
+  Widget _buildResponseContent(_ResponseData resp, {bool showTags = false}) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Align(
           alignment: Alignment.centerRight,
@@ -2229,7 +2137,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       ],
       _buildResponseBody(resp),
       
-      if (_tagsRevealed) ...[
+      if (showTags) ...[
         const SizedBox(height: 14),
         AnimatedBuilder(
           animation: _tagsRevealCtrl,

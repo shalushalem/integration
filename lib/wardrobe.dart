@@ -93,7 +93,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchWardrobeItems(); // ✅ Fetch from Appwrite on load
+    _fetchWardrobeItems(); 
   }
 
   // 🚀 Fetch from Appwrite
@@ -276,7 +276,6 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
           TextButton(
             onPressed: () async {
               Navigator.of(context).pop();
-              // Optionally: Add Appwrite DB Delete Logic here
               setState(() => _wardrobe.removeWhere((i) => i.id == id));
               _showToast('🗑 "${item.name}" removed');
             },
@@ -316,7 +315,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               _FilterBar(activeCat: _activeCat, onCatTap: _setCat),
             Expanded(
               child: _isLoading
-                  ? Center(child: CircularProgressIndicator(color: t.accent.primary)) // ✅ Loader 
+                  ? Center(child: CircularProgressIndicator(color: t.accent.primary)) 
                   : _activeTab == 0
                   ? _WardrobePanel(
                 items: _filtered,
@@ -774,8 +773,9 @@ class _AddItemModalState extends State<_AddItemModal>
   final _nameCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   final _subCategoryCtrl = TextEditingController();
+  final _occasionsCtrl = TextEditingController(); // 🚀 Swapped chips for text input
+  
   String _selectedCat = '';
-  final List<String> _selectedOccs = [];
   final ImagePicker _picker = ImagePicker();
   
   // Dual Images loaded in memory
@@ -804,7 +804,6 @@ class _AddItemModalState extends State<_AddItemModal>
     'Makeup',
     'Skincare',
   ];
-  static const _occs = ['Casual', 'Work', 'Dinner', 'Sport', 'Travel'];
 
   @override
   void initState() {
@@ -836,10 +835,10 @@ class _AddItemModalState extends State<_AddItemModal>
     _nameCtrl.dispose();
     _notesCtrl.dispose();
     _subCategoryCtrl.dispose();
+    _occasionsCtrl.dispose();
     super.dispose();
   }
 
-  // 🚀 Step 1: Pick Image & Process via BackendService
   Future<void> _pickImage(ImageSource source) async {
     try {
       final file = await _picker.pickImage(
@@ -862,33 +861,36 @@ class _AddItemModalState extends State<_AddItemModal>
       final backend = Provider.of<BackendService>(context, listen: false);
       String base64Image = base64Encode(bytes);
 
+      // 1. Remove the Background 
       final bgResult = await backend.removeBackground(base64Image);
       if (bgResult != null && mounted) {
         setState(() {
           _itemImageBytes = base64Decode(bgResult); 
           _processStatus = 'Analyzing fabric & color...';
         });
-        base64Image = bgResult; 
       }
 
-      final analysis = await backend.analyzeImage(base64Image);
+      // 2. Analyze the Garment 
+      final analysis = await backend.analyzeImage(_itemImageBytes!);
+      
       if (analysis != null && mounted) {
         setState(() {
-          _aiData = analysis;
+          _aiData = analysis; // Holds secret Color & Pattern payloads!
 
-          _nameCtrl.text = analysis['item_name'] ?? analysis['name'] ?? 'New Item';
-          String aiCat = analysis['app_category'] ?? analysis['category'] ?? '';
+          _nameCtrl.text = analysis['item_name'] ?? 'New Item';
+          
+          String aiCat = analysis['app_category'] ?? '';
           if (_cats.contains(aiCat)) {
             _selectedCat = aiCat;
           }
           
           if (analysis['sub_category'] != null) {
-             _subCategoryCtrl.text = analysis['sub_category'];
+             String sub = analysis['sub_category'].toString();
+             _subCategoryCtrl.text = sub.substring(0, 1).toUpperCase() + sub.substring(1);
           }
-
-          String color = analysis['dominant_color_hex'] ?? analysis['color_code'] ?? 'Unknown';
-          String pattern = analysis['pattern'] ?? 'Solid';
-          _notesCtrl.text = 'Color: $color\nPattern: $pattern';
+          
+          // 🚀 REMOVED the code injecting color into _notesCtrl!
+          // It will now be handled stealthily in _saveAndUpload.
         });
       }
     } catch (e) {
@@ -907,7 +909,7 @@ class _AddItemModalState extends State<_AddItemModal>
     }
   }
 
-  // 🚀 Step 2: Upload RAW + MASKED to Cloudflare R2 & Save to Appwrite DB
+  // 🚀 Step 2: Upload to Cloudflare R2 & Save to Appwrite DB
   Future<void> _saveAndUpload() async {
     if (_nameCtrl.text.trim().isEmpty || _selectedCat.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -960,7 +962,7 @@ class _AddItemModalState extends State<_AddItemModal>
         );
         rawImageUrl = '${Env.r2UrlRaw}/$rawFileName';
 
-        // B. Upload PROCESSED/MASKED Image
+        // B. Upload PROCESSED Image
         setState(() => _processStatus = 'Uploading processed cutout...');
         maskedFileName = 'wardrobe_$fileId.png';
         await minio.putObject(
@@ -988,7 +990,13 @@ class _AddItemModalState extends State<_AddItemModal>
         'liked': false,     
       };
 
-      List<String> combinedOccasions = List.from(_selectedOccs);
+      // 🚀 Safely parse Occasions from the TextField by comma
+      List<String> combinedOccasions = _occasionsCtrl.text
+          .split(',')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+
       if (_subCategoryCtrl.text.trim().isNotEmpty) {
           combinedOccasions.add(_subCategoryCtrl.text.trim());
       }
@@ -1000,7 +1008,7 @@ class _AddItemModalState extends State<_AddItemModal>
         documentData['notes'] = _notesCtrl.text.trim();
       }
 
-      // Stealth Metadata Injection
+      // 🚀 Stealth Metadata Injection: Saving Color and Pattern securely
       if (_aiData != null) {
         if (_aiData!['sub_category'] != null) {
           documentData['sub_category'] = _aiData!['sub_category'];
@@ -1231,55 +1239,12 @@ class _AddItemModalState extends State<_AddItemModal>
                             ),
                           ),
                           const SizedBox(height: 16),
+                          // 🚀 NEW: Occasions as a simple input field
                           _ModalField(
                             label: 'Occasions',
-                            child: Wrap(
-                              spacing: 7,
-                              runSpacing: 7,
-                              children: _occs.map((occ) {
-                                final active =
-                                _selectedOccs.contains(occ);
-                                return GestureDetector(
-                                  onTap: () => setState(() => active
-                                      ? _selectedOccs.remove(occ)
-                                      : _selectedOccs.add(occ)),
-                                  child: AnimatedContainer(
-                                    duration: const Duration(
-                                        milliseconds: 180),
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 14, vertical: 7),
-                                    decoration: BoxDecoration(
-                                      gradient: active
-                                          ? LinearGradient(colors: [
-                                        t.accent.primary,
-                                        t.accent.tertiary
-                                      ])
-                                          : null,
-                                      color:
-                                      active ? null : t.panel,
-                                      borderRadius:
-                                      BorderRadius.circular(20),
-                                      border: Border.all(
-                                        color: active
-                                            ? t.accent.primary
-                                            : t.cardBorder,
-                                        width: 1.5,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      occ,
-                                      style: TextStyle(
-                                        fontFamily: 'Inter',
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w500,
-                                        color: active
-                                            ? t.textPrimary
-                                            : t.mutedText,
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
+                            child: _StyledInput(
+                              controller: _occasionsCtrl,
+                              hint: 'e.g. Casual, Work (comma separated)',
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -1287,8 +1252,7 @@ class _AddItemModalState extends State<_AddItemModal>
                             label: 'Notes (optional)',
                             child: _StyledInput(
                               controller: _notesCtrl,
-                              hint:
-                              'Colour, material, where you got it…',
+                              hint: 'Where you got it, styling thoughts…',
                               maxLines: 3,
                             ),
                           ),
