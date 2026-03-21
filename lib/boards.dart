@@ -4,18 +4,19 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
+import 'package:myapp/life_goals.dart' as life_goals;
 import 'package:myapp/calendar.dart';
 import 'package:myapp/theme/theme_tokens.dart';
-
+import 'package:myapp/daily_wear.dart' as daily_wear;
 // ── Master Board Import ──
-import 'package:myapp/occasion.dart'; // Handles Daily Wear, Workout, Office, Party, Vacation, etc.
+import 'package:myapp/occasion.dart'; // Handles Daily Wear, Office, Party, Vacation, etc.
 
 // ── Specific Board Imports ──
 import 'package:myapp/everything_else.dart' as everything_else;
 import 'package:myapp/home_and_utilities.dart' as home_utils;
 import 'package:myapp/bills_page.dart' as bills;
 import 'package:myapp/skincare.dart';
+import 'package:myapp/workout.dart' as workout; // <-- Added Workout import back!
 
 class ShellBackNavigationNotification extends Notification {
   const ShellBackNavigationNotification();
@@ -291,11 +292,8 @@ class _BoardsScreenState extends State<BoardsScreen>
     _sectionOpacity = CurvedAnimation(parent: _sectionCtrl, curve: Curves.ease);
     _sectionSlide = Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero)
         .animate(CurvedAnimation(parent: _sectionCtrl, curve: Curves.ease));
-
-    // REMOVED immediate .forward() calls here to fix the IndexedStack bug!
   }
 
-  // <-- THE FIX: Only play animations when the tab actually becomes visible
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -594,12 +592,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _card,
                   arrowColor: lifeContentColor,
                   shellColor: _shell,
-                  onTap: () => _push(const OccasionBoard(
-                    occasion: 'Daily Wear',
-                    title: 'Daily Wear',
-                    subtitle: "Today's outfits",
-                    emptyEmoji: '👕',
-                  )),
+                  onTap: () => _push(const daily_wear.DailyWearScreen()), // Or whatever your main class is named in daily_wear.dart
                 ),
               ),
             ),
@@ -627,6 +620,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _card,
                   arrowColor: lifeContentColor,
                   shellColor: _shell,
+                  // <-- FIX: Now properly points to BillsScreen!
                   onTap: () => _push(const home_utils.HomeUtilitiesScreen()),
                 ),
               ),
@@ -660,12 +654,8 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _panel,
                   arrowColor: lifeContentColor,
                   shellColor: _shell,
-                  onTap: () => _push(const OccasionBoard(
-                    occasion: 'Workout',
-                    title: 'Work Out',
-                    subtitle: 'Gym & yoga',
-                    emptyEmoji: '🏃',
-                  )),
+                  // <-- FIX: Now points correctly to WorkoutScreen!
+                  onTap: () => _push(const workout.WorkoutScreen()),
                 ),
               ),
             ),
@@ -693,8 +683,8 @@ class _BoardsScreenState extends State<BoardsScreen>
                   arrowBg: _panel,
                   arrowColor: lifeContentColor,
                   shellColor: _shell,
-                  // <-- FIX: updated from bills.Screen4() to bills.BillsScreen()
-                  onTap: () => _push(const bills.BillsScreen()),
+                  // <-- FIX: Reverted to placeholder until we build Life Goals
+                  onTap: () => _push(const life_goals.LifeGoalsScreen()),
                 ),
               ),
             ),
@@ -1429,7 +1419,6 @@ class _StaggeredCardState extends State<_StaggeredCard>
       begin: const Offset(0, 0.14),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _ctrl, curve: _A.pageEntry));
-    // REMOVED immediate .forward() call
   }
 
   // Trigger animation ONLY when TickerMode enables this widget

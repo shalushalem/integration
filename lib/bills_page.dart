@@ -1,15 +1,8 @@
-// ════════════════════════════════════════════════════════════════════
-//  bills_page.dart  –  AHVI My Bills Screen
-//  Includes: slide-in bill cards, animated filter tabs, bottom-sheet
-//  modals with slide-up animation, coupon manager, detail sheet,
-//  dynamic totals that react to filter, add-bill form, delete bills,
-//  FAB chat button, animated chat panel, toast notifications, and
-//  pulsing dot animation.
-// ════════════════════════════════════════════════════════════════════
-
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:myapp/services/appwrite_service.dart';
 
 // ── PALETTE (1:1 from CSS :root) ────────────────────────────────────
 const Color kBg        = Color(0xFF08111F);
@@ -29,7 +22,7 @@ const Color kPanel2    = Color(0x1FFFFFFF);
 const Color kBorder    = Color(0x1FFFFFFF);
 
 // ════════════════════════════════════════════════════════════════════
-//  ROOT WIDGET - RENAMED TO BillsScreen to avoid conflict with home.dart
+//  ROOT WIDGET
 // ════════════════════════════════════════════════════════════════════
 class BillsScreen extends StatefulWidget {
   const BillsScreen({super.key});
@@ -40,102 +33,41 @@ class BillsScreen extends StatefulWidget {
 class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin {
 
   // ── STATE ──────────────────────────────────────────────────────────
+  bool _isLoading = true;
   String _activeFilter = 'all';
   bool   _chatOpen     = false;
 
-  // Active add-bill mode: 'ai' or 'manual'
   String _addMode = 'ai';
-
-  // Dropdown selections inside Add Bill form
   String _selCategory = 'Shopping';
   String _selPayment  = 'UPI';
   String _couponTypeVal = 'Percent';
 
-  // Toast state
   String  _toastMsg    = '';
   bool    _toastVisible = false;
   late AnimationController _toastAnim;
 
-  // FAB pulse animation for the chat dot
   late AnimationController _pulseCtrl;
   late Animation<double>   _pulseAnim;
 
-  // Chat panel slide animation
   late AnimationController _chatCtrl;
   late Animation<double>   _chatSlide;
 
-  // Overlay slide animation (used for both Add Bill & Coupon sheets)
   late AnimationController _sheetCtrl;
   late Animation<double>   _sheetSlide;
 
-  // Overlay type: 'add' | 'coupon' | ''
   String _overlayType = '';
+  
+  bool _isSavingBill = false;
+  bool _isSavingCoupon = false;
 
-  // Chat messages
   final List<Map<String, String>> _chatMessages = [
     {'from': 'ahvi', 'text': 'Hi! ✦ I\'m AHVI. Upload a bill photo for AI autofill, or enter details manually — I\'ve got you covered!'},
   ];
   final TextEditingController _chatInputCtrl = TextEditingController();
 
-  // ── BILLS DATA ─────────────────────────────────────────────────────
-  List<Map<String, dynamic>> _bills = [
-    {
-      'id': 'b1',
-      'store': 'Swiggy',
-      'amount': 485.0,
-      'date': 'Mar 15, 2025',
-      'category': 'food',
-      'payment': 'UPI',
-      'note': 'Dinner order - Burger & Fries',
-      'catColor': kAccent5,
-      'catBg': const Color(0x26FFD86E),
-      'icon': '🍔',
-    },
-    {
-      'id': 'b2',
-      'store': 'Apollo Pharmacy',
-      'amount': 1250.0,
-      'date': 'Mar 12, 2025',
-      'category': 'medical',
-      'payment': 'Credit Card',
-      'note': 'Monthly medicines',
-      'catColor': kAccent4,
-      'catBg': const Color(0x26FF8EC7),
-      'icon': '💊',
-    },
-    {
-      'id': 'b3',
-      'store': 'Zara',
-      'amount': 3499.0,
-      'date': 'Mar 10, 2025',
-      'category': 'shopping',
-      'payment': 'Debit Card',
-      'note': 'Summer collection',
-      'catColor': kAccent2,
-      'catBg': const Color(0x268D7DFF),
-      'icon': '👗',
-    },
-    {
-      'id': 'b4',
-      'store': 'BESCOM',
-      'amount': 890.0,
-      'date': 'Mar 5, 2025',
-      'category': 'utility',
-      'payment': 'Net Banking',
-      'note': 'Electricity bill - March',
-      'catColor': kAccent3,
-      'catBg': const Color(0x2604D7C8),
-      'icon': '⚡',
-    },
-  ];
-
-  // ── COUPONS DATA ───────────────────────────────────────────────────
-  List<Map<String, dynamic>> _coupons = [
-    {'id': 'c1', 'code': 'SAVE10',   'type': 'percent', 'value': 10,  'note': '10% off anything',        'bigNum': '10%', 'unitTxt': 'OFF',      'gradient': [const Color(0xFF8D7DFF), const Color(0xFF6B91FF)]},
-    {'id': 'c2', 'code': 'FLAT50',   'type': 'flat',    'value': 50,  'note': '₹50 flat discount',       'bigNum': '₹50', 'unitTxt': 'FLAT OFF', 'gradient': [const Color(0xFFFF8EC7), const Color(0xFFFFD86E)]},
-    {'id': 'c3', 'code': 'AHVI15',   'type': 'percent', 'value': 15,  'note': 'AHVI exclusive 15% off',  'bigNum': '15%', 'unitTxt': 'OFF',      'gradient': [const Color(0xFF04D7C8), const Color(0xFF6B91FF)]},
-    {'id': 'c4', 'code': 'FESTIVE25','type': 'percent', 'value': 25,  'note': 'Festive season deal',     'bigNum': '25%', 'unitTxt': 'OFF',      'gradient': [const Color(0xFF6B91FF), const Color(0xFF04D7C8)]},
-  ];
+  // ── DB DATA LISTS ──────────────────────────────────────────────────
+  List<Map<String, dynamic>> _bills = [];
+  List<Map<String, dynamic>> _coupons = [];
 
   // ── COMPUTED ───────────────────────────────────────────────────────
   List<Map<String, dynamic>> get _filteredBills {
@@ -162,7 +94,7 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     }
     final top = totals.entries.reduce((a, b) => a.value > b.value ? a : b).key;
     const icons = {'food':'🍔','shopping':'🛍️','medical':'💊','utility':'⚡','other':'📄'};
-    return icons[top] ?? '–';
+    return icons[top.toLowerCase()] ?? '–';
   }
 
   String _formatAmount(double v) {
@@ -179,28 +111,36 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     }
     return v.toStringAsFixed(0);
   }
+  
+  Map<String, dynamic> _getCategoryMeta(String cat) {
+    const meta = {
+      'shopping': {'icon': '🛍️', 'color': kAccent2, 'bg': Color(0x268D7DFF)},
+      'food':     {'icon': '🍔', 'color': kAccent5, 'bg': Color(0x26FFD86E)},
+      'utility':  {'icon': '⚡', 'color': kAccent3, 'bg': Color(0x2604D7C8)},
+      'medical':  {'icon': '💊', 'color': kAccent4, 'bg': Color(0x26FF8EC7)},
+      'other':    {'icon': '📄', 'color': kText,    'bg': Color(0x1AFFFFFF)},
+    };
+    return meta[cat.toLowerCase()] ?? meta['other']!;
+  }
 
   // ── LIFECYCLE ─────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
+    _fetchData();
 
-    // Pulse animation for chat dot
     _pulseCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 2))
       ..repeat(reverse: true);
     _pulseAnim = Tween<double>(begin: 1.0, end: 1.35).animate(
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
 
-    // Chat panel slide/scale animation
     _chatCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 350));
     _chatSlide = CurvedAnimation(parent: _chatCtrl, curve: Curves.easeOutBack);
 
-    // Sheet slide-up animation
     _sheetCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 450));
     _sheetSlide = CurvedAnimation(parent: _sheetCtrl, curve: const Cubic(0.34, 1.2, 0.64, 1));
 
-    // Toast animation
     _toastAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
   }
 
@@ -214,7 +154,158 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     super.dispose();
   }
 
-  // ── ACTIONS ───────────────────────────────────────────────────────
+  // ── APPWRITE ACTIONS ──────────────────────────────────────────────
+  
+  // Converts Appwrite ISO Datetime back to a friendly UI string
+  String _formatFriendlyDate(String isoString) {
+    try {
+      final d = DateTime.parse(isoString);
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return '${months[d.month - 1]} ${d.day}, ${d.year}';
+    } catch(e) {
+      return isoString; 
+    }
+  }
+
+  Future<void> _fetchData() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final billsDocs = await appwrite.getBills();
+      final couponsDocs = await appwrite.getCoupons();
+      
+      if (mounted) {
+        setState(() {
+          _bills = billsDocs.map((d) => {
+            'id': d.$id,
+            'store': d.data['store'],
+            'amount': (d.data['amount'] as num).toDouble(), // Safe cast int to double for UI
+            'date': _formatFriendlyDate(d.data['date']), // Convert datetime to nice string
+            'category': d.data['category'],
+            'payment': d.data['payment'],
+            'items': d.data['items'] ?? '', 
+            'note': d.data['note'] ?? '',
+          }).toList();
+
+          _coupons = couponsDocs.map((d) => {
+            'id': d.$id,
+            'code': d.data['code'],
+            'type': d.data['type'],
+            'value': (d.data['value'] as num).toDouble(), // Safe cast int to double for UI
+            'note': d.data['note'] ?? '',
+          }).toList();
+          
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+      _showToast('Failed to load data');
+    }
+  }
+
+  void _deleteBill(String id) async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      await appwrite.deleteBill(id);
+      if (!mounted) return;
+      setState(() => _bills.removeWhere((b) => b['id'] == id));
+      _showToast('Bill removed');
+    } catch (e) {
+      if (!mounted) return;
+      _showToast('Error removing bill');
+    }
+  }
+
+  void _deleteCoupon(String id) async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      await appwrite.deleteCoupon(id);
+      if (!mounted) return;
+      setState(() => _coupons.removeWhere((c) => c['id'] == id));
+      _showToast('Coupon removed');
+    } catch (e) {
+      if (!mounted) return;
+      _showToast('Error removing coupon');
+    }
+  }
+
+  void _addBill({
+    required String store,
+    required String amount,
+    required String category,
+    required String payment,
+    required String items, 
+    required String note,
+  }) async {
+    final amt = double.tryParse(amount) ?? 0;
+    if (store.trim().isEmpty || amt <= 0) {
+      _showToast('Please fill Store and Amount');
+      return;
+    }
+    
+    setState(() => _isSavingBill = true);
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      await appwrite.createBill({
+        'store': store.trim(),
+        'amount': amt.toInt(), // ✅ FIXED: Appwrite expects Integer!
+        'date': DateTime.now().toIso8601String(), // ✅ FIXED: Appwrite expects ISO Datetime
+        'category': category.toLowerCase(),
+        'payment': payment,
+        'items': items.trim(), 
+        'note': note.trim().isEmpty ? null : note.trim(), // Send null if empty
+      });
+      
+      if (mounted) {
+        _fetchData(); 
+        _closeOverlay();
+        _showToast('✦ Bill saved!');
+      }
+    } catch (e) {
+      if (mounted) _showToast('Error saving bill');
+      debugPrint("Bill Error: $e");
+    } finally {
+      if (mounted) setState(() => _isSavingBill = false);
+    }
+  }
+  
+  void _saveNewCoupon() async {
+    final code = _newCodeCtrl.text.trim().toUpperCase();
+    final value = double.tryParse(_newValueCtrl.text) ?? 0;
+    final note = _newNoteCtrl.text.trim();
+    
+    if (code.isEmpty) { _showToast('Enter a coupon code'); return; }
+    if (_couponTypeVal != 'Free' && value <= 0) { _showToast('Enter a valid value'); return; }
+    if (_coupons.any((c) => c['code'] == code)) { _showToast('Coupon already saved!'); return; }
+
+    setState(() => _isSavingCoupon = true);
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      
+      await appwrite.createCoupon({
+        'code': code,
+        'type': _couponTypeVal.toLowerCase(),
+        'value': value.toInt(), // ✅ FIXED: Appwrite expects Integer!
+        'note': note.isEmpty ? null : note, 
+      });
+      
+      if (mounted) {
+        _newCodeCtrl.clear();
+        _newValueCtrl.clear();
+        _newNoteCtrl.clear();
+        _fetchData(); // Refresh coupons
+        _showToast('✦ Coupon "$code" saved!');
+      }
+    } catch(e) {
+      if (mounted) _showToast('Error saving coupon');
+      debugPrint("Coupon Error: $e");
+    } finally {
+      if (mounted) setState(() => _isSavingCoupon = false);
+    }
+  }
+
+  // ── UI ACTIONS ────────────────────────────────────────────────────
+
   void _toggleChat() {
     setState(() => _chatOpen = !_chatOpen);
     if (_chatOpen) {
@@ -231,7 +322,7 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
 
   void _closeOverlay() {
     _sheetCtrl.reverse().then((_) {
-      setState(() => _overlayType = '');
+      if (mounted) setState(() => _overlayType = '');
     });
   }
 
@@ -246,73 +337,23 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     if (mounted) setState(() => _toastVisible = false);
   }
 
-  void _deleteBill(String id) {
-    setState(() => _bills.removeWhere((b) => b['id'] == id));
-    _showToast('Bill removed');
-  }
-
-  void _deleteCoupon(String id) {
-    setState(() => _coupons.removeWhere((c) => c['id'] == id));
-    _showToast('Coupon removed');
-  }
-
-  void _addBill({
-    required String store,
-    required String amount,
-    required String category,
-    required String payment,
-    required String note,
-  }) {
-    final amt = double.tryParse(amount) ?? 0;
-    if (store.trim().isEmpty || amt <= 0) {
-      _showToast('Please fill Store and Amount');
-      return;
-    }
-    const catMeta = {
-      'Shopping': {'cat': 'shopping', 'icon': '🛍️', 'color': kAccent2, 'bg': Color(0x268D7DFF)},
-      'Food':     {'cat': 'food',     'icon': '🍽️', 'color': kAccent5, 'bg': Color(0x26FFD86E)},
-      'Utility':  {'cat': 'utility',  'icon': '⚡', 'color': kAccent3, 'bg': Color(0x2604D7C8)},
-      'Medical':  {'cat': 'medical',  'icon': '💊', 'color': kAccent4, 'bg': Color(0x26FF8EC7)},
-      'Other':    {'cat': 'other',    'icon': '📄', 'color': kText,    'bg': Color(0x1AFFFFFF)},
-    };
-    final meta = catMeta[category] ?? catMeta['Other']!;
-    setState(() {
-      _bills.insert(0, {
-        'id': 'b${DateTime.now().millisecondsSinceEpoch}',
-        'store': store.trim(),
-        'amount': amt,
-        'date': _todayLabel(),
-        'category': meta['cat'],
-        'payment': payment,
-        'note': note.trim().isEmpty ? '—' : note.trim(),
-        'catColor': meta['color'],
-        'catBg': meta['bg'],
-        'icon': meta['icon'],
-      });
-    });
-    _closeOverlay();
-    _showToast('✦ Bill saved!');
-  }
-
-  String _todayLabel() {
-    final now = DateTime.now();
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return '${months[now.month - 1]} ${now.day}, ${now.year}';
-  }
-
   // ── BUILD ─────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: kBg, 
+        body: Center(child: CircularProgressIndicator(color: kAccent2))
+      );
+    }
+    
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
         backgroundColor: kBg,
         body: Stack(
           children: [
-            // ── MESH BACKGROUND
             _MeshBackground(),
-
-            // ── MAIN SCREEN
             SafeArea(
               bottom: false,
               child: Column(
@@ -323,15 +364,7 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
                 ],
               ),
             ),
-
-            // ── CHAT FAB
-            Positioned(
-              bottom: 108,
-              right: 20,
-              child: _buildChatFab(),
-            ),
-
-            // ── CHAT PANEL
+            Positioned(bottom: 108, right: 20, child: _buildChatFab()),
             AnimatedBuilder(
               animation: _chatSlide,
               builder: (_, __) {
@@ -354,22 +387,16 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
                 );
               },
             ),
-
-            // ── OVERLAY (Add Bill / Coupon Manager)
             if (_overlayType.isNotEmpty)
               AnimatedBuilder(
                 animation: _sheetSlide,
                 builder: (_, __) => _buildOverlayBackdrop(),
               ),
-
-            // ── TOAST NOTIFICATION
             if (_toastVisible)
               AnimatedBuilder(
                 animation: _toastAnim,
                 builder: (_, __) => Positioned(
-                  bottom: 120,
-                  left: 0,
-                  right: 0,
+                  bottom: 120, left: 0, right: 0,
                   child: Center(
                     child: Opacity(
                       opacity: _toastAnim.value,
@@ -392,7 +419,7 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
   // ════════════════════════════════════════════════════════════════════
   Widget _buildHeader() {
     return Container(
-      color: Colors.transparent, // Adjusted so mesh background shows
+      color: kBg,
       padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -433,9 +460,6 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  //  SCROLL AREA
-  // ════════════════════════════════════════════════════════════════════
   Widget _buildScrollArea() {
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
@@ -464,9 +488,6 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
   String _toTitleCase(String s) =>
       s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
-  // ════════════════════════════════════════════════════════════════════
-  //  SPENDING CARD
-  // ════════════════════════════════════════════════════════════════════
   Widget _buildSpendingCard() {
     final bills = _filteredBills;
     final total = _totalAmount;
@@ -563,9 +584,6 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  //  FILTER TABS
-  // ════════════════════════════════════════════════════════════════════
   Widget _buildFilterTabs() {
     final tabs = [
       {'key': 'all',      'label': 'All',      'color': Colors.white,  'bg': kBg2},
@@ -623,9 +641,6 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  //  BILLS LIST
-  // ════════════════════════════════════════════════════════════════════
   Widget _buildBillsList() {
     final bills = _filteredBills;
     if (bills.isEmpty) return _buildEmptyState();
@@ -634,11 +649,14 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
       children: bills.asMap().entries.map((entry) {
         final i    = entry.key;
         final bill = entry.value;
+        final meta = _getCategoryMeta(bill['category'] as String);
+        
         return _AnimatedBillCard(
           key: ValueKey(bill['id']),
           bill: bill,
+          meta: meta,
           delay: Duration(milliseconds: i * 60),
-          onTap: () => _showDetailSheet(bill),
+          onTap: () => _showDetailSheet(bill, meta),
           onDelete: () => _deleteBill(bill['id'] as String),
         );
       }).toList(),
@@ -671,9 +689,6 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  //  BOTTOM ACTIONS
-  // ════════════════════════════════════════════════════════════════════
   Widget _buildBottomActions() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
@@ -760,9 +775,6 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  //  CHAT FAB 
-  // ════════════════════════════════════════════════════════════════════
   Widget _buildChatFab() {
     return _PressScaleButton(
       onTap: _toggleChat,
@@ -821,9 +833,6 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  //  CHAT PANEL 
-  // ════════════════════════════════════════════════════════════════════
   Widget _buildChatPanel() {
     return Container(
       width: 300,
@@ -984,9 +993,6 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     _chatInputCtrl.clear();
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  //  OVERLAY (Add Bill + Coupon Manager)
-  // ════════════════════════════════════════════════════════════════════
   Widget _buildOverlayBackdrop() {
     return GestureDetector(
       onTap: _closeOverlay,
@@ -1115,13 +1121,17 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
               )),
               const SizedBox(width: 10),
               Expanded(flex: 2, child: _PressScaleButton(
-                onTap: () => _addBill(
-                  store: _storeCtrl.text,
-                  amount: _amountCtrl.text,
-                  category: _selCategory,
-                  payment: _selPayment,
-                  note: _notesCtrl.text,
-                ),
+                onTap: () {
+                  if (_isSavingBill) return;
+                  _addBill(
+                    store: _storeCtrl.text,
+                    amount: _amountCtrl.text,
+                    category: _selCategory,
+                    payment: _selPayment,
+                    items: _itemsCtrl.text, 
+                    note: _notesCtrl.text,
+                  );
+                },
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   decoration: BoxDecoration(
@@ -1131,8 +1141,9 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
                       BoxShadow(color: Color(0x4D6B91FF), blurRadius: 20, offset: Offset(0, 6)),
                     ],
                   ),
-                  child: const Center(child: Text('✦ Save Bill', style: TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white,
+                  child: Center(child: _isSavingBill ? 
+                    const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) :
+                    const Text('✦ Save Bill', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white,
                   ))),
                 ),
               )),
@@ -1322,7 +1333,7 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
   Widget _datePickerTrigger() {
     return GestureDetector(
       onTap: () async {
-        await showDatePicker(
+        final picked = await showDatePicker(
           context: context,
           initialDate: DateTime.now(),
           firstDate: DateTime(2020),
@@ -1516,7 +1527,7 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
                   const SizedBox(height: 16),
                   if (_coupons.isEmpty) _buildCouponEmptyState(),
                   ..._coupons.asMap().entries.map((e) =>
-                      _buildStoredCouponCard(e.value)),
+                      _buildStoredCouponCard(e.value, e.key)),
                 ],
               ),
             ),
@@ -1582,7 +1593,9 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
         _couponInput(controller: _newNoteCtrl, placeholder: 'Short description…'),
         const SizedBox(height: 12),
         _PressScaleButton(
-          onTap: _saveNewCoupon,
+          onTap: () {
+            if (!_isSavingCoupon) _saveNewCoupon();
+          },
           child: Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 13),
@@ -1593,55 +1606,21 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
                 BoxShadow(color: Color(0x528D7DFF), blurRadius: 16, offset: Offset(0, 5)),
               ],
             ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: const [
-              Icon(Icons.add_rounded, color: Colors.white, size: 16),
-              SizedBox(width: 6),
-              Text('Save Coupon', style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white,
-              )),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              if (_isSavingCoupon)
+                const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+              else ...[
+                const Icon(Icons.add_rounded, color: Colors.white, size: 16),
+                const SizedBox(width: 6),
+                const Text('Save Coupon', style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white,
+                )),
+              ]
             ]),
           ),
         ),
       ]),
     );
-  }
-
-  void _saveNewCoupon() {
-    final code = _newCodeCtrl.text.trim().toUpperCase();
-    final value = double.tryParse(_newValueCtrl.text) ?? 0;
-    final note = _newNoteCtrl.text.trim();
-    if (code.isEmpty) { _showToast('Enter a coupon code'); return; }
-    if (_couponTypeVal != 'Free' && value <= 0) { _showToast('Enter a valid value'); return; }
-    if (_coupons.any((c) => c['code'] == code)) { _showToast('Coupon already saved!'); return; }
-
-    final palettes = [
-      [const Color(0xFF8D7DFF), const Color(0xFF6B91FF)],
-      [const Color(0xFFFF8EC7), const Color(0xFFFFD86E)],
-      [const Color(0xFF04D7C8), const Color(0xFF6B91FF)],
-      [const Color(0xFF6B91FF), const Color(0xFF04D7C8)],
-    ];
-    final grad = palettes[_coupons.length % palettes.length];
-    final bigNum = _couponTypeVal == 'Free' ? '🎁' :
-    (_couponTypeVal == 'Flat' ? '₹${value.toInt()}' : '${value.toInt()}%');
-    final unitTxt = _couponTypeVal == 'Free' ? 'SPECIAL' :
-    (_couponTypeVal == 'Flat' ? 'FLAT OFF' : 'OFF');
-
-    setState(() {
-      _coupons.insert(0, {
-        'id': 'c${DateTime.now().millisecondsSinceEpoch}',
-        'code': code,
-        'type': _couponTypeVal.toLowerCase(),
-        'value': value.toInt(),
-        'note': note.isEmpty ? '' : note,
-        'bigNum': bigNum,
-        'unitTxt': unitTxt,
-        'gradient': grad,
-      });
-    });
-    _newCodeCtrl.clear();
-    _newValueCtrl.clear();
-    _newNoteCtrl.clear();
-    _showToast('✦ Coupon "$code" saved!');
   }
 
   Widget _couponFieldLabel(String label) {
@@ -1704,8 +1683,20 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     );
   }
 
-  Widget _buildStoredCouponCard(Map<String, dynamic> coupon) {
-    final gradientColors = coupon['gradient'] as List<Color>;
+  Widget _buildStoredCouponCard(Map<String, dynamic> coupon, int index) {
+    final palettes = [
+      [const Color(0xFF8D7DFF), const Color(0xFF6B91FF)],
+      [const Color(0xFFFF8EC7), const Color(0xFFFFD86E)],
+      [const Color(0xFF04D7C8), const Color(0xFF6B91FF)],
+      [const Color(0xFF6B91FF), const Color(0xFF04D7C8)],
+    ];
+    final gradientColors = palettes[index % palettes.length];
+    
+    final bigNum = coupon['type'] == 'free' ? '🎁' :
+        (coupon['type'] == 'flat' ? '₹${coupon['value'].toInt()}' : '${coupon['value'].toInt()}%');
+    final unitTxt = coupon['type'] == 'free' ? 'SPECIAL' :
+        (coupon['type'] == 'flat' ? 'FLAT OFF' : 'OFF');
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       height: 90,
@@ -1739,7 +1730,7 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(coupon['bigNum'] as String,
+                      Text(bigNum,
                         style: const TextStyle(
                           fontSize: 22, fontWeight: FontWeight.w900,
                           color: Colors.white, height: 1.0,
@@ -1747,7 +1738,7 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 2),
-                      Text(coupon['unitTxt'] as String,
+                      Text(unitTxt,
                         style: const TextStyle(
                           fontSize: 10, fontWeight: FontWeight.w700,
                           color: Color(0xD9FFFFFF), letterSpacing: 0.64,
@@ -1805,7 +1796,7 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
                           Icon(Icons.local_offer, size: 8, color: gradientColors.first),
                           const SizedBox(width: 3),
                           Text(
-                            '${coupon['value']}${coupon['type'] == 'percent' ? '%' : '₹'} Off',
+                            '${coupon['value'].toInt()}${coupon['type'] == 'percent' ? '%' : '₹'} Off',
                             style: TextStyle(
                               fontSize: 9, fontWeight: FontWeight.w700,
                               letterSpacing: 0.96, color: gradientColors.first,
@@ -1837,24 +1828,18 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  //  DETAIL SHEET 
-  // ════════════════════════════════════════════════════════════════════
-  void _showDetailSheet(Map<String, dynamic> bill) {
+  void _showDetailSheet(Map<String, dynamic> bill, Map<String, dynamic> meta) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _DetailSheet(bill: bill, onDelete: (id) {
+      builder: (_) => _DetailSheet(bill: bill, meta: meta, onDelete: (id) {
         Navigator.pop(context);
         _deleteBill(id);
       }),
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  //  TOAST
-  // ════════════════════════════════════════════════════════════════════
   Widget _buildToast() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
@@ -1890,6 +1875,7 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
 // ════════════════════════════════════════════════════════════════════
 class _AnimatedBillCard extends StatefulWidget {
   final Map<String, dynamic> bill;
+  final Map<String, dynamic> meta;
   final VoidCallback onTap;
   final VoidCallback onDelete;
   final Duration delay;
@@ -1897,6 +1883,7 @@ class _AnimatedBillCard extends StatefulWidget {
   const _AnimatedBillCard({
     super.key,
     required this.bill,
+    required this.meta,
     required this.onTap,
     required this.onDelete,
     required this.delay,
@@ -1941,6 +1928,7 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
   @override
   Widget build(BuildContext context) {
     final bill = widget.bill;
+    final meta = widget.meta;
 
     return FadeTransition(
       opacity: _opacity,
@@ -1977,7 +1965,7 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
                   Container(
                     width: 52, height: 62,
                     decoration: BoxDecoration(
-                      color: bill['catBg'] as Color,
+                      color: meta['bg'] as Color,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: kBorder, width: 1.5),
                       boxShadow: const [
@@ -1985,11 +1973,12 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
                       ],
                     ),
                     child: Center(
-                      child: Text(bill['icon'] as String,
+                      child: Text(meta['icon'] as String,
                           style: const TextStyle(fontSize: 26)),
                     ),
                   ),
                   const SizedBox(width: 13),
+
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2013,14 +2002,14 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                             decoration: BoxDecoration(
-                              color: bill['catBg'] as Color,
+                              color: meta['bg'] as Color,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
                               (bill['category'] as String).toUpperCase(),
                               style: TextStyle(
                                 fontSize: 9, fontWeight: FontWeight.w700,
-                                letterSpacing: 0.96, color: bill['catColor'] as Color,
+                                letterSpacing: 0.96, color: meta['color'] as Color,
                               ),
                             ),
                           ),
@@ -2036,7 +2025,9 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
                       ],
                     ),
                   ),
+
                   const SizedBox(width: 10),
+
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -2095,13 +2086,14 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  DETAIL SHEET 
+//  DETAIL SHEET
 // ════════════════════════════════════════════════════════════════════
 class _DetailSheet extends StatelessWidget {
   final Map<String, dynamic> bill;
+  final Map<String, dynamic> meta;
   final void Function(String id) onDelete;
 
-  const _DetailSheet({required this.bill, required this.onDelete});
+  const _DetailSheet({required this.bill, required this.meta, required this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -2133,7 +2125,7 @@ class _DetailSheet extends StatelessWidget {
                 Container(
                   width: 68, height: 80,
                   decoration: BoxDecoration(
-                    color: bill['catBg'] as Color,
+                    color: meta['bg'] as Color,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: const Color(0x4DC4A0C8), width: 1.5),
                     boxShadow: const [
@@ -2141,7 +2133,7 @@ class _DetailSheet extends StatelessWidget {
                     ],
                   ),
                   child: Center(
-                    child: Text(bill['icon'] as String, style: const TextStyle(fontSize: 32)),
+                    child: Text(meta['icon'] as String, style: const TextStyle(fontSize: 32)),
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -2190,28 +2182,33 @@ class _DetailSheet extends StatelessWidget {
             _detailRow('Payment',  bill['payment'] as String),
             _detailRow('Amount',   '₹${_fmtAmount(bill['amount'] as double)}'),
             _detailRow('Date',     bill['date'] as String),
-            const Padding(
-              padding: EdgeInsets.only(top: 18, bottom: 10),
-              child: Text('NOTES', style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600,
-                letterSpacing: 2.4, color: kMuted,
-              )),
-            ),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0x148D7DFF), Color(0x0DFF8EC7)],
-                  begin: Alignment.topLeft, end: Alignment.bottomRight,
-                ),
-                border: Border.all(color: const Color(0x238D7DFF), width: 1),
-                borderRadius: BorderRadius.circular(16),
+            if ((bill['items'] as String).isNotEmpty) ...[
+              _detailRow('Items', bill['items'] as String),
+            ],
+            if ((bill['note'] as String).isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.only(top: 18, bottom: 10),
+                child: Text('NOTES', style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w600,
+                  letterSpacing: 2.4, color: kMuted,
+                )),
               ),
-              child: Text(bill['note'] as String, style: const TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w500, color: kText, height: 1.6,
-              )),
-            ),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0x148D7DFF), Color(0x0DFF8EC7)],
+                    begin: Alignment.topLeft, end: Alignment.bottomRight,
+                  ),
+                  border: Border.all(color: const Color(0x238D7DFF), width: 1),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(bill['note'] as String, style: const TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w500, color: kText, height: 1.6,
+                )),
+              ),
+            ],
             const SizedBox(height: 18),
             Row(children: [
               Expanded(child: _detailBtn(context, 'Share', false)),

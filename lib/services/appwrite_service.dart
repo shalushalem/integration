@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:appwrite/appwrite.dart';
 import 'package:appwrite/models.dart';
 import 'package:appwrite/enums.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:myapp/config/env.dart'; 
 
 class AppwriteService extends ChangeNotifier {
   late Client client;
@@ -11,21 +11,10 @@ class AppwriteService extends ChangeNotifier {
   late Databases databases;
   late Avatars avatars;
 
-  // ── Environment Variables ──
-  String get _endpoint => dotenv.env['EXPO_PUBLIC_APPWRITE_ENDPOINT'] ?? 'https://cloud.appwrite.io/v1';
-  String get _projectId => dotenv.env['EXPO_PUBLIC_APPWRITE_PROJECT_ID'] ?? '';
-  String get _databaseId => dotenv.env['EXPO_PUBLIC_APPWRITE_DATABASE_ID'] ?? '';
-  String get _plansCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_PLANS'] ?? 'plans';
-  String get _savedBoardsCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_SAVED_BOARDS'] ?? 'saved_boards';
-  String get _skincareCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_SKINCARE'] ?? 'skincare';
-  
-  // New distinct collection for the workout screen
-  String get _workoutOutfitsCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_WORKOUT_OUTFITS'] ?? 'workout_outfits';
-
   AppwriteService() {
     client = Client()
-      ..setEndpoint(_endpoint)
-      ..setProject(_projectId);
+      ..setEndpoint(Env.appwriteEndpoint)   
+      ..setProject(Env.appwriteProjectId);
 
     account = Account(client);
     databases = Databases(client);
@@ -112,8 +101,8 @@ class AppwriteService extends ChangeNotifier {
       data['userId'] = user.$id; 
 
       return await databases.createDocument(
-        databaseId: _databaseId,
-        collectionId: _plansCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.plansCollection,
         documentId: ID.unique(),
         data: data,
       );
@@ -129,8 +118,8 @@ class AppwriteService extends ChangeNotifier {
       if (user == null) throw Exception("User not authenticated");
 
       final result = await databases.listDocuments(
-        databaseId: _databaseId,
-        collectionId: _plansCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.plansCollection,
         queries: [
           Query.equal('userId', user.$id),
         ],
@@ -145,8 +134,8 @@ class AppwriteService extends ChangeNotifier {
   Future<void> deletePlan(String documentId) async {
     try {
       await databases.deleteDocument(
-        databaseId: _databaseId,
-        collectionId: _plansCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.plansCollection,
         documentId: documentId,
       );
     } catch (e) {
@@ -158,8 +147,8 @@ class AppwriteService extends ChangeNotifier {
   Future<void> updatePlanReminder(String documentId, bool reminder) async {
     try {
       await databases.updateDocument(
-        databaseId: _databaseId,
-        collectionId: _plansCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.plansCollection,
         documentId: documentId,
         data: {'reminder': reminder},
       );
@@ -179,8 +168,8 @@ class AppwriteService extends ChangeNotifier {
       if (user == null) throw Exception("User not authenticated");
 
       final result = await databases.listDocuments(
-        databaseId: _databaseId,
-        collectionId: _savedBoardsCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.savedBoardsCollection,
         queries: [
           Query.equal('userId', user.$id),
           Query.equal('occasion', occasion),
@@ -200,8 +189,8 @@ class AppwriteService extends ChangeNotifier {
       if (user == null) throw Exception("User not authenticated");
 
       final result = await databases.listDocuments(
-        databaseId: _databaseId,
-        collectionId: _savedBoardsCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.savedBoardsCollection,
         queries: [
           Query.equal('userId', user.$id),
           Query.orderDesc('\$createdAt'), 
@@ -217,8 +206,8 @@ class AppwriteService extends ChangeNotifier {
   Future<void> deleteSavedBoard(String documentId) async {
     try {
       await databases.deleteDocument(
-        databaseId: _databaseId,
-        collectionId: _savedBoardsCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.savedBoardsCollection,
         documentId: documentId,
       );
     } catch (e) {
@@ -237,15 +226,15 @@ class AppwriteService extends ChangeNotifier {
       if (user == null) return null;
 
       final result = await databases.listDocuments(
-        databaseId: _databaseId,
-        collectionId: _skincareCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.skincareCollection,
         queries: [Query.equal('userId', user.$id)],
       );
 
       if (result.documents.isEmpty) {
         return await databases.createDocument(
-          databaseId: _databaseId,
-          collectionId: _skincareCollection,
+          databaseId: Env.appwriteDatabaseId,
+          collectionId: Env.skincareCollection,
           documentId: ID.unique(),
           data: {
             'userId': user.$id,
@@ -280,8 +269,8 @@ class AppwriteService extends ChangeNotifier {
       updateData['lastUpdated'] = DateTime.now().toIso8601String();
 
       await databases.updateDocument(
-        databaseId: _databaseId,
-        collectionId: _skincareCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.skincareCollection,
         documentId: documentId,
         data: updateData,
       );
@@ -300,8 +289,8 @@ class AppwriteService extends ChangeNotifier {
       if (user == null) throw Exception("User not authenticated");
 
       final result = await databases.listDocuments(
-        databaseId: _databaseId,
-        collectionId: _workoutOutfitsCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.workoutOutfitsCollection,
         queries: [
           Query.equal('userId', user.$id),
           Query.orderDesc('\$createdAt'),
@@ -322,8 +311,8 @@ class AppwriteService extends ChangeNotifier {
       data['userId'] = user.$id;
 
       return await databases.createDocument(
-        databaseId: _databaseId,
-        collectionId: _workoutOutfitsCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.workoutOutfitsCollection,
         documentId: ID.unique(),
         data: data,
       );
@@ -336,12 +325,351 @@ class AppwriteService extends ChangeNotifier {
   Future<void> deleteWorkoutOutfit(String documentId) async {
     try {
       await databases.deleteDocument(
-        databaseId: _databaseId,
-        collectionId: _workoutOutfitsCollection,
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.workoutOutfitsCollection,
         documentId: documentId,
       );
     } catch (e) {
       debugPrint("Error deleting workout outfit: $e");
+      rethrow;
+    }
+  }
+
+  // =========================================================================
+  // BILLS & COUPONS DB METHODS
+  // =========================================================================
+
+  Future<List<Document>> getBills() async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      final result = await databases.listDocuments(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.billsCollection,
+        queries: [
+          Query.equal('userId', user.$id),
+          Query.orderDesc('\$createdAt'),
+        ],
+      );
+      return result.documents;
+    } catch (e) {
+      debugPrint("Error fetching bills: $e");
+      return [];
+    }
+  }
+
+  Future<Document> createBill(Map<String, dynamic> data) async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      data['userId'] = user.$id;
+
+      return await databases.createDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.billsCollection,
+        documentId: ID.unique(),
+        data: data,
+      );
+    } catch (e) {
+      debugPrint("Error creating bill: $e");
+      rethrow;
+    }
+  }
+
+  Future<void> deleteBill(String documentId) async {
+    try {
+      await databases.deleteDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.billsCollection,
+        documentId: documentId,
+      );
+    } catch (e) {
+      debugPrint("Error deleting bill: $e");
+      rethrow;
+    }
+  }
+
+  Future<List<Document>> getCoupons() async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      final result = await databases.listDocuments(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.couponsCollection,
+        queries: [
+          Query.equal('userId', user.$id),
+          Query.orderDesc('\$createdAt'),
+        ],
+      );
+      return result.documents;
+    } catch (e) {
+      debugPrint("Error fetching coupons: $e");
+      return [];
+    }
+  }
+
+  Future<Document> createCoupon(Map<String, dynamic> data) async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      data['userId'] = user.$id;
+
+      return await databases.createDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.couponsCollection,
+        documentId: ID.unique(),
+        data: data,
+      );
+    } catch (e) {
+      debugPrint("Error creating coupon: $e");
+      rethrow;
+    }
+  }
+
+  Future<void> deleteCoupon(String documentId) async {
+    try {
+      await databases.deleteDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.couponsCollection,
+        documentId: documentId,
+      );
+    } catch (e) {
+      debugPrint("Error deleting coupon: $e");
+      rethrow;
+    }
+  }
+
+  // =========================================================================
+  // MEDI TRACKER DB METHODS
+  // =========================================================================
+
+  Future<List<Document>> getMeds() async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      final result = await databases.listDocuments(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.medsCollection,
+        queries: [
+          Query.equal('userId', user.$id),
+          Query.orderDesc('\$createdAt'),
+        ],
+      );
+      return result.documents;
+    } catch (e) {
+      debugPrint("Error fetching meds: $e");
+      return [];
+    }
+  }
+
+  Future<Document> createMed(Map<String, dynamic> data) async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+      data['userId'] = user.$id;
+
+      return await databases.createDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.medsCollection,
+        documentId: ID.unique(),
+        data: data,
+      );
+    } catch (e) {
+      debugPrint("Error creating med: $e");
+      rethrow;
+    }
+  }
+
+  Future<void> updateMed(String documentId, Map<String, dynamic> data) async {
+    try {
+      await databases.updateDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.medsCollection,
+        documentId: documentId,
+        data: data,
+      );
+    } catch (e) {
+      debugPrint("Error updating med: $e");
+      rethrow;
+    }
+  }
+
+  Future<void> deleteMed(String documentId) async {
+    try {
+      await databases.deleteDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.medsCollection,
+        documentId: documentId,
+      );
+    } catch (e) {
+      debugPrint("Error deleting med: $e");
+      rethrow;
+    }
+  }
+
+  Future<List<Document>> getMedLogs() async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      final result = await databases.listDocuments(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.medLogsCollection,
+        queries: [
+          Query.equal('userId', user.$id),
+          Query.orderDesc('time'), 
+        ],
+      );
+      return result.documents;
+    } catch (e) {
+      debugPrint("Error fetching med logs: $e");
+      return [];
+    }
+  }
+
+  Future<Document> createMedLog(Map<String, dynamic> data) async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+      data['userId'] = user.$id;
+
+      return await databases.createDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.medLogsCollection,
+        documentId: ID.unique(),
+        data: data,
+      );
+    } catch (e) {
+      debugPrint("Error creating med log: $e");
+      rethrow;
+    }
+  }
+
+  // =========================================================================
+  // MEAL PLANNER DB METHODS
+  // =========================================================================
+
+  Future<List<Document>> getMealPlans() async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      final result = await databases.listDocuments(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.mealPlansCollection,
+        queries: [
+          Query.equal('userId', user.$id),
+          Query.orderDesc('\$createdAt'),
+        ],
+      );
+      return result.documents;
+    } catch (e) {
+      debugPrint("Error fetching meal plans: $e");
+      return [];
+    }
+  }
+
+  Future<Document> createMealPlan(Map<String, dynamic> data) async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+      data['userId'] = user.$id;
+
+      return await databases.createDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.mealPlansCollection,
+        documentId: ID.unique(),
+        data: data,
+      );
+    } catch (e) {
+      debugPrint("Error creating meal plan: $e");
+      rethrow;
+    }
+  }
+
+  Future<void> deleteMealPlan(String documentId) async {
+    try {
+      await databases.deleteDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.mealPlansCollection,
+        documentId: documentId,
+      );
+    } catch (e) {
+      debugPrint("Error deleting meal plan: $e");
+      rethrow;
+    }
+  }
+
+  // =========================================================================
+  // LIFE GOALS DB METHODS
+  // =========================================================================
+
+  Future<List<Document>> getLifeGoals() async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+
+      final result = await databases.listDocuments(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.lifeGoalsCollection,
+        queries: [
+          Query.equal('userId', user.$id),
+          Query.orderDesc('\$createdAt'),
+        ],
+      );
+      return result.documents;
+    } catch (e) {
+      debugPrint("Error fetching life goals: $e");
+      return [];
+    }
+  }
+
+  Future<Document> createLifeGoal(Map<String, dynamic> data) async {
+    try {
+      final user = await getCurrentUser();
+      if (user == null) throw Exception("User not authenticated");
+      data['userId'] = user.$id;
+
+      return await databases.createDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.lifeGoalsCollection,
+        documentId: ID.unique(),
+        data: data,
+      );
+    } catch (e) {
+      debugPrint("Error creating life goal: $e");
+      rethrow;
+    }
+  }
+
+  Future<void> updateLifeGoalProgress(String documentId, int progress) async {
+    try {
+      await databases.updateDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.lifeGoalsCollection,
+        documentId: documentId,
+        data: {'progress': progress},
+      );
+    } catch (e) {
+      debugPrint("Error updating life goal progress: $e");
+      rethrow;
+    }
+  }
+
+  Future<void> deleteLifeGoal(String documentId) async {
+    try {
+      await databases.deleteDocument(
+        databaseId: Env.appwriteDatabaseId,
+        collectionId: Env.lifeGoalsCollection,
+        documentId: documentId,
+      );
+    } catch (e) {
+      debugPrint("Error deleting life goal: $e");
       rethrow;
     }
   }

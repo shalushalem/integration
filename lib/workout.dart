@@ -60,7 +60,7 @@ void showToast(BuildContext context, String message) {
 }
 
 // ─── Entry point ──────────────────────────────────────────────────
-// RENAMED from Screen4 to WorkoutScreen to match main.dart routing!
+// [CHANGED] Renamed to WorkoutScreen to match app_routes.dart and boards.dart
 class WorkoutScreen extends StatefulWidget {
   const WorkoutScreen({super.key});
   @override
@@ -375,14 +375,18 @@ class _HomePageState extends State<_HomePage> {
     }
   }
 
-  // <-- ADDED: Delete from Appwrite logic
+  // <-- ADDED: Delete from Appwrite logic with missing mounted checks
   void _deleteOutfit(String id) async {
     try {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
       await appwrite.deleteWorkoutOutfit(id);
+      
+      if (!mounted) return; // [FIXED]
+      
       setState(() => _outfits.removeWhere((o) => o['id'] == id));
       showToast(context, 'Outfit removed');
     } catch (e) {
+      if (!mounted) return; // [FIXED]
       showToast(context, 'Error deleting outfit');
     }
   }
@@ -412,7 +416,7 @@ class _HomePageState extends State<_HomePage> {
             child: _TabsSection(
               categories: _categories,
               currentTab: _currentTab,
-              outfitsCount: _outfits.length,
+              outfits: _outfits, // [FIXED] Pass the full list instead of just the count
               onTabChanged: (t) => setState(() => _currentTab = t),
               // [CHANGED B13: wire modal open — shows Add Outfit dialog]
               onAddOutfit: () => _openAddOutfitModal(context),
@@ -446,8 +450,8 @@ class _HomePageState extends State<_HomePage> {
       transitionDuration: const Duration(milliseconds: 250),
       pageBuilder: (ctx, anim1, anim2) => _AddOutfitModal(
         onOutfitAdded: _fetchOutfits, // <-- Added callback to refresh list!
-        onClose: () => Navigator.of(ctx).pop(),
-      ),
+        onClose: () => Navigator.of(ctx).pop()
+      ), 
       transitionBuilder: (ctx, anim, secondary, child) {
         // [ADDED B13] Scale + fade in (0.98 → 1.0 scale, 0 → 1 opacity)
         final curved = CurvedAnimation(parent: anim, curve: Curves.easeOut);
@@ -561,16 +565,23 @@ class _HeroBanner extends StatelessWidget {
 class _TabsSection extends StatelessWidget {
   final List<Map<String, dynamic>> categories;
   final String currentTab;
-  final int outfitsCount;
+  final List<Map<String, dynamic>> outfits; // [FIXED] Replaced int outfitsCount with list
   final ValueChanged<String> onTabChanged;
   final VoidCallback onAddOutfit;
 
-  const _TabsSection({required this.categories, required this.currentTab, required this.outfitsCount, required this.onTabChanged, required this.onAddOutfit});
+  const _TabsSection({
+    required this.categories, 
+    required this.currentTab, 
+    required this.outfits, 
+    required this.onTabChanged, 
+    required this.onAddOutfit
+  });
 
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
     final accent = t.accent;
+    final outfitsCount = outfits.length; // [FIXED] Calculate total dynamically
       final kAccentGrad = LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
@@ -643,7 +654,17 @@ class _TabsSection extends StatelessWidget {
           child: Row(
             children: [
               _Tab(label: 'All', id: 'all', count: outfitsCount, isActive: currentTab == 'all', onTap: () => onTabChanged('all')),
-              ...categories.map((cat) => _Tab(label: cat['label'] as String, id: cat['id'] as String, count: 0, isActive: currentTab == cat['id'], onTap: () => onTabChanged(cat['id'] as String))),
+              ...categories.map((cat) {
+                // [FIXED] Dynamically calculate individual category count
+                final catCount = outfits.where((o) => o['cat'] == cat['id']).length;
+                return _Tab(
+                  label: cat['label'] as String, 
+                  id: cat['id'] as String, 
+                  count: catCount, // <-- Now uses dynamic count
+                  isActive: currentTab == cat['id'], 
+                  onTap: () => onTabChanged(cat['id'] as String)
+                );
+              }),
               const SizedBox(width: 4),
               _AddCategoryBtn(),
             ],
@@ -1470,9 +1491,8 @@ class _ChatInputBar extends StatelessWidget {
 }
 
 // ─── Add Outfit Modal ─────────────────────────────────────────────
-// [CHANGED B13/B14/B34: now a proper dialog widget with close callback and auto-focus]
 class _AddOutfitModal extends StatefulWidget {
-  final VoidCallback? onOutfitAdded; // Added to refresh list
+  final VoidCallback? onOutfitAdded; // <-- Added to refresh list
   final VoidCallback? onClose;
   const _AddOutfitModal({this.onOutfitAdded, this.onClose});
   @override

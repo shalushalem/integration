@@ -1,9 +1,12 @@
 // ignore_for_file: library_private_types_in_public_api
 import 'dart:math';
 import 'dart:ui' show ImageFilter;
+import 'dart:convert'; // [ADDED] For encoding/decoding JSON meal arrays
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
+import 'package:myapp/services/appwrite_service.dart';
 
 void main() {
   runApp(const MyApp());
@@ -26,7 +29,7 @@ class MyApp extends StatelessWidget {
 
 // ── Data Models ───────────────────────────────────────────────────────────────
 class MealPlan {
-  final int id;
+  final String id; // [CHANGED] from int to String for Appwrite IDs
   final String name, desc, planType;
   final List<MealItem> meals;
   final int totalCal;
@@ -39,30 +42,19 @@ class MealItem {
   final int cal;
   const MealItem({required this.type, required this.icon, required this.cls,
     required this.name, required this.desc, required this.cal});
+
+  // [ADDED] For Appwrite string array storage
+  Map<String, dynamic> toMap() => {
+    'type': type, 'icon': icon, 'cls': cls, 'name': name, 'desc': desc, 'cal': cal
+  };
+
+  factory MealItem.fromMap(Map<String, dynamic> map) => MealItem(
+    type: map['type'] ?? '', icon: map['icon'] ?? '', cls: map['cls'] ?? '',
+    name: map['name'] ?? '', desc: map['desc'] ?? '', cal: map['cal'] ?? 0
+  );
 }
 
-final List<MealPlan> kSeedPlans = [
-  MealPlan(id: 1, name: 'Mediterranean Daily Plan',
-      desc: 'Fresh, heart-healthy Mediterranean-inspired meals',
-      planType: 'daily', totalCal: 1640,
-      meals: [
-        MealItem(type:'Breakfast',icon:'🌅',cls:'breakfast',name:'Greek yogurt parfait',desc:'Granola, honey, mixed berries',cal:380),
-        MealItem(type:'Lunch',icon:'☀️',cls:'lunch',name:'Grilled chicken salad',desc:'Olives, feta, cucumber, lemon dressing',cal:520),
-        MealItem(type:'Dinner',icon:'🌙',cls:'dinner',name:'Salmon with roasted veggies',desc:'Herbs, olive oil, lemon zest',cal:590),
-        MealItem(type:'Snack',icon:'🍎',cls:'snack',name:'Hummus & veggies',desc:'Carrots, cucumber, pita',cal:150),
-      ]),
-  MealPlan(id: 2, name: 'High Protein Weekly Plan',
-      desc: '7-day high-protein batch-prep plan for muscle gain',
-      planType: 'weekly', totalCal: 3780,
-      meals: [
-        MealItem(type:'Breakfast',icon:'🌅',cls:'breakfast',name:'Scrambled eggs + smoked salmon',desc:'Whole grain toast, avocado',cal:480),
-        MealItem(type:'Lunch',icon:'☀️',cls:'lunch',name:'Chicken + quinoa + broccoli',desc:'Serve as bowl, wrap or skillet',cal:560),
-        MealItem(type:'Dinner',icon:'🌙',cls:'dinner',name:'Beef stir-fry + snap peas & rice',desc:'Lean beef, ginger-soy glaze',cal:580),
-        MealItem(type:'Daily Snacks',icon:'🍎',cls:'snack',name:'Greek yogurt, boiled eggs, protein bars',desc:'~200 cal each',cal:200),
-      ]),
-];
-
-// ── [F5] Blur helper ──────────────────────────────────────────────────────────
+// [F5] Blur helper ──────────────────────────────────────────────────────────
 ImageFilter _buildBlur(double sigma) =>
     ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
 
@@ -76,12 +68,14 @@ class Screen4 extends StatefulWidget {
 }
 
 class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
-  final List<MealPlan> _plans = List.from(kSeedPlans);
+  List<MealPlan> _plans = []; // [CHANGED] Starts empty, fetched from DB
+  bool _isLoading = true; // [ADDED]
+
   String _currentView = 'all';
   bool _chatOpen = false;
   bool _modalOpen = false;
   bool _deleteModalOpen = false;
-  int? _deleteTargetId;
+  String? _deleteTargetId; // [CHANGED] to String
   String _deleteTargetName = '';
 
   // Form controllers
@@ -98,7 +92,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   final List<_ChatMsg> _messages = [];
   final _chatInputCtrl = TextEditingController();
   final _messagesScrollCtrl = ScrollController();
-  final Set<int> _expandedCards = {};
+  final Set<String> _expandedCards = {}; // [CHANGED] to String
 
   // Animation controllers
   late AnimationController _chatAnimCtrl;
@@ -119,7 +113,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _modalAnimCtrl  = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
     _deleteAnimCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
 
-    // [F1] Start live clock — mirrors HTML: setInterval(updateDateTime, 1000)
+    _fetchData(); // [ADDED] Fetch DB data
+
     _updateLiveTime();
     _ticker = createTicker((elapsed) {
       if ((elapsed - _lastTick).inMilliseconds >= 1000) {
@@ -132,7 +127,33 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         text: 'Hey! 😊 Ask for a Mediterranean, High Protein, Vegan, Low Carb or Balanced plan — and say daily, weekly or monthly!'));
   }
 
-  // [F1] Build live time string
+  // [ADDED] DB Fetch Logic
+  Future<void> _fetchData() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final docs = await appwrite.getMealPlans();
+      if (mounted) {
+        setState(() {
+          _plans = docs.map((d) {
+            final mealsList = (d.data['meals'] as List<dynamic>?) ?? [];
+            final meals = mealsList.map((m) => MealItem.fromMap(jsonDecode(m as String))).toList();
+            return MealPlan(
+              id: d.$id,
+              name: d.data['name'],
+              desc: d.data['desc'],
+              planType: d.data['planType'],
+              totalCal: d.data['totalCal'],
+              meals: meals,
+            );
+          }).toList();
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   void _updateLiveTime() {
     final now = DateTime.now();
     final h    = now.hour > 12 ? now.hour - 12 : (now.hour == 0 ? 12 : now.hour);
@@ -175,7 +196,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     }); }});
   }
 
-  void _showDeleteConfirm(int id, String name) {
+  void _showDeleteConfirm(String id, String name) {
     setState(() { _deleteTargetId = id; _deleteTargetName = name; _deleteModalOpen = true; });
     _deleteAnimCtrl.forward();
   }
@@ -197,12 +218,25 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     }
     Navigator.of(context).maybePop();
   }
-  void _confirmDelete() {
-    setState(() => _plans.removeWhere((p) => p.id == _deleteTargetId));
-    _cancelDelete();
+
+  // [CHANGED] Dynamic DB Delete
+  void _confirmDelete() async {
+    if (_deleteTargetId == null) return;
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      await appwrite.deleteMealPlan(_deleteTargetId!);
+      if (mounted) {
+        setState(() => _plans.removeWhere((p) => p.id == _deleteTargetId));
+        _cancelDelete();
+      }
+    } catch (e) {
+      debugPrint("Error deleting plan: $e");
+      _cancelDelete();
+    }
   }
 
-  void _saveCustomPlan() {
+  // [CHANGED] Dynamic DB Save
+  void _saveCustomPlan() async {
     final name = _planNameCtrl.text.trim();
     if (name.isEmpty) { setState(() => _planNameError = true); return; }
     setState(() => _planNameError = false);
@@ -212,12 +246,28 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     if (_dNameCtrl.text.trim().isNotEmpty) meals.add(MealItem(type:'Dinner',icon:'🌙',cls:'dinner',name:_dNameCtrl.text.trim(),desc:_dDescCtrl.text.trim(),cal:int.tryParse(_dCalCtrl.text)??0));
     if (_sNameCtrl.text.trim().isNotEmpty) meals.add(MealItem(type:'Snack',icon:'🍎',cls:'snack',name:_sNameCtrl.text.trim(),desc:_sDescCtrl.text.trim(),cal:int.tryParse(_sCalCtrl.text)??0));
     if (meals.isEmpty) return;
+    
     final totalCal = meals.fold(0, (a, m) => a + m.cal);
-    setState(() => _plans.insert(0, MealPlan(id:DateTime.now().millisecondsSinceEpoch,name:name,desc:_planDescCtrl.text.trim(),planType:_selectedPlanType,meals:meals,totalCal:totalCal)));
-    _closeModal();
+    final mealStrings = meals.map((m) => jsonEncode(m.toMap())).toList(); // Encode meals
+
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      await appwrite.createMealPlan({
+        'name': name,
+        'desc': _planDescCtrl.text.trim().isEmpty ? 'Custom plan' : _planDescCtrl.text.trim(),
+        'planType': _selectedPlanType,
+        'totalCal': totalCal,
+        'meals': mealStrings,
+      });
+      if (mounted) {
+        _fetchData(); // Refresh UI list from DB
+        _closeModal();
+      }
+    } catch(e) {
+      debugPrint("Error saving plan: $e");
+    }
   }
 
-  // [F7] Typing indicator before bot reply — mirrors HTML showTyping() + setTimeout(600-1100ms)
   void _sendChatMessage(String text) {
     if (text.trim().isEmpty) return;
     setState(() => _messages.add(_ChatMsg(isBot: false, text: text.trim())));
@@ -259,10 +309,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
     final styleName = {'mediterranean':'Mediterranean','protein':'High Protein','vegan':'Vegan','lowcarb':'Low Carb','balanced':'Balanced'}[style]??'Mediterranean';
     final cap = '${planType[0].toUpperCase()}${planType.substring(1)}';
+    
     return _ChatMsg(isBot: true,
       text: "Here's your $styleName $cap Plan! 🎉",
       suggestedPlan: MealPlan(
-        id: DateTime.now().millisecondsSinceEpoch,
+        id: DateTime.now().millisecondsSinceEpoch.toString(), // Temporary string ID
         name: '$styleName $cap Plan',
         desc: 'AI-suggested $styleName meal plan',
         planType: planType, totalCal: 1580,
@@ -288,6 +339,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     final t = context.themeTokens;
     final kBg = t.backgroundPrimary;
     final filtered = _filteredPlans;
+
+    if (_isLoading) {
+      return Scaffold(backgroundColor: kBg, body: Center(child: CircularProgressIndicator(color: t.accent.primary)));
+    }
+
     return PopScope(
       canPop: !_overlayVisible,
       onPopInvokedWithResult: (didPop, result) {
@@ -299,7 +355,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         backgroundColor: kBg,
         body: Stack(
           children: [
-          // [F2] Animated background orbs (drift keyframe)
           RepaintBoundary(
             child: TickerMode(
               enabled: !_overlayVisible,
@@ -316,10 +371,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // [F1][F3][F6] Header with live clock, back hover, add btn hover
                         _TopSection(dateStr: _getDateString(), liveTimeStr: _liveTimeStr, onAddTap: _openModal),
                         const SizedBox(height: 18),
-                        // [F8] View tabs with hover opacity
                         _ViewTabs(currentView: _currentView, onTabChanged: (v) => setState(() => _currentView = v)),
                         const SizedBox(height: 18),
                         if (filtered.isEmpty && _plans.isEmpty)
@@ -332,7 +385,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                               final idx = _plans.indexOf(plan);
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 16),
-                                // [F9][F10][F11][F12] Card with shadow hover, edit btn, del red hover, pop-in
                                 child: _VisualPlanCard(
                                   plan: plan, colorIndex: idx,
                                   isExpanded: _expandedCards.contains(plan.id),
@@ -353,13 +405,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             ),
           ),
 
-          // [F4] Chat FAB with scale hover
           Positioned(
             bottom: 20, right: 16,
             child: _ChatFab(onTap: _openChat),
           ),
 
-          // [F5] Overlay with backdrop blur
           if (_modalOpen || _chatOpen || _deleteModalOpen)
             GestureDetector(
               onTap: () {
@@ -370,7 +420,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               child: AnimatedOpacity(
                 opacity: (_modalOpen || _chatOpen || _deleteModalOpen) ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 250),
-                // [F5] BackdropFilter blur(6px)
                 child: BackdropFilter(
                   filter: _buildBlur(6.0),
                   child: Container(color: t.backgroundPrimary.withValues(alpha: 0.35)),
@@ -378,7 +427,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               ),
             ),
 
-          // Add Meal Modal — [F13][F14][F15]
           if (_modalOpen)
             _AddMealModal(
               animation: _modalAnimCtrl,
@@ -392,24 +440,36 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               onPlanTypeChange: (t) => setState(() => _selectedPlanType = t),
             ),
 
-          // Delete Modal — [F16][F17]
           if (_deleteModalOpen)
             _DeleteConfirmModal(
               animation: _deleteAnimCtrl, planName: _deleteTargetName,
               onCancel: _cancelDelete, onConfirm: _confirmDelete,
             ),
 
-          // Chat Drawer — [F7][F18][F19][F20][F21]
           if (_chatOpen)
             _ChatDrawer(
               animation: _chatAnimCtrl, messages: _messages,
               inputCtrl: _chatInputCtrl, scrollCtrl: _messagesScrollCtrl,
               onClose: _closeChat, onSend: _sendChatMessage,
-              onSavePlan: (plan) {
-                setState(() => _plans.insert(0, plan));
-                Future.delayed(const Duration(milliseconds: 150), () {
-                  if (mounted) setState(() => _messages.add(_ChatMsg(isBot: true, text: '✅ "${plan.name}" has been saved to your Meal Plans!')));
-                });
+              // [CHANGED] Dynamic DB save for AI generated plans
+              onSavePlan: (plan) async {
+                final mealStrings = plan.meals.map((m) => jsonEncode(m.toMap())).toList();
+                try {
+                  final appwrite = Provider.of<AppwriteService>(context, listen: false);
+                  await appwrite.createMealPlan({
+                    'name': plan.name,
+                    'desc': plan.desc,
+                    'planType': plan.planType,
+                    'totalCal': plan.totalCal,
+                    'meals': mealStrings,
+                  });
+                  _fetchData(); // Reload DB list
+                  Future.delayed(const Duration(milliseconds: 150), () {
+                    if (mounted) setState(() => _messages.add(_ChatMsg(isBot: true, text: '✅ "${plan.name}" has been saved to your Meal Plans!')));
+                  });
+                } catch(e) {
+                   debugPrint("Error saving bot plan: $e");
+                }
               },
             ),
           ],
@@ -421,8 +481,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // [F2] Background Orbs — drift @keyframes
-//   CSS: animation: drift 9s ease-in-out infinite alternate
-//   orb2 delay 2.5s, orb3 delay 5s
 // ─────────────────────────────────────────────────────────────────────────────
 class _BgOrbs extends StatefulWidget {
   const _BgOrbs();
@@ -954,7 +1012,7 @@ class _ExpandedBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.themeTokens;
     final guideItems = [
-      {'num':'3','label':'MEALS PER DAY','sub':'structured'},
+      {'num':'${plan.meals.length}','label':'MEALS PER DAY','sub':'structured'},
       {'num':'${plan.totalCal}','label':'CALORIES TOTAL','sub':'estimated'},
       {'num':'4','label':'FOOD GROUPS','sub':'balanced'},
     ];
@@ -1124,7 +1182,6 @@ class _ChatFabState extends State<_ChatFab> {
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          // [F4] scale(1.04) on hover
           transform: Matrix4.diagonal3Values(_hovered ? 1.04 : 1.0, _hovered ? 1.04 : 1.0, 1.0),
           transformAlignment: Alignment.center,
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
@@ -1212,7 +1269,6 @@ class _AddMealModal extends StatelessWidget {
                     const SizedBox(width: 6),
                     Expanded(child: Text('Add Custom Meal Plan',
                         style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: t.textPrimary))),
-                    // [F14] Close btn with red-tint hover
                     _HoverCloseBtn(onTap: onClose),
                   ],
                 ),
@@ -1229,7 +1285,6 @@ class _AddMealModal extends StatelessWidget {
                       _FieldGroup(label: 'Description',
                           child: _Field(ctrl: planDescCtrl, hint: 'e.g. Heart-healthy meals')),
                       const SizedBox(height: 14),
-                      // [F15] Plan type selector with hover gradient
                       _FieldGroup(label: 'Plan Type', child: Row(children: [
                         _TypeSelBtn(id:'daily',   label:'Daily',   icon:Icons.wb_sunny_outlined,          selected:selectedPlanType, onTap:onPlanTypeChange),
                         const SizedBox(width: 8),
@@ -1248,7 +1303,6 @@ class _AddMealModal extends StatelessWidget {
                         _MealInputRow(iconColor:accent.tertiary, mealLabel:'Snack (optional)',  nameCtrl:sNameCtrl, descCtrl:sDescCtrl, calCtrl:sCalCtrl),
                       ])),
                       const SizedBox(height: 14),
-                      // [F13] Submit button with hover opacity 0.90 + translateY(-1px)
                       _SubmitBtn(onTap: onSave, label: 'Save Meal Plan'),
                     ],
                   ),
@@ -1262,10 +1316,6 @@ class _AddMealModal extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F14] Hover close button — red tint background + red icon on hover
-//   .xbtn:hover { background: rgba(255,80,80,.15); color: #ff6060 }
-// ─────────────────────────────────────────────────────────────────────────────
 class _HoverCloseBtn extends StatefulWidget {
   final VoidCallback onTap;
   const _HoverCloseBtn({required this.onTap});
@@ -1299,9 +1349,6 @@ class _HoverCloseBtnState extends State<_HoverCloseBtn> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F13] Submit button — opacity 0.90 + translateY(-1px) on hover
-// ─────────────────────────────────────────────────────────────────────────────
 class _SubmitBtn extends StatefulWidget {
   final VoidCallback onTap;
   final String label;
@@ -1348,9 +1395,6 @@ class _SubmitBtnState extends State<_SubmitBtn> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Field helpers
-// ─────────────────────────────────────────────────────────────────────────────
 class _FieldGroup extends StatelessWidget {
   final String label;
   final Widget child;
@@ -1390,9 +1434,6 @@ class _Field extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F15] Type selector button — accent border + gradient hint on hover
-// ─────────────────────────────────────────────────────────────────────────────
 class _TypeSelBtn extends StatefulWidget {
   final String id, label, selected;
   final IconData icon;
@@ -1485,9 +1526,6 @@ class _MealInputRow extends StatelessWidget {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Delete Confirm Modal — [F16] cancel hover · [F17] confirm hover opacity
-// ─────────────────────────────────────────────────────────────────────────────
 class _DeleteConfirmModal extends StatelessWidget {
   final AnimationController animation;
   final String planName;
@@ -1548,10 +1586,8 @@ class _DeleteConfirmModal extends StatelessWidget {
               const SizedBox(height: 22),
               Row(
                 children: [
-                  // [F16] Cancel hover: background panel-2
                   Expanded(child: _HoverCancelBtn(onTap: onCancel)),
                   const SizedBox(width: 10),
-                  // [F17] Delete hover: opacity 0.88
                   Expanded(child: _HoverDeleteBtn(onTap: onConfirm)),
                 ],
               ),
@@ -1563,9 +1599,6 @@ class _DeleteConfirmModal extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F16] Cancel button — hover: background panel-2
-// ─────────────────────────────────────────────────────────────────────────────
 class _HoverCancelBtn extends StatefulWidget {
   final VoidCallback onTap;
   const _HoverCancelBtn({required this.onTap});
@@ -1587,7 +1620,6 @@ class _HoverCancelBtnState extends State<_HoverCancelBtn> {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            // [F16] hover → panel-2 = rgba(255,255,255,.12)
             color: _hovered ? t.panelBorder : t.panel,
             borderRadius: BorderRadius.circular(100),
             border: Border.all(color: t.cardBorder, width: 1.5),
@@ -1606,9 +1638,6 @@ class _HoverCancelBtnState extends State<_HoverCancelBtn> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F17] Delete confirm button — hover: opacity 0.88
-// ─────────────────────────────────────────────────────────────────────────────
 class _HoverDeleteBtn extends StatefulWidget {
   final VoidCallback onTap;
   const _HoverDeleteBtn({required this.onTap});
@@ -1652,9 +1681,6 @@ class _HoverDeleteBtnState extends State<_HoverDeleteBtn> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Chat
-// ─────────────────────────────────────────────────────────────────────────────
 class _ChatMsg {
   final bool isBot, isTyping;
   final String text;
@@ -1700,7 +1726,6 @@ class _ChatDrawerState extends State<_ChatDrawer> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header
             Container(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
               decoration: BoxDecoration(border: Border(bottom: BorderSide(color: t.cardBorder, width: 1))),
@@ -1716,13 +1741,10 @@ class _ChatDrawerState extends State<_ChatDrawer> {
                     Text('Ahvi AI', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: t.textPrimary)),
                     Text("I'll suggest daily, weekly or monthly plans", style: TextStyle(fontSize: 11.5, color: t.mutedText)),
                   ])),
-                  // [F14] Red-tint hover on close
                   _HoverCloseBtn(onTap: widget.onClose),
                 ],
               ),
             ),
-
-            // Messages
             Flexible(
               child: ListView.builder(
                 controller: widget.scrollCtrl,
@@ -1739,7 +1761,6 @@ class _ChatDrawerState extends State<_ChatDrawer> {
                         child: Column(
                           crossAxisAlignment: msg.isBot ? CrossAxisAlignment.start : CrossAxisAlignment.end,
                           children: [
-                            // [F12] Pop-in on each message bubble
                             _PopInWidget(
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -1754,14 +1775,12 @@ class _ChatDrawerState extends State<_ChatDrawer> {
                                   border: msg.isBot ? Border.all(color: t.cardBorder, width: 1) : null,
                                   boxShadow: msg.isBot ? null : [BoxShadow(color: t.accent.primary.withValues(alpha: 0.30), blurRadius: 14, offset: const Offset(0, 4))],
                                 ),
-                                // [F7] Typing indicator or text
                                 child: msg.isTyping
                                     ? const _TypingDots()
                                     : Text(msg.text, style: TextStyle(fontSize: 13, height: 1.55, color: msg.isBot ? t.textPrimary : t.tileText)),
                               ),
                             ),
                             if (msg.suggestedPlan != null)
-                            // [F21] Save plan card with hover animation
                               _SuggestedPlanCard(
                                 plan: msg.suggestedPlan!,
                                 isSaved: _savedIndices.contains(i),
@@ -1778,8 +1797,6 @@ class _ChatDrawerState extends State<_ChatDrawer> {
                 },
               ),
             ),
-
-            // Quick reply chips — [F20] hover opacity 0.82
             Container(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
               decoration: BoxDecoration(border: Border(top: BorderSide(color: t.cardBorder, width: 1))),
@@ -1796,14 +1813,11 @@ class _ChatDrawerState extends State<_ChatDrawer> {
                 ],
               ),
             ),
-
-            // Input row
             Container(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
               decoration: BoxDecoration(border: Border(top: BorderSide(color: t.cardBorder, width: 1))),
               child: Row(
                 children: [
-                  // [F18] Mic button hover accent
                   const _MicBtn(),
                   const SizedBox(width: 8),
                   Expanded(
@@ -1823,7 +1837,6 @@ class _ChatDrawerState extends State<_ChatDrawer> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // [F19] Send button hover opacity 0.88
                   _SendBtn(onTap: () => widget.onSend(widget.inputCtrl.text)),
                 ],
               ),
@@ -1835,11 +1848,6 @@ class _ChatDrawerState extends State<_ChatDrawer> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F7] Typing dots — 3 staggered blink animations
-//   .dot { animation: blink 1.2s infinite } delays: 0, 0.2s, 0.4s
-//   opacity: 0.3 → 1 → 0.3
-// ─────────────────────────────────────────────────────────────────────────────
 class _TypingDots extends StatefulWidget {
   const _TypingDots();
   @override
@@ -1889,9 +1897,6 @@ class _TypingDotsState extends State<_TypingDots> with TickerProviderStateMixin 
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F12] Pop-in wrapper — opacity 0→1, scale 0.96→1 in 250ms
-// ─────────────────────────────────────────────────────────────────────────────
 class _PopInWidget extends StatefulWidget {
   final Widget child;
   const _PopInWidget({required this.child});
@@ -1924,10 +1929,6 @@ class _PopInWidgetState extends State<_PopInWidget> with SingleTickerProviderSta
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F18] Mic button — accent border + icon color on hover
-//   .meal-mic-btn:hover { border-color: accent; color: accent }
-// ─────────────────────────────────────────────────────────────────────────────
 class _MicBtn extends StatefulWidget {
   const _MicBtn();
   @override
@@ -1957,9 +1958,6 @@ class _MicBtnState extends State<_MicBtn> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F19] Send button — hover opacity 0.88
-// ─────────────────────────────────────────────────────────────────────────────
 class _SendBtn extends StatefulWidget {
   final VoidCallback onTap;
   const _SendBtn({required this.onTap});
@@ -1996,10 +1994,6 @@ class _SendBtnState extends State<_SendBtn> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F20] Quick reply chip — hover opacity 0.82
-//   .qr:hover { opacity: 0.82 }
-// ─────────────────────────────────────────────────────────────────────────────
 class _QuickBtn extends StatefulWidget {
   final String label;
   final VoidCallback onTap;
@@ -2036,10 +2030,6 @@ class _QuickBtnState extends State<_QuickBtn> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F21] Suggested plan card — save btn hover: opacity 0.88 + translateY(-1px)
-//   .save-plan-btn:hover { opacity: 0.88; transform: translateY(-1px) }
-// ─────────────────────────────────────────────────────────────────────────────
 class _SuggestedPlanCard extends StatefulWidget {
   final MealPlan plan;
   final bool isSaved;
@@ -2075,7 +2065,6 @@ class _SuggestedPlanCardState extends State<_SuggestedPlanCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Card header
           Container(
             padding: const EdgeInsets.fromLTRB(13, 10, 13, 8),
             decoration: BoxDecoration(
@@ -2109,7 +2098,6 @@ class _SuggestedPlanCardState extends State<_SuggestedPlanCard> {
               if (m.desc.isNotEmpty) Text(m.desc, style: TextStyle(fontSize: 10.5, color: t.mutedText)),
             ]),
           )),
-          // Calories footer
           Container(
             padding: const EdgeInsets.fromLTRB(13, 7, 13, 7),
             decoration: BoxDecoration(
@@ -2129,7 +2117,6 @@ class _SuggestedPlanCardState extends State<_SuggestedPlanCard> {
               ],
             ),
           ),
-          // [F21] Save button
           Padding(
             padding: const EdgeInsets.fromLTRB(11, 10, 11, 11),
             child: MouseRegion(
@@ -2142,7 +2129,6 @@ class _SuggestedPlanCardState extends State<_SuggestedPlanCard> {
                   opacity: (!widget.isSaved && _saveHovered) ? 0.88 : 1.0,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 180),
-                    // [F21] translateY(-1px) on hover
                     transform: Matrix4.translationValues(0, (!widget.isSaved && _saveHovered) ? -1.0 : 0.0, 0),
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     decoration: BoxDecoration(
@@ -2175,9 +2161,6 @@ class _SuggestedPlanCardState extends State<_SuggestedPlanCard> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Custom Painters
-// ─────────────────────────────────────────────────────────────────────────────
 class _PlusCirclePainter extends CustomPainter {
   final Color color;
   const _PlusCirclePainter(this.color);
