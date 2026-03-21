@@ -461,38 +461,51 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   void _submitQuery(String query) {
+    _chatFocusNode.unfocus(); 
+
     if (query.isEmpty && _overlayState == _OverlayState.idle) {
       _triggerIntent('chat');
       return;
     }
+
     if (_overlayState == _OverlayState.idle) {
       _activeIntent = 'chat';
       final cfg = _intentConfig['chat']!;
       _setPlaceholder('chat');
+      
       setState(() {
         _homeCollapsed = true;
         _overlayBrandSub = cfg.brandSub;
       });
+      
       _homeCollapseCtrl.animateTo(1.0,
           duration: const Duration(milliseconds: 600),
           curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+          
       Future.delayed(const Duration(milliseconds: 420), () {
         if (!mounted) return;
-        setState(() {
-          _overlayState = _OverlayState.suggestions;
-          _overlaySuggestions = cfg.suggestions;
-          _responseData = null;
-          _tagsRevealed = false;
-        });
-        _overlayFadeCtrl.animateTo(1.0,
-            duration: const Duration(milliseconds: 380),
-            curve: const Cubic(0.16, 1.0, 0.3, 1.0));
-        if (query.isNotEmpty) _handleQuery(query, 'chat');
+        
+        if (query.isNotEmpty) {
+          setState(() {
+            _overlayState = _OverlayState.thinking;
+          });
+          _overlayFadeCtrl.animateTo(1.0,
+              duration: const Duration(milliseconds: 380),
+              curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+          _handleQuery(query, 'chat');
+        } else {
+          setState(() {
+            _overlayState = _OverlayState.suggestions;
+            _overlaySuggestions = cfg.suggestions;
+            _responseData = null;
+            _tagsRevealed = false;
+          });
+          _overlayFadeCtrl.animateTo(1.0,
+              duration: const Duration(milliseconds: 380),
+              curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+        }
       });
-    } else if (_overlayState == _OverlayState.suggestions) {
-      _handleQuery(query, _activeIntent ?? 'chat');
-    } else if (_overlayState == _OverlayState.response) {
-      // Allow continuous chatting from the response screen!
+    } else if (_overlayState == _OverlayState.suggestions || _overlayState == _OverlayState.response) {
       _handleQuery(query, _activeIntent ?? 'chat');
     }
   }
@@ -506,6 +519,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       _overlayState = _OverlayState.thinking;
       _overlaySuggestions = [];
       _responseTags = cfg.responseTags;
+      _tagsRevealed = false;
     });
 
     _ResponseData? resp = _responseMap[question];
@@ -517,19 +531,17 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         
         String aiText = "Could not parse response.";
         if (apiResult.containsKey('message') && apiResult['message'] != null) {
-             aiText = apiResult['message']['content'] ?? "No content";
+             aiText = apiResult['message']['content']?.toString() ?? "No content";
         } else if (apiResult.containsKey('error')) {
-             aiText = apiResult['error'];
+             aiText = apiResult['error']?.toString() ?? "Unknown error occurred";
         }
 
-        // 1. STRIP BACKEND TAGS FROM THE TEXT UI
-        aiText = aiText.replaceAll(RegExp(r'\[CHIPS:.*?\]', caseSensitive: false), '');
-        aiText = aiText.replaceAll(RegExp(r'\[STYLE_BOARD:.*?\]', caseSensitive: false), '');
-        aiText = aiText.replaceAll(RegExp(r'\[PACK_LIST:.*?\]', caseSensitive: false), '');
+        aiText = aiText.replaceAll(RegExp(r'\[CHIPS:.*?\]', caseSensitive: false, dotAll: true), '');
+        aiText = aiText.replaceAll(RegExp(r'\[STYLE_BOARD:.*?\]', caseSensitive: false, dotAll: true), '');
+        aiText = aiText.replaceAll(RegExp(r'\[PACK_LIST:.*?\]', caseSensitive: false, dotAll: true), '');
         aiText = aiText.trim();
 
-        // 2. OVERRIDE THE UI BUTTONS WITH DYNAMIC CHIPS
-        if (apiResult.containsKey('chips') && apiResult['chips'] is List) {
+        if (apiResult.containsKey('chips') && apiResult['chips'] != null && apiResult['chips'] is List) {
           final List<dynamic> rawChips = apiResult['chips'];
           if (rawChips.isNotEmpty) {
             _responseTags = rawChips.map((e) => e.toString()).toList();
@@ -542,10 +554,16 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           intro: aiText,
         );
       } catch (e) {
+        // 🚀 FIX: Prevent massive HTML error dumps from breaking the RenderFlex!
+        String errorMsg = e.toString();
+        if (errorMsg.length > 200) {
+          errorMsg = errorMsg.substring(0, 200) + '... (Check Server Logs)';
+        }
+        
         resp = _ResponseData(
           type: 'text',
           question: question,
-          intro: "Sorry, I couldn't reach the Python backend. Make sure the server is running.\nError: $e",
+          intro: "Sorry, I couldn't reach the Python backend. Make sure the server is running.\n\nError: $errorMsg",
         );
       }
     }
@@ -557,21 +575,13 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       _responseData = resp;
     });
 
-    final tagDelay = resp!.type == 'outfits'
-        ? 600
-        : resp.type == 'week'
-            ? 800
-            : resp.type == 'plan'
-                ? 700
-                : resp.type == 'tasks'
-                    ? 600
-                    : 900;
+    final tagDelay = 150; 
                     
     Future.delayed(Duration(milliseconds: tagDelay), () {
       if (!mounted) return;
       setState(() => _tagsRevealed = true);
       _tagsRevealCtrl.animateTo(1.0,
-          duration: const Duration(milliseconds: 380),
+          duration: const Duration(milliseconds: 200),
           curve: const Cubic(0.16, 1.0, 0.3, 1.0));
     });
   }
@@ -2118,7 +2128,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       case _OverlayState.response:
         if (_responseData == null) return const SizedBox();
         return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 280),
+          duration: const Duration(milliseconds: 100), 
           switchInCurve: const Cubic(0.16, 1.0, 0.3, 1.0),
           switchOutCurve: const Cubic(0.4, 0.0, 1.0, 1.0),
           transitionBuilder: (child, anim) {
@@ -2195,16 +2205,24 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                 fontWeight: FontWeight.w600)),
       ]),
       const SizedBox(height: 10),
+      
+      // 🚀 FIX: Placed inside a strict bounding box to physically prevent the `99,000` pixel overflow!
       if (resp.intro.isNotEmpty) ...[
-        Text(resp.intro,
+        SizedBox(
+          width: MediaQuery.of(context).size.width - 40,
+          child: Text(
+            resp.intro,
             style: TextStyle(
                 color: _textSub,
                 fontSize: 13,
                 fontWeight: FontWeight.w400,
-                height: 1.6)),
+                height: 1.6),
+          ),
+        ),
         const SizedBox(height: 14),
       ],
       _buildResponseBody(resp),
+      
       if (_tagsRevealed) ...[
         const SizedBox(height: 14),
         AnimatedBuilder(
@@ -2220,9 +2238,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                       .map((tag) => _AnimatedPressable(
                           scalePressed: 0.96,
                           liftY: -1.5,
-                          // --- BUG FIX: Tags are now clickable! ---
                           onTap: () => _submitQuery(tag), 
                           child: Container(
+                              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 60),
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 13, vertical: 6),
                               decoration: BoxDecoration(
@@ -2231,6 +2249,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                   border: Border.all(
                                       color: _accent.withValues(alpha: 0.20))),
                               child: Text(tag,
+                                  maxLines: 2, 
+                                  overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                       color: _accent,
                                       fontSize: 11,
@@ -2293,6 +2313,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                           spacing: 3,
                                           children: o.tags
                                               .map((t) => Container(
+                                                  constraints: const BoxConstraints(maxWidth: 70),
                                                   padding: const EdgeInsets
                                                       .symmetric(
                                                       horizontal: 5, vertical: 1),
@@ -2303,6 +2324,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                                           BorderRadius.circular(
                                                               100)),
                                                   child: Text(t,
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow.ellipsis,
                                                       style: TextStyle(
                                                           color: _textMuted,
                                                           fontSize: 8.5,
@@ -3496,9 +3519,11 @@ class _EntryFadeSlideState extends State<_EntryFadeSlide> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final h = constraints.biggest.height == 0
-            ? 1.0
-            : constraints.biggest.height;
+        double h = constraints.biggest.height;
+        if (h == 0 || h == double.infinity) {
+          h = MediaQuery.of(context).size.height;
+        }
+        
         final frac = widget.dy / h;
         return AnimatedOpacity(
           opacity: _show ? 1.0 : 0.0,
