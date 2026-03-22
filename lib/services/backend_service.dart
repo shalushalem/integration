@@ -127,21 +127,23 @@ class BackendService {
     }
   }
 
-  // 🚀 FIXED: Now accepts Uint8List and sends a Multipart Request!
+  // 🚀 FIXED: Now converts Uint8List to Base64 and sends to the NEW JSON endpoint!
   Future<Map<String, dynamic>?> analyzeImage(Uint8List imageBytes) async {
     try {
-      final uri = Uri.parse('$baseUrl/garment/analyze/'); 
-      var request = http.MultipartRequest('POST', uri);
-      
-      // Attach the image bytes as a file
-      request.files.add(http.MultipartFile.fromBytes(
-        'image_file', 
-        imageBytes,
-        filename: 'upload.png',
-      ));
+      // 1. Convert the image bytes to a Base64 string
+      String base64String = base64Encode(imageBytes);
 
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      // 2. Point to the NEW endpoint from your vision.py router
+      final uri = Uri.parse('$baseUrl/api/analyze-image'); 
+      
+      // 3. Send a standard JSON POST request
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'image_base64': base64String
+        }),
+      );
       
       if (response.statusCode == 200) {
         return jsonDecode(response.body); 
