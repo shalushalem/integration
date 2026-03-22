@@ -90,7 +90,7 @@ class AppwriteService extends ChangeNotifier {
   }
 
   // =========================================================================
-  // 👕 WARDROBE (OUTFITS) DB METHODS
+  // 👔 WARDROBE (OUTFITS) DB METHODS
   // =========================================================================
 
   Future<List<Map<String, dynamic>>> getWardrobeItems() async {
@@ -102,6 +102,7 @@ class AppwriteService extends ChangeNotifier {
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.outfitsCollection, 
         queries: [
+          // 🛑 AS REQUESTED: Kept user_id ONLY for the Wardrobe/Outfits table
           Query.equal('user_id', user.$id), 
           Query.orderDesc('\$createdAt'), 
         ],
@@ -116,12 +117,12 @@ class AppwriteService extends ChangeNotifier {
           "color_code": doc.data['color_code'],
           "pattern": doc.data['pattern'],
           "occasions": doc.data['occasions'],
-          "image_url": doc.data['image_url'], // 🚀 ADDED BACK FOR INLINE CHAT UI
+          "image_url": doc.data['image_url'], 
         };
       }).toList();
 
     } catch (e) {
-      debugPrint("🚨 Error fetching wardrobe items: $e");
+      debugPrint("👕 Error fetching wardrobe items: $e");
       return []; 
     }
   }
@@ -135,7 +136,7 @@ class AppwriteService extends ChangeNotifier {
       final user = await getCurrentUser();
       if (user == null) throw Exception("User not authenticated");
 
-      data['user_id'] = user.$id; 
+      data['userId'] = user.$id; // FIXED to userId
 
       return await databases.createDocument(
         databaseId: Env.appwriteDatabaseId,
@@ -158,7 +159,7 @@ class AppwriteService extends ChangeNotifier {
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.plansCollection,
         queries: [
-          Query.equal('user_id', user.$id),
+          Query.equal('userId', user.$id), // FIXED to userId
         ],
       );
       return result.documents;
@@ -208,7 +209,7 @@ class AppwriteService extends ChangeNotifier {
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.savedBoardsCollection,
         queries: [
-          Query.equal('user_id', user.$id),
+          Query.equal('userId', user.$id), // FIXED to userId
           Query.equal('occasion', occasion),
           Query.orderDesc('\$createdAt'), 
         ],
@@ -229,7 +230,7 @@ class AppwriteService extends ChangeNotifier {
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.savedBoardsCollection,
         queries: [
-          Query.equal('user_id', user.$id),
+          Query.equal('userId', user.$id), // FIXED to userId
           Query.orderDesc('\$createdAt'), 
         ],
       );
@@ -265,7 +266,7 @@ class AppwriteService extends ChangeNotifier {
       final result = await databases.listDocuments(
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.skincareCollection,
-        queries: [Query.equal('user_id', user.$id)],
+        queries: [Query.equal('userId', user.$id)], // FIXED to userId
       );
 
       if (result.documents.isEmpty) {
@@ -274,7 +275,7 @@ class AppwriteService extends ChangeNotifier {
           collectionId: Env.skincareCollection,
           documentId: ID.unique(),
           data: {
-            'user_id': user.$id,
+            'userId': user.$id, // FIXED to userId
             'skinType': '',
             'concerns': [],
             'daySteps': [],
@@ -329,7 +330,7 @@ class AppwriteService extends ChangeNotifier {
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.workoutOutfitsCollection,
         queries: [
-          Query.equal('user_id', user.$id),
+          Query.equal('userId', user.$id), // FIXED to userId
           Query.orderDesc('\$createdAt'),
         ],
       );
@@ -345,7 +346,7 @@ class AppwriteService extends ChangeNotifier {
       final user = await getCurrentUser();
       if (user == null) throw Exception("User not authenticated");
 
-      data['user_id'] = user.$id;
+      data['userId'] = user.$id; // FIXED to userId
 
       return await databases.createDocument(
         databaseId: Env.appwriteDatabaseId,
@@ -385,7 +386,7 @@ class AppwriteService extends ChangeNotifier {
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.billsCollection,
         queries: [
-          Query.equal('user_id', user.$id),
+          Query.equal('userId', user.$id), // FIXED to userId
           Query.orderDesc('\$createdAt'),
         ],
       );
@@ -401,7 +402,7 @@ class AppwriteService extends ChangeNotifier {
       final user = await getCurrentUser();
       if (user == null) throw Exception("User not authenticated");
 
-      data['user_id'] = user.$id;
+      data['userId'] = user.$id; // FIXED to userId
 
       return await databases.createDocument(
         databaseId: Env.appwriteDatabaseId,
@@ -437,7 +438,7 @@ class AppwriteService extends ChangeNotifier {
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.couponsCollection,
         queries: [
-          Query.equal('user_id', user.$id),
+          Query.equal('userId', user.$id), // FIXED to userId
           Query.orderDesc('\$createdAt'),
         ],
       );
@@ -453,7 +454,7 @@ class AppwriteService extends ChangeNotifier {
       final user = await getCurrentUser();
       if (user == null) throw Exception("User not authenticated");
 
-      data['user_id'] = user.$id;
+      data['userId'] = user.$id; // FIXED to userId
 
       return await databases.createDocument(
         databaseId: Env.appwriteDatabaseId,
@@ -493,7 +494,7 @@ class AppwriteService extends ChangeNotifier {
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.medsCollection,
         queries: [
-          Query.equal('user_id', user.$id),
+          Query.equal('userId', user.$id), // FIXED to userId
           Query.orderDesc('\$createdAt'),
         ],
       );
@@ -508,7 +509,7 @@ class AppwriteService extends ChangeNotifier {
     try {
       final user = await getCurrentUser();
       if (user == null) throw Exception("User not authenticated");
-      data['user_id'] = user.$id;
+      data['userId'] = user.$id; // FIXED to userId
 
       return await databases.createDocument(
         databaseId: Env.appwriteDatabaseId,
@@ -558,7 +559,7 @@ class AppwriteService extends ChangeNotifier {
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.medLogsCollection,
         queries: [
-          Query.equal('user_id', user.$id),
+          Query.equal('userId', user.$id), // FIXED to userId
           Query.orderDesc('time'), 
         ],
       );
@@ -573,7 +574,7 @@ class AppwriteService extends ChangeNotifier {
     try {
       final user = await getCurrentUser();
       if (user == null) throw Exception("User not authenticated");
-      data['user_id'] = user.$id;
+      data['userId'] = user.$id; // FIXED to userId
 
       return await databases.createDocument(
         databaseId: Env.appwriteDatabaseId,
@@ -600,7 +601,7 @@ class AppwriteService extends ChangeNotifier {
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.mealPlansCollection,
         queries: [
-          Query.equal('user_id', user.$id),
+          Query.equal('userId', user.$id), // FIXED to userId
           Query.orderDesc('\$createdAt'),
         ],
       );
@@ -615,7 +616,7 @@ class AppwriteService extends ChangeNotifier {
     try {
       final user = await getCurrentUser();
       if (user == null) throw Exception("User not authenticated");
-      data['user_id'] = user.$id;
+      data['userId'] = user.$id; // FIXED to userId
 
       return await databases.createDocument(
         databaseId: Env.appwriteDatabaseId,
@@ -655,7 +656,7 @@ class AppwriteService extends ChangeNotifier {
         databaseId: Env.appwriteDatabaseId,
         collectionId: Env.lifeGoalsCollection,
         queries: [
-          Query.equal('user_id', user.$id),
+          Query.equal('userId', user.$id), // FIXED to userId
           Query.orderDesc('\$createdAt'),
         ],
       );
@@ -670,7 +671,7 @@ class AppwriteService extends ChangeNotifier {
     try {
       final user = await getCurrentUser();
       if (user == null) throw Exception("User not authenticated");
-      data['user_id'] = user.$id;
+      data['userId'] = user.$id; // FIXED to userId
 
       return await databases.createDocument(
         databaseId: Env.appwriteDatabaseId,
