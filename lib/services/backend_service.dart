@@ -2,67 +2,43 @@ import 'dart:convert';
 import 'dart:typed_data'; // 🚀 Added this so it understands Uint8List!
 import 'package:http/http.dart' as http;
 import 'package:myapp/config/env.dart';
-import 'package:myapp/services/appwrite_service.dart';
 
 class BackendService {
   final String baseUrl = Env.backendApiUrl;
-  final AppwriteService _appwriteService = AppwriteService(); 
 
   // --- Chat & Styling Engine ---
   Future<Map<String, dynamic>> sendChatQuery(
-    String query, 
-    String userId, 
-    List<Map<String, String>> chatHistory, 
-    String currentMemory,                  
+    String query,
+    String userId,
+    List<Map<String, String>> chatHistory,
+    String currentMemory,
     {bool isRetry = false, List<Map<String, dynamic>>? fetchedWardrobe}
   ) async {
     try {
-      if (!isRetry) {
-        print("💬 Sending message to AHVI (No wardrobe attached yet)...");
-      }
-
-      // 🚀 STRIP THE FAT: Remove the heavy image URLs before sending to FastAPI!
-      final safeWardrobePayload = (fetchedWardrobe ?? []).map((item) {
-        final copy = Map<String, dynamic>.from(item);
-        copy.remove('image_url'); // Server only needs the text to think!
-        return copy;
-      }).toList();
-
       final response = await http.post(
-        Uri.parse('$baseUrl/api/text'), 
+        Uri.parse('$baseUrl/api/text'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'messages': [
-            ...chatHistory, 
+            ...chatHistory,
             {'role': 'user', 'content': query}
           ],
           'language': 'en',
-          'current_memory': currentMemory, 
+          'current_memory': currentMemory,
+          'user_id': userId,
           'user_profile': {},
-          'wardrobe_items': safeWardrobePayload, 
-          'wardrobe_attached': isRetry, 
         }),
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
 
-        // 🛑 THE PING-PONG INTERCEPTOR
-        if (data['requires_wardrobe'] == true && !isRetry) {
-           print("🛑 AHVI requested your wardrobe! Fetching from Appwrite...");
-           final items = await _appwriteService.getWardrobeItems();
-           
-           print("✅ Fetched ${items.length} items. Sending them back to AHVI...");
-           return sendChatQuery(query, userId, chatHistory, currentMemory, isRetry: true, fetchedWardrobe: items);
-        }
-
-        // 🚀 UI LOGIC PARSING
         String rawText = data['message']?['content'] ?? "I'm having trouble thinking right now.";
         String cleanText = rawText;
-        
+
         List<dynamic> extractedChips = data['chips'] ?? [];
-        String? extractedBoardData = (data['board_ids'] != null && data['board_ids'].toString().isNotEmpty) 
-            ? data['board_ids'] 
+        String? extractedBoardData = (data['board_ids'] != null && data['board_ids'].toString().isNotEmpty)
+            ? data['board_ids']
             : null;
         String? extractedPackData;
         String hiddenMenuText = "";
@@ -85,8 +61,8 @@ class BackendService {
         Match? packMatch = packRegex.firstMatch(cleanText);
         if (packMatch != null) {
           extractedPackData = packMatch.group(1);
-          hiddenMenuText = cleanText.replaceAll(packMatch.group(0)!, '').trim(); 
-          cleanText = "I've prepared your custom Packing Menu! 🌴✨";
+          hiddenMenuText = cleanText.replaceAll(packMatch.group(0)!, '').trim();
+          cleanText = "I've prepared your custom Packing Menu!";
         }
 
         data['message']['content'] = cleanText;
@@ -97,7 +73,6 @@ class BackendService {
         data['has_actions'] = (extractedBoardData != null || extractedPackData != null);
 
         return data;
-
       } else {
         throw Exception('Failed to get AI response: ${response.statusCode}');
       }
@@ -106,7 +81,6 @@ class BackendService {
       return {'error': 'Could not connect to AHVI brain. Error: $e'};
     }
   }
-
   // ─────────────────────────────────────────────────────────────────────────────
   //  WARDROBE: VISION & BACKGROUND REMOVAL
   // ─────────────────────────────────────────────────────────────────────────────
@@ -156,4 +130,105 @@ class BackendService {
       return null;
     }
   }
+
+  Future<Map<String, dynamic>?> sendAnthropicMessages({
+    required List<Map<String, dynamic>> messages,
+    String? system,
+    String model = 'claude-sonnet-4-20250514',
+    int maxTokens = 380,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/anthropic'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'model': model,
+          'max_tokens': maxTokens,
+          if (system != null && system.isNotEmpty) 'system': system,
+          'messages': messages,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchWeather({
+    required double latitude,
+    required double longitude,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '$baseUrl/api/weather?latitude=$latitude&longitude=$longitude',
+      );
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> uploadAvatar({
+    required String userId,
+    required Uint8List imageBytes,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/uploads/avatar'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'user_id': userId,
+          'image_base64': base64Encode(imageBytes),
+        }),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return data['avatar_url']?.toString();
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, String>?> uploadWardrobeImages({
+    required String fileId,
+    required Uint8List rawImageBytes,
+    required Uint8List maskedImageBytes,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/uploads/wardrobe'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'file_id': fileId,
+          'raw_image_base64': base64Encode(rawImageBytes),
+          'masked_image_base64': base64Encode(maskedImageBytes),
+        }),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return {
+          'raw_file_name': data['raw_file_name']?.toString() ?? '',
+          'masked_file_name': data['masked_file_name']?.toString() ?? '',
+          'raw_image_url': data['raw_image_url']?.toString() ?? '',
+          'masked_image_url': data['masked_image_url']?.toString() ?? '',
+        };
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
 }
+
+
+

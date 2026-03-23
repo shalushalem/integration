@@ -5,7 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
+import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 
 enum _TryOnStage { preview, loading, camera, captured }
@@ -415,16 +415,12 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     const fallbackLat = 16.5062;
     const fallbackLon = 80.648;
     try {
-      final url = Uri.parse(
-        'https://api.open-meteo.com/v1/forecast'
-            '?latitude=$fallbackLat&longitude=$fallbackLon'
-            '&current=temperature_2m,weathercode,apparent_temperature'
-            '&timezone=auto',
+      final backend = BackendService();
+      final data = await backend.fetchWeather(
+        latitude: fallbackLat,
+        longitude: fallbackLon,
       );
-      final res =
-      await http.get(url).timeout(const Duration(seconds: 8));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
+      if (data != null) {
         final current = data['current'] as Map<String, dynamic>;
         final temp = (current['temperature_2m'] as num).round();
         final feel = (current['apparent_temperature'] as num).round();
@@ -772,29 +768,21 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
         .toList();
     history.add({'role': 'user', 'content': userText});
 
-    const apiKey =
-    String.fromEnvironment('ANTHROPIC_API_KEY', defaultValue: '');
-
     try {
-      final response = await http
-          .post(
-        Uri.parse('https://api.anthropic.com/v1/messages'),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: jsonEncode({
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 380,
-          'system': systemPrompt,
-          'messages': history,
-        }),
-      )
+      final backend = BackendService();
+      final data = await backend
+          .sendAnthropicMessages(
+            model: 'claude-sonnet-4-20250514',
+            maxTokens: 380,
+            system: systemPrompt,
+            messages: history,
+          )
           .timeout(const Duration(seconds: 15));
 
       if (!mounted) return;
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (data == null) {
+        throw Exception('No response from backend');
+      }
       final content = data['content'];
       final replyText = (content is List && content.isNotEmpty)
           ? content[0]['text'] as String?

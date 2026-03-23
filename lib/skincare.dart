@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/services/backend_service.dart';
 
 void main() {
   runApp(const MyApp());
@@ -1034,17 +1034,18 @@ class _ChatOverlayState extends State<_ChatOverlay>
         'Be friendly and use 1 emoji max.';
 
     try {
-      final response = await http.post(
-        Uri.parse('https://api.anthropic.com/v1/messages'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 120,
-          'system': 'You are AHVI, a warm expert skincare advisor.',
-          'messages': [{'role': 'user', 'content': greetPrompt}],
-        }),
+      final backend = BackendService();
+      final data = await backend.sendAnthropicMessages(
+        model: 'claude-sonnet-4-20250514',
+        maxTokens: 120,
+        system: 'You are AHVI, a warm expert skincare advisor.',
+        messages: [
+          {'role': 'user', 'content': greetPrompt},
+        ],
       );
-      final data = jsonDecode(response.body);
+      if (data == null) {
+        throw Exception('No response from backend');
+      }
       final text = (data['content'] as List?)?.firstWhere(
             (b) => b['type'] == 'text', orElse: () => null,
       )?['text'] as String?;
@@ -1117,17 +1118,16 @@ class _ChatOverlayState extends State<_ChatOverlay>
         'Use light friendly language with 1-2 emojis max.';
 
     try {
-      final response = await http.post(
-        Uri.parse('https://api.anthropic.com/v1/messages'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 380,
-          'system': systemPrompt,
-          'messages': _chatHistory,
-        }),
+      final backend = BackendService();
+      final data = await backend.sendAnthropicMessages(
+        model: 'claude-sonnet-4-20250514',
+        maxTokens: 380,
+        system: systemPrompt,
+        messages: _chatHistory,
       );
-      final data = jsonDecode(response.body);
+      if (data == null) {
+        throw Exception('No response from backend');
+      }
       final aiText = (data['content'] as List?)?.firstWhere(
             (b) => b['type'] == 'text', orElse: () => null,
       )?['text'] as String?;

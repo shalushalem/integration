@@ -18,19 +18,6 @@ class Env {
   static String get medsCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_MEDS'] ?? '';
   static String get medLogsCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_MED_LOGS'] ?? '';
 
-  // ── Cloudflare R2 Credentials ──
-  static String get r2AccountId => dotenv.env['EXPO_PUBLIC_R2_ACCOUNT_ID'] ?? '';
-  static String get r2S3ApiUrl => dotenv.env['EXPO_PUBLIC_R2_S3_API_URL'] ?? '';
-  static String get r2AccessKeyId => dotenv.env['EXPO_PUBLIC_R2_ACCESS_KEY_ID'] ?? '';
-  static String get r2SecretAccessKey => dotenv.env['EXPO_PUBLIC_R2_SECRET_ACCESS_KEY'] ?? '';
-  
-  // ── Raw Images Bucket Details ──
-  static String get rawBucketId => dotenv.env['EXPO_PUBLIC_R2_BUCKET_RAW_IMAGES'] ?? '';
-  static String get r2UrlRaw => dotenv.env['EXPO_PUBLIC_R2_URL_RAW_IMAGES'] ?? '';
-
-  // ── Wardrobe R2 Bucket Details ──
-  static String get wardrobeBucketId => dotenv.env['EXPO_PUBLIC_R2_BUCKET_WARDROBE'] ?? '';
-  static String get r2UrlWardrobe => dotenv.env['EXPO_PUBLIC_R2_URL_WARDROBE'] ?? '';
   static String get lifeGoalsCollection => dotenv.env['EXPO_PUBLIC_APPWRITE_COLLECTION_LIFE_GOALS'] ?? '';
   // ── AI Python Backend ──
   static String get backendApiUrl => dotenv.env['EXPO_PUBLIC_BACKEND_API_URL'] ?? '';

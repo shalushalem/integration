@@ -134,6 +134,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
   String _userName = '...';
   Uint8List? _avatarBytes;
+  final bool _liteUiMode = true;
 
   @override
   void initState() {
@@ -141,29 +142,29 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
     _aurora1Ctrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 14))
-          ..repeat(reverse: true);
+          ..forward();
     _aurora2Ctrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 18))
-          ..repeat(reverse: true);
+          ..forward();
     _aurora3Ctrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 22))
-          ..repeat(reverse: true);
+          ..forward();
     _shimmerCtrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 3))
-          ..repeat();
+          ..forward();
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 2800))
-      ..repeat(reverse: true);
+      ..forward();
 
     _floatBadgeCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4000),
-    )..repeat(reverse: true);
+    )..forward();
 
     _breatheCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4000),
-    )..repeat(reverse: true);
+    )..forward();
 
     _heartPopCtrls = List.generate(
       4,
@@ -197,16 +198,18 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       ),
     );
 
-    _suggestionTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      setState(() => _suggestionOpacity = 0.0);
-      Future.delayed(const Duration(milliseconds: 350), () {
-        if (!mounted) return;
-        setState(() {
-          _suggestionIdx = (_suggestionIdx + 1) % _aiSuggestions.length;
-          _suggestionOpacity = 1.0;
+    if (!_liteUiMode) {
+      _suggestionTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+        setState(() => _suggestionOpacity = 0.0);
+        Future.delayed(const Duration(milliseconds: 350), () {
+          if (!mounted) return;
+          setState(() {
+            _suggestionIdx = (_suggestionIdx + 1) % _aiSuggestions.length;
+            _suggestionOpacity = 1.0;
+          });
         });
       });
-    });
+    }
 
     _homeCollapseCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 600));
@@ -214,7 +217,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         vsync: this, duration: const Duration(milliseconds: 380));
     _thinkingCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1200))
-      ..repeat();
+      ..forward();
     _tagsRevealCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 380));
 

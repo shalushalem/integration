@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:appwrite/models.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart';
@@ -13,7 +12,7 @@ class Screen4 extends StatefulWidget {
 
 class _Screen4State extends State<Screen4> {
   bool _isLoading = true;
-  List<Document> _boards = [];
+  List<ProxyDocument> _boards = [];
 
   @override
   void initState() {

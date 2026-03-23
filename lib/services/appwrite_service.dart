@@ -1,29 +1,58 @@
+import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter/material.dart';
+
 import 'package:appwrite/appwrite.dart';
-import 'package:appwrite/models.dart';
 import 'package:appwrite/enums.dart';
-import 'package:myapp/config/env.dart'; 
+import 'package:appwrite/models.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:myapp/config/env.dart';
+
+class ProxyDocument {
+  final String $id;
+  final Map<String, dynamic> data;
+  final Map<String, dynamic> raw;
+
+  ProxyDocument({
+    required this.$id,
+    required this.data,
+    required this.raw,
+  });
+
+  factory ProxyDocument.fromApi(Map<String, dynamic> rawMap) {
+    final mapped = Map<String, dynamic>.from(rawMap);
+    final id = (mapped[r'$id'] ?? mapped['id'] ?? '').toString();
+    final data = <String, dynamic>{};
+
+    mapped.forEach((key, value) {
+      if (!key.startsWith(r'$')) {
+        data[key] = value;
+      }
+    });
+
+    return ProxyDocument(
+      $id: id,
+      data: data,
+      raw: mapped,
+    );
+  }
+}
 
 class AppwriteService extends ChangeNotifier {
   late Client client;
   late Account account;
-  late Databases databases;
   late Avatars avatars;
+  late String _baseUrl;
 
   AppwriteService() {
     client = Client()
-      ..setEndpoint(Env.appwriteEndpoint)   
+      ..setEndpoint(Env.appwriteEndpoint)
       ..setProject(Env.appwriteProjectId);
 
     account = Account(client);
-    databases = Databases(client);
     avatars = Avatars(client);
+    _baseUrl = '${Env.backendApiUrl}/api/data';
   }
-
-  // =========================================================================
-  // AUTHENTICATION METHODS
-  // =========================================================================
 
   Future<User?> getCurrentUser() async {
     try {
@@ -33,51 +62,50 @@ class AppwriteService extends ChangeNotifier {
       return null;
     }
   }
-  
+
   Future<Session?> loginEmailPassword(String email, String password) async {
-     try {
-       final session = await account.createEmailPasswordSession(email: email, password: password);
-       notifyListeners();
-       return session;
-     } catch(e) {
-       debugPrint("Login error: $e");
-       rethrow;
-     }
+    try {
+      final session = await account.createEmailPasswordSession(email: email, password: password);
+      notifyListeners();
+      return session;
+    } catch (e) {
+      debugPrint("Login error: $e");
+      rethrow;
+    }
   }
 
   Future<bool> loginWithGoogle() async {
     try {
       await account.createOAuth2Session(provider: OAuthProvider.google);
       notifyListeners();
-      return true; 
+      return true;
     } catch (e) {
       debugPrint("Google login error: $e");
-      return false; 
+      return false;
     }
   }
 
   Future<User> registerEmailPassword(String email, String password, String name) async {
-     try {
-       final user = await account.create(
-         userId: ID.unique(), 
-         email: email, 
-         password: password, 
-         name: name
-       );
-       return user;
-     } catch(e) {
-       debugPrint("Register error: $e");
-       rethrow;
-     }
+    try {
+      return await account.create(
+        userId: ID.unique(),
+        email: email,
+        password: password,
+        name: name,
+      );
+    } catch (e) {
+      debugPrint("Register error: $e");
+      rethrow;
+    }
   }
 
   Future<void> logout() async {
-     try {
-       await account.deleteSession(sessionId: 'current');
-       notifyListeners();
-     } catch(e) {
-       debugPrint("Logout error: $e");
-     }
+    try {
+      await account.deleteSession(sessionId: 'current');
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Logout error: $e");
+    }
   }
 
   Future<Uint8List?> getUserAvatar(String name) async {
@@ -89,80 +117,159 @@ class AppwriteService extends ChangeNotifier {
     }
   }
 
-  // =========================================================================
-  // 👔 WARDROBE (OUTFITS) DB METHODS
-  // =========================================================================
+  Future<String> _requireUserId() async {
+    final user = await getCurrentUser();
+    if (user == null) {
+      throw Exception("User not authenticated");
+    }
+    return user.$id;
+  }
+
+  Uri _resourceUri(String resource, {Map<String, String>? query}) {
+    final uri = Uri.parse('$_baseUrl/$resource');
+    if (query == null || query.isEmpty) return uri;
+    return uri.replace(queryParameters: query);
+  }
+
+  Future<List<ProxyDocument>> _listDocs(
+    String resource, {
+    String? userId,
+    String? occasion,
+    int limit = 100,
+  }) async {
+    final query = <String, String>{'limit': '$limit'};
+    if (userId != null && userId.isNotEmpty) query['user_id'] = userId;
+    if (occasion != null && occasion.isNotEmpty) query['occasion'] = occasion;
+
+    final response = await http.get(_resourceUri(resource, query: query));
+    if (response.statusCode != 200) {
+      throw Exception('Failed to fetch $resource: ${response.body}');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    final docs = List<Map<String, dynamic>>.from(body['documents'] ?? const []);
+    return docs.map(ProxyDocument.fromApi).toList();
+  }
+
+  Future<ProxyDocument> _createDoc(
+    String resource,
+    Map<String, dynamic> data, {
+    String? userId,
+    String? documentId,
+  }) async {
+    final response = await http.post(
+      Uri.parse(_baseUrl),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'resource': resource,
+        'data': data,
+        if (userId != null) 'user_id': userId,
+        if (documentId != null) 'document_id': documentId,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to create $resource: ${response.body}');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
+  }
+
+  Future<ProxyDocument> _updateDoc(
+    String resource,
+    String documentId,
+    Map<String, dynamic> data,
+  ) async {
+    final response = await http.patch(
+      Uri.parse('$_baseUrl/$documentId'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'resource': resource,
+        'data': data,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to update $resource: ${response.body}');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
+  }
+
+  Future<void> _deleteDoc(String resource, String documentId) async {
+    final request = http.Request('DELETE', Uri.parse(_baseUrl))
+      ..headers['Content-Type'] = 'application/json'
+      ..body = jsonEncode({'resource': resource, 'document_id': documentId});
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode != 200) {
+      throw Exception('Failed to delete $resource: ${response.body}');
+    }
+  }
+
+  Future<ProxyDocument> getUserProfile() async {
+    final userId = await _requireUserId();
+    final response = await http.get(Uri.parse('$_baseUrl/users/$userId'));
+    if (response.statusCode != 200) {
+      throw Exception('Failed to fetch profile: ${response.body}');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
+  }
+
+  Future<ProxyDocument> upsertUserProfile(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    final response = await http.put(
+      Uri.parse('$_baseUrl/users/$userId'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(data),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to save profile: ${response.body}');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
+  }
 
   Future<List<Map<String, dynamic>>> getWardrobeItems() async {
     try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.outfitsCollection, 
-        queries: [
-          // 🛑 AS REQUESTED: Kept user_id ONLY for the Wardrobe/Outfits table
-          Query.equal('user_id', user.$id), 
-          Query.orderDesc('\$createdAt'), 
-        ],
-      );
-
-      return result.documents.map((doc) {
-        return {
-          "id": doc.$id,
-          "name": doc.data['name'],
-          "category": doc.data['category'],
-          "sub_category": doc.data['sub_category'],
-          "color_code": doc.data['color_code'],
-          "pattern": doc.data['pattern'],
-          "occasions": doc.data['occasions'],
-          "image_url": doc.data['image_url'], 
-        };
-      }).toList();
-
+      final userId = await _requireUserId();
+      final docs = await _listDocs('outfits', userId: userId, limit: 200);
+      return docs
+          .map((doc) => {
+                "id": doc.$id,
+                "name": doc.data['name'],
+                "category": doc.data['category'],
+                "sub_category": doc.data['sub_category'],
+                "color_code": doc.data['color_code'],
+                "pattern": doc.data['pattern'],
+                "occasions": doc.data['occasions'],
+                "image_url": doc.data['image_url'],
+                "masked_url": doc.data['masked_url'],
+                "notes": doc.data['notes'],
+                "worn": doc.data['worn'] ?? 0,
+                "liked": doc.data['liked'] ?? false,
+              })
+          .toList();
     } catch (e) {
-      debugPrint("👕 Error fetching wardrobe items: $e");
-      return []; 
+      debugPrint("Error fetching wardrobe items: $e");
+      return [];
     }
   }
 
-  // =========================================================================
-  // CALENDAR PLANS DB METHODS
-  // =========================================================================
-
-  Future<Document> createPlan(Map<String, dynamic> data) async {
-    try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      data['userId'] = user.$id; // FIXED to userId
-
-      return await databases.createDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.plansCollection,
-        documentId: ID.unique(),
-        data: data,
-      );
-    } catch (e) {
-      debugPrint("Error creating plan: $e");
-      rethrow;
-    }
+  Future<ProxyDocument> createWardrobeItem(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('outfits', data, userId: userId);
   }
 
-  Future<List<Document>> getUserPlans() async {
-    try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
+  Future<ProxyDocument> createPlan(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('plans', data, userId: userId);
+  }
 
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.plansCollection,
-        queries: [
-          Query.equal('userId', user.$id), // FIXED to userId
-        ],
-      );
-      return result.documents;
+  Future<List<ProxyDocument>> getUserPlans() async {
+    try {
+      final userId = await _requireUserId();
+      return await _listDocs('plans', userId: userId);
     } catch (e) {
       debugPrint("Error fetching plans: $e");
       return [];
@@ -170,121 +277,50 @@ class AppwriteService extends ChangeNotifier {
   }
 
   Future<void> deletePlan(String documentId) async {
-    try {
-      await databases.deleteDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.plansCollection,
-        documentId: documentId,
-      );
-    } catch (e) {
-      debugPrint("Error deleting plan: $e");
-      rethrow;
-    }
+    await _deleteDoc('plans', documentId);
   }
 
   Future<void> updatePlanReminder(String documentId, bool reminder) async {
-    try {
-      await databases.updateDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.plansCollection,
-        documentId: documentId,
-        data: {'reminder': reminder},
-      );
-    } catch (e) {
-      debugPrint("Error updating plan reminder: $e");
-      rethrow;
-    }
+    await _updateDoc('plans', documentId, {'reminder': reminder});
   }
 
-  // =========================================================================
-  // SAVED BOARDS DB METHODS
-  // =========================================================================
-
-  Future<List<Document>> getSavedBoardsByOccasion(String occasion) async {
+  Future<List<ProxyDocument>> getSavedBoardsByOccasion(String occasion) async {
     try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.savedBoardsCollection,
-        queries: [
-          Query.equal('userId', user.$id), // FIXED to userId
-          Query.equal('occasion', occasion),
-          Query.orderDesc('\$createdAt'), 
-        ],
-      );
-      return result.documents;
+      final userId = await _requireUserId();
+      return await _listDocs('saved_boards', userId: userId, occasion: occasion);
     } catch (e) {
       debugPrint("Error fetching $occasion boards: $e");
-      return []; 
+      return [];
     }
   }
 
-  Future<List<Document>> getAllSavedBoards() async {
+  Future<List<ProxyDocument>> getAllSavedBoards() async {
     try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.savedBoardsCollection,
-        queries: [
-          Query.equal('userId', user.$id), // FIXED to userId
-          Query.orderDesc('\$createdAt'), 
-        ],
-      );
-      return result.documents;
+      final userId = await _requireUserId();
+      return await _listDocs('saved_boards', userId: userId);
     } catch (e) {
       debugPrint("Error fetching all boards: $e");
-      return []; 
+      return [];
     }
   }
 
   Future<void> deleteSavedBoard(String documentId) async {
-    try {
-      await databases.deleteDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.savedBoardsCollection,
-        documentId: documentId,
-      );
-    } catch (e) {
-      debugPrint("Error deleting board: $e");
-      throw Exception("Failed to delete board");
-    }
+    await _deleteDoc('saved_boards', documentId);
   }
 
-  // =========================================================================
-  // SKINCARE DB METHODS
-  // =========================================================================
-
-  Future<Document?> getSkincareProfile() async {
+  Future<ProxyDocument?> getSkincareProfile() async {
     try {
-      final user = await getCurrentUser();
-      if (user == null) return null;
+      final userId = await _requireUserId();
+      final docs = await _listDocs('skincare', userId: userId, limit: 1);
+      if (docs.isNotEmpty) return docs.first;
 
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.skincareCollection,
-        queries: [Query.equal('userId', user.$id)], // FIXED to userId
-      );
-
-      if (result.documents.isEmpty) {
-        return await databases.createDocument(
-          databaseId: Env.appwriteDatabaseId,
-          collectionId: Env.skincareCollection,
-          documentId: ID.unique(),
-          data: {
-            'userId': user.$id, // FIXED to userId
-            'skinType': '',
-            'concerns': [],
-            'daySteps': [],
-            'nightSteps': [],
-            'lastUpdated': DateTime.now().toIso8601String(),
-          },
-        );
-      }
-      return result.documents.first;
+      return _createDoc('skincare', {
+        'skinType': '',
+        'concerns': [],
+        'daySteps': [],
+        'nightSteps': [],
+        'lastUpdated': DateTime.now().toIso8601String(),
+      }, userId: userId);
     } catch (e) {
       debugPrint("Error fetching skincare profile: $e");
       return null;
@@ -298,417 +334,150 @@ class AppwriteService extends ChangeNotifier {
     List<int>? daySteps,
     List<int>? nightSteps,
   }) async {
-    try {
-      Map<String, dynamic> updateData = {};
-      if (skinType != null) updateData['skinType'] = skinType;
-      if (concerns != null) updateData['concerns'] = concerns;
-      if (daySteps != null) updateData['daySteps'] = daySteps;
-      if (nightSteps != null) updateData['nightSteps'] = nightSteps;
-      updateData['lastUpdated'] = DateTime.now().toIso8601String();
-
-      await databases.updateDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.skincareCollection,
-        documentId: documentId,
-        data: updateData,
-      );
-    } catch (e) {
-      debugPrint("Error updating skincare profile: $e");
-    }
+    final updateData = <String, dynamic>{};
+    if (skinType != null) updateData['skinType'] = skinType;
+    if (concerns != null) updateData['concerns'] = concerns;
+    if (daySteps != null) updateData['daySteps'] = daySteps;
+    if (nightSteps != null) updateData['nightSteps'] = nightSteps;
+    updateData['lastUpdated'] = DateTime.now().toIso8601String();
+    await _updateDoc('skincare', documentId, updateData);
   }
 
-  // =========================================================================
-  // WORKOUT OUTFITS DB METHODS
-  // =========================================================================
-
-  Future<List<Document>> getWorkoutOutfits() async {
+  Future<List<ProxyDocument>> getWorkoutOutfits() async {
     try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.workoutOutfitsCollection,
-        queries: [
-          Query.equal('userId', user.$id), // FIXED to userId
-          Query.orderDesc('\$createdAt'),
-        ],
-      );
-      return result.documents;
+      final userId = await _requireUserId();
+      return await _listDocs('workout_outfits', userId: userId);
     } catch (e) {
       debugPrint("Error fetching workout outfits: $e");
       return [];
     }
   }
 
-  Future<Document> createWorkoutOutfit(Map<String, dynamic> data) async {
-    try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      data['userId'] = user.$id; // FIXED to userId
-
-      return await databases.createDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.workoutOutfitsCollection,
-        documentId: ID.unique(),
-        data: data,
-      );
-    } catch (e) {
-      debugPrint("Error creating workout outfit: $e");
-      rethrow;
-    }
+  Future<ProxyDocument> createWorkoutOutfit(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('workout_outfits', data, userId: userId);
   }
 
   Future<void> deleteWorkoutOutfit(String documentId) async {
-    try {
-      await databases.deleteDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.workoutOutfitsCollection,
-        documentId: documentId,
-      );
-    } catch (e) {
-      debugPrint("Error deleting workout outfit: $e");
-      rethrow;
-    }
+    await _deleteDoc('workout_outfits', documentId);
   }
 
-  // =========================================================================
-  // BILLS & COUPONS DB METHODS
-  // =========================================================================
-
-  Future<List<Document>> getBills() async {
+  Future<List<ProxyDocument>> getBills() async {
     try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.billsCollection,
-        queries: [
-          Query.equal('userId', user.$id), // FIXED to userId
-          Query.orderDesc('\$createdAt'),
-        ],
-      );
-      return result.documents;
+      final userId = await _requireUserId();
+      return await _listDocs('bills', userId: userId);
     } catch (e) {
       debugPrint("Error fetching bills: $e");
       return [];
     }
   }
 
-  Future<Document> createBill(Map<String, dynamic> data) async {
-    try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      data['userId'] = user.$id; // FIXED to userId
-
-      return await databases.createDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.billsCollection,
-        documentId: ID.unique(),
-        data: data,
-      );
-    } catch (e) {
-      debugPrint("Error creating bill: $e");
-      rethrow;
-    }
+  Future<ProxyDocument> createBill(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('bills', data, userId: userId);
   }
 
   Future<void> deleteBill(String documentId) async {
-    try {
-      await databases.deleteDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.billsCollection,
-        documentId: documentId,
-      );
-    } catch (e) {
-      debugPrint("Error deleting bill: $e");
-      rethrow;
-    }
+    await _deleteDoc('bills', documentId);
   }
 
-  Future<List<Document>> getCoupons() async {
+  Future<List<ProxyDocument>> getCoupons() async {
     try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.couponsCollection,
-        queries: [
-          Query.equal('userId', user.$id), // FIXED to userId
-          Query.orderDesc('\$createdAt'),
-        ],
-      );
-      return result.documents;
+      final userId = await _requireUserId();
+      return await _listDocs('coupons', userId: userId);
     } catch (e) {
       debugPrint("Error fetching coupons: $e");
       return [];
     }
   }
 
-  Future<Document> createCoupon(Map<String, dynamic> data) async {
-    try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      data['userId'] = user.$id; // FIXED to userId
-
-      return await databases.createDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.couponsCollection,
-        documentId: ID.unique(),
-        data: data,
-      );
-    } catch (e) {
-      debugPrint("Error creating coupon: $e");
-      rethrow;
-    }
+  Future<ProxyDocument> createCoupon(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('coupons', data, userId: userId);
   }
 
   Future<void> deleteCoupon(String documentId) async {
-    try {
-      await databases.deleteDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.couponsCollection,
-        documentId: documentId,
-      );
-    } catch (e) {
-      debugPrint("Error deleting coupon: $e");
-      rethrow;
-    }
+    await _deleteDoc('coupons', documentId);
   }
 
-  // =========================================================================
-  // MEDI TRACKER DB METHODS
-  // =========================================================================
-
-  Future<List<Document>> getMeds() async {
+  Future<List<ProxyDocument>> getMeds() async {
     try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.medsCollection,
-        queries: [
-          Query.equal('userId', user.$id), // FIXED to userId
-          Query.orderDesc('\$createdAt'),
-        ],
-      );
-      return result.documents;
+      final userId = await _requireUserId();
+      return await _listDocs('meds', userId: userId);
     } catch (e) {
       debugPrint("Error fetching meds: $e");
       return [];
     }
   }
 
-  Future<Document> createMed(Map<String, dynamic> data) async {
-    try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-      data['userId'] = user.$id; // FIXED to userId
-
-      return await databases.createDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.medsCollection,
-        documentId: ID.unique(),
-        data: data,
-      );
-    } catch (e) {
-      debugPrint("Error creating med: $e");
-      rethrow;
-    }
+  Future<ProxyDocument> createMed(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('meds', data, userId: userId);
   }
 
   Future<void> updateMed(String documentId, Map<String, dynamic> data) async {
-    try {
-      await databases.updateDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.medsCollection,
-        documentId: documentId,
-        data: data,
-      );
-    } catch (e) {
-      debugPrint("Error updating med: $e");
-      rethrow;
-    }
+    await _updateDoc('meds', documentId, data);
   }
 
   Future<void> deleteMed(String documentId) async {
-    try {
-      await databases.deleteDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.medsCollection,
-        documentId: documentId,
-      );
-    } catch (e) {
-      debugPrint("Error deleting med: $e");
-      rethrow;
-    }
+    await _deleteDoc('meds', documentId);
   }
 
-  Future<List<Document>> getMedLogs() async {
+  Future<List<ProxyDocument>> getMedLogs() async {
     try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.medLogsCollection,
-        queries: [
-          Query.equal('userId', user.$id), // FIXED to userId
-          Query.orderDesc('time'), 
-        ],
-      );
-      return result.documents;
+      final userId = await _requireUserId();
+      return await _listDocs('med_logs', userId: userId);
     } catch (e) {
       debugPrint("Error fetching med logs: $e");
       return [];
     }
   }
 
-  Future<Document> createMedLog(Map<String, dynamic> data) async {
-    try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-      data['userId'] = user.$id; // FIXED to userId
-
-      return await databases.createDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.medLogsCollection,
-        documentId: ID.unique(),
-        data: data,
-      );
-    } catch (e) {
-      debugPrint("Error creating med log: $e");
-      rethrow;
-    }
+  Future<ProxyDocument> createMedLog(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('med_logs', data, userId: userId);
   }
 
-  // =========================================================================
-  // MEAL PLANNER DB METHODS
-  // =========================================================================
-
-  Future<List<Document>> getMealPlans() async {
+  Future<List<ProxyDocument>> getMealPlans() async {
     try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.mealPlansCollection,
-        queries: [
-          Query.equal('userId', user.$id), // FIXED to userId
-          Query.orderDesc('\$createdAt'),
-        ],
-      );
-      return result.documents;
+      final userId = await _requireUserId();
+      return await _listDocs('meal_plans', userId: userId);
     } catch (e) {
       debugPrint("Error fetching meal plans: $e");
       return [];
     }
   }
 
-  Future<Document> createMealPlan(Map<String, dynamic> data) async {
-    try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-      data['userId'] = user.$id; // FIXED to userId
-
-      return await databases.createDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.mealPlansCollection,
-        documentId: ID.unique(),
-        data: data,
-      );
-    } catch (e) {
-      debugPrint("Error creating meal plan: $e");
-      rethrow;
-    }
+  Future<ProxyDocument> createMealPlan(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('meal_plans', data, userId: userId);
   }
 
   Future<void> deleteMealPlan(String documentId) async {
-    try {
-      await databases.deleteDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.mealPlansCollection,
-        documentId: documentId,
-      );
-    } catch (e) {
-      debugPrint("Error deleting meal plan: $e");
-      rethrow;
-    }
+    await _deleteDoc('meal_plans', documentId);
   }
 
-  // =========================================================================
-  // LIFE GOALS DB METHODS
-  // =========================================================================
-
-  Future<List<Document>> getLifeGoals() async {
+  Future<List<ProxyDocument>> getLifeGoals() async {
     try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-
-      final result = await databases.listDocuments(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.lifeGoalsCollection,
-        queries: [
-          Query.equal('userId', user.$id), // FIXED to userId
-          Query.orderDesc('\$createdAt'),
-        ],
-      );
-      return result.documents;
+      final userId = await _requireUserId();
+      return await _listDocs('life_goals', userId: userId);
     } catch (e) {
       debugPrint("Error fetching life goals: $e");
       return [];
     }
   }
 
-  Future<Document> createLifeGoal(Map<String, dynamic> data) async {
-    try {
-      final user = await getCurrentUser();
-      if (user == null) throw Exception("User not authenticated");
-      data['userId'] = user.$id; // FIXED to userId
-
-      return await databases.createDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.lifeGoalsCollection,
-        documentId: ID.unique(),
-        data: data,
-      );
-    } catch (e) {
-      debugPrint("Error creating life goal: $e");
-      rethrow;
-    }
+  Future<ProxyDocument> createLifeGoal(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('life_goals', data, userId: userId);
   }
 
   Future<void> updateLifeGoalProgress(String documentId, int progress) async {
-    try {
-      await databases.updateDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.lifeGoalsCollection,
-        documentId: documentId,
-        data: {'progress': progress},
-      );
-    } catch (e) {
-      debugPrint("Error updating life goal progress: $e");
-      rethrow;
-    }
+    await _updateDoc('life_goals', documentId, {'progress': progress});
   }
 
   Future<void> deleteLifeGoal(String documentId) async {
-    try {
-      await databases.deleteDocument(
-        databaseId: Env.appwriteDatabaseId,
-        collectionId: Env.lifeGoalsCollection,
-        documentId: documentId,
-      );
-    } catch (e) {
-      debugPrint("Error deleting life goal: $e");
-      rethrow;
-    }
+    await _deleteDoc('life_goals', documentId);
   }
 }
+
