@@ -258,9 +258,7 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
       },
       child: Scaffold(
         backgroundColor: _bg,
-        body: _isLoading 
-            ? Center(child: CircularProgressIndicator(color: _accent))
-            : Stack(
+        body: Stack(
           children: [
             Center(
               child: SizedBox(
@@ -276,6 +274,17 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
                 ),
               ),
             ),
+            if (_isLoading)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: LinearProgressIndicator(
+                  minHeight: 2,
+                  color: _accent,
+                  backgroundColor: Colors.transparent,
+                ),
+              ),
             AnimatedOpacity(
               duration: const Duration(milliseconds: 300),
               opacity: _chatOpen ? 1.0 : 0.0,

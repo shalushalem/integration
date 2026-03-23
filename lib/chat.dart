@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:myapp/theme/theme_tokens.dart';
-import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/services/backend_service.dart';
+import 'package:myapp/theme/theme_tokens.dart';
 import 'package:provider/provider.dart';
 
 class ChatMessage {
@@ -30,31 +30,39 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  
-  // The core state variables for memory!
+
   final List<ChatMessage> _messages = [];
   final List<Map<String, String>> _chatHistory = [];
-  List<Map<String, dynamic>> _localWardrobeCache = []; // 🚀 UI CACHE FOR IMAGES
+  List<Map<String, dynamic>> _localWardrobeCache = [];
 
-  String _runningMemory = "";
+  String _runningMemory = '';
   bool _isTyping = false;
-  String _userName = "User";
+  String _userName = 'User';
 
   @override
   void initState() {
     super.initState();
     _fetchUser();
     _fetchLocalWardrobe();
-    // Add a welcome message!
-    _messages.add(ChatMessage(
-      text: "Hi! I'm AHVI. How can I help you style or plan your day?",
-      isMe: false,
-    ));
+    _messages.add(
+      ChatMessage(
+        text: "Hi! I'm AHVI. How can I help you style or plan your day?",
+        isMe: false,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchUser() async {
     final appwrite = Provider.of<AppwriteService>(context, listen: false);
     final user = await appwrite.getCurrentUser();
+
     if (user != null && mounted) {
       setState(() {
         _userName = user.name.isNotEmpty ? user.name.split(' ').first : 'Stylist';
@@ -62,28 +70,25 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // 🚀 Fetch the wardrobe instantly so the UI can draw the pictures!
   Future<void> _fetchLocalWardrobe() async {
     final appwrite = Provider.of<AppwriteService>(context, listen: false);
     final items = await appwrite.getWardrobeItems();
     if (mounted) setState(() => _localWardrobeCache = items);
   }
 
-  void _sendMessage([String? chipText]) async {
+  Future<void> _sendMessage([String? chipText]) async {
     final text = chipText ?? _controller.text.trim();
     if (text.isEmpty) return;
 
     _controller.clear();
 
-    // 1. Add user message to UI and History
     setState(() {
       _messages.add(ChatMessage(text: text, isMe: true));
-      _chatHistory.add({"role": "user", "content": text});
+      _chatHistory.add({'role': 'user', 'content': text});
       _isTyping = true;
     });
     _scrollToBottom();
 
-    // 2. Call the backend
     try {
       final backend = Provider.of<BackendService>(context, listen: false);
       final response = await backend.sendChatQuery(
@@ -95,32 +100,51 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (!mounted) return;
 
-      // 3. Update Memory
-      if (response['updated_memory'] != null) {
-        _runningMemory = response['updated_memory'];
+      if (response['error'] != null) {
+        setState(() {
+          _isTyping = false;
+          _messages.add(
+            ChatMessage(
+              text: "Couldn't connect right now. Please try again.",
+              isMe: false,
+            ),
+          );
+        });
+        _scrollToBottom();
+        return;
       }
 
-      // 4. Parse AI Response
-      String aiText = response['message']?['content']?.toString() ?? "I'm having trouble connecting.";
-      _chatHistory.add({"role": "assistant", "content": aiText});
+      if (response['updated_memory'] != null) {
+        _runningMemory = response['updated_memory'].toString();
+      }
+
+      final aiText = response['message']?['content']?.toString() ??
+          "I'm having trouble connecting.";
+      _chatHistory.add({'role': 'assistant', 'content': aiText});
 
       setState(() {
         _isTyping = false;
-        _messages.add(ChatMessage(
-          text: aiText,
-          isMe: false,
-          chips: response['chips'] ?? [],
-          boardId: response['board_ids'],
-          packId: response['pack_ids'],
-        ));
+        _messages.add(
+          ChatMessage(
+            text: aiText,
+            isMe: false,
+            chips: response['chips'] ?? [],
+            boardId: response['board_ids'],
+            packId: response['pack_ids'],
+          ),
+        );
       });
       _scrollToBottom();
-      
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _isTyping = false;
-        _messages.add(ChatMessage(text: "Connection Error: $e", isMe: false));
+        _messages.add(
+          ChatMessage(
+            text: 'Network issue detected. Please try again.',
+            isMe: false,
+          ),
+        );
       });
       _scrollToBottom();
     }
@@ -138,12 +162,12 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  // 🚀 THE INLINE STYLE BOARD MAGIC
   Widget _buildInlineStyleBoard(String boardIds, AppThemeTokens t) {
     if (boardIds.isEmpty) return const SizedBox();
 
     final ids = boardIds.split(',').map((e) => e.trim()).toList();
-    final boardItems = _localWardrobeCache.where((item) => ids.contains(item['id'])).toList();
+    final boardItems =
+        _localWardrobeCache.where((item) => ids.contains(item['id'])).toList();
 
     if (boardItems.isEmpty) return const SizedBox();
 
@@ -215,7 +239,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
-    
+
     return Scaffold(
       backgroundColor: t.backgroundPrimary,
       appBar: AppBar(
@@ -224,7 +248,11 @@ class _ChatScreenState extends State<ChatScreen> {
         iconTheme: IconThemeData(color: t.textPrimary),
         title: Text(
           'AHVI',
-          style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w600, letterSpacing: 2.0),
+          style: TextStyle(
+            color: t.textPrimary,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 2.0,
+          ),
         ),
         centerTitle: true,
       ),
@@ -247,7 +275,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 padding: const EdgeInsets.only(left: 20, bottom: 10),
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  child: Text("AHVI is typing...", style: TextStyle(color: t.mutedText, fontSize: 12)),
+                  child: Text(
+                    'AHVI is typing...',
+                    style: TextStyle(color: t.mutedText, fontSize: 12),
+                  ),
                 ),
               ),
             _buildInputArea(t),
@@ -259,12 +290,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildMessageBubble(ChatMessage msg, AppThemeTokens t) {
     return Column(
-      crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment:
+          msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         Align(
           alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
           child: Container(
-            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+            constraints:
+                BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
@@ -287,8 +320,6 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
         ),
-        
-        // Render Chips if AI suggests them
         if (!msg.isMe && msg.chips.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 16, left: 4),
@@ -299,28 +330,34 @@ class _ChatScreenState extends State<ChatScreen> {
                 return GestureDetector(
                   onTap: () => _sendMessage(chip.toString()),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: t.accent.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: t.accent.primary.withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: t.accent.primary.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Text(
                       chip.toString(),
-                      style: TextStyle(color: t.accent.primary, fontSize: 12, fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                        color: t.accent.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 );
               }).toList(),
             ),
           ),
-          
-        // 🚀 THE MAGIC: Render Style Boards and Pack Lists Inline!
         if (!msg.isMe && msg.boardId != null && msg.boardId!.isNotEmpty)
           _buildInlineStyleBoard(msg.boardId!, t),
-
         if (!msg.isMe && msg.packId != null && msg.packId!.isNotEmpty)
-          _buildInlineStyleBoard(msg.packId!, t), // Using the same beautiful widget for packing!
+          _buildInlineStyleBoard(msg.packId!, t),
       ],
     );
   }
@@ -348,7 +385,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _sendMessage(),
                 decoration: InputDecoration(
-                  hintText: "Ask AHVI anything...",
+                  hintText: 'Ask AHVI anything...',
                   hintStyle: TextStyle(color: t.mutedText),
                   border: InputBorder.none,
                 ),

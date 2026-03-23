@@ -5,6 +5,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -142,6 +143,38 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     setState(() => _activeTab = index);
   }
 
+  Future<void> _toggleLikePersist(String id) async {
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    final item = _wardrobe.firstWhere((e) => e.id == id);
+    final previous = item.liked;
+    setState(() => item.liked = !item.liked);
+    _showToast(item.liked
+        ? '? Added "${item.name}" to favourites'
+        : '? Removed from favourites');
+    try {
+      await appwrite.updateWardrobeItem(id, {'liked': item.liked});
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => item.liked = previous);
+      _showToast('? Could not save like state');
+    }
+  }
+
+  Future<void> _logWearPersist(String id) async {
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    final item = _wardrobe.firstWhere((e) => e.id == id);
+    final previous = item.worn;
+    setState(() => item.worn = previous + 1);
+    _showToast('? Logged a wear for "${item.name}"');
+    try {
+      await appwrite.updateWardrobeItem(id, {'worn': item.worn});
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => item.worn = previous);
+      _showToast('? Could not save wear count');
+    }
+  }
+
   void _openAddModal() {
     HapticFeedback.lightImpact();
     showDialog(
@@ -188,16 +221,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       builder: (_) => _ItemDetailPanel(
         item: item,
         onWore: () {
-          setState(() => item.worn++);
           Navigator.of(context).pop();
           _openItemDetail(id);
-          _showToast('? Logged a wear for "${item.name}"');
+          _logWearPersist(id);
         },
         onToggleLike: () {
-          setState(() => item.liked = !item.liked);
-          _showToast(item.liked
-              ? '? Added "${item.name}" to favourites'
-              : '? Removed from favourites');
+          _toggleLikePersist(id);
         },
         onDelete: () {
           Navigator.of(context).pop();
@@ -259,6 +288,14 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               Navigator.of(context).pop();
               setState(() => _wardrobe.removeWhere((i) => i.id == id));
               _showToast('?? "${item.name}" removed');
+              try {
+                final appwrite = Provider.of<AppwriteService>(context, listen: false);
+                await appwrite.deleteWardrobeItem(id);
+              } catch (_) {
+                if (!mounted) return;
+                setState(() => _wardrobe.insert(0, item));
+                _showToast('? Could not remove item');
+              }
             },
             child: Text('Remove',
                 style: TextStyle(fontFamily: 'Inter', color: accent4)),
@@ -306,19 +343,10 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 onDelete: (id) => _showDeleteConfirm(id),
                 onToggleLike: (id) {
                   HapticFeedback.selectionClick();
-                  final i = _wardrobe.firstWhere((e) => e.id == id);
-                  setState(() => i.liked = !i.liked);
-                  _showToast(i.liked
-                      ? '? Added "${i.name}" to favourites'
-                      : '? Removed from favourites');
+                  _toggleLikePersist(id);
                 },
                 onWore: (id) {
-                  setState(() {
-                    final i = _wardrobe.firstWhere((e) => e.id == id);
-                    i.worn++;
-                  });
-                  final i = _wardrobe.firstWhere((e) => e.id == id);
-                  _showToast('? Logged a wear for "${i.name}"');
+                  _logWearPersist(id);
                 },
                 onShare: (id) {
                   final i = _wardrobe.firstWhere((e) => e.id == id);

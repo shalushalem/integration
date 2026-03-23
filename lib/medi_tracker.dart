@@ -281,9 +281,7 @@ class _MediTrackScreenState extends State<MediTrackScreen>
       },
       child: Scaffold(
         backgroundColor: bg,
-        body: _isLoading 
-          ? Center(child: CircularProgressIndicator(color: accent))
-          : Container(
+        body: Container(
               width: double.infinity, height: double.infinity, color: phoneShell,
               child: Stack(
                 children: [
@@ -296,6 +294,17 @@ class _MediTrackScreenState extends State<MediTrackScreen>
                   Positioned(bottom: 30, right: 18, child: _buildChatFab()),
                   if (activeScreen == 'medicines')
                     Positioned(bottom: 20, right: 18, child: _buildAddFab()),
+                  if (_isLoading)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: LinearProgressIndicator(
+                        minHeight: 2,
+                        color: accent,
+                        backgroundColor: Colors.transparent,
+                      ),
+                    ),
                 ],
               ),
             ),

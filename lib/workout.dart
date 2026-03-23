@@ -393,12 +393,16 @@ class _HomePageState extends State<_HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return Center(child: CircularProgressIndicator(color: context.themeTokens.accent.primary));
-    }
-
     return CustomScrollView(
       slivers: [
+        if (_isLoading)
+          SliverToBoxAdapter(
+            child: LinearProgressIndicator(
+              minHeight: 2,
+              color: context.themeTokens.accent.primary,
+              backgroundColor: Colors.transparent,
+            ),
+          ),
         const SliverToBoxAdapter(child: SizedBox(height: 56)),
         SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 32),

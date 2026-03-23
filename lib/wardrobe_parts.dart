@@ -189,17 +189,44 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                                       ],
                                     ),
                                     borderRadius: BorderRadius.circular(16),
-                                    image: item.displayUrl != null 
-                                      ? DecorationImage(image: NetworkImage(item.displayUrl!), fit: BoxFit.cover)
-                                      : (item.imageBytes != null ? DecorationImage(image: MemoryImage(item.imageBytes!), fit: BoxFit.cover) : null),
                                   ),
-                                  child: (item.displayUrl == null && item.imageBytes == null)
-                                      ? Center(
-                                    child: Text(_catEmoji(item.cat),
-                                        style:
-                                        const TextStyle(fontSize: 56)),
-                                  )
-                                      : null,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: item.displayUrl != null
+                                        ? CachedNetworkImage(
+                                            imageUrl: item.displayUrl!,
+                                            fit: BoxFit.cover,
+                                            fadeInDuration: Duration.zero,
+                                            placeholder: (_, __) => Center(
+                                              child: SizedBox(
+                                                width: 18,
+                                                height: 18,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: t.accent.primary,
+                                                ),
+                                              ),
+                                            ),
+                                            errorWidget: (_, __, ___) => Center(
+                                              child: Text(
+                                                _catEmoji(item.cat),
+                                                style: const TextStyle(fontSize: 56),
+                                              ),
+                                            ),
+                                          )
+                                        : (item.imageBytes != null
+                                            ? Image.memory(
+                                                item.imageBytes!,
+                                                fit: BoxFit.cover,
+                                                gaplessPlayback: true,
+                                              )
+                                            : Center(
+                                                child: Text(
+                                                  _catEmoji(item.cat),
+                                                  style: const TextStyle(fontSize: 56),
+                                                ),
+                                              )),
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 14),
@@ -2007,17 +2034,37 @@ class _ItemCardState extends State<_ItemCard>
                             t.accent.secondary.withValues(alpha: 0.12)
                           ],
                         ),
-                        // ? Prioritize Masked URL over Raw URL
-                        image: item.displayUrl != null
-                            ? DecorationImage(image: NetworkImage(item.displayUrl!), fit: BoxFit.cover)
-                            : (item.imageBytes != null ? DecorationImage(image: MemoryImage(item.imageBytes!), fit: BoxFit.cover) : null),
                       ),
-                      child: (item.displayUrl == null && item.imageBytes == null)
-                          ? Center(
-                        child: Text(_catEmoji(item.cat),
-                            style: const TextStyle(fontSize: 40)),
-                      )
-                          : null,
+                      child: item.displayUrl != null
+                          ? CachedNetworkImage(
+                              imageUrl: item.displayUrl!,
+                              fit: BoxFit.cover,
+                              fadeInDuration: Duration.zero,
+                              placeholder: (_, __) => Center(
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: t.accent.primary,
+                                  ),
+                                ),
+                              ),
+                              errorWidget: (_, __, ___) => Center(
+                                child: Text(_catEmoji(item.cat),
+                                    style: const TextStyle(fontSize: 40)),
+                              ),
+                            )
+                          : (item.imageBytes != null
+                              ? Image.memory(
+                                  item.imageBytes!,
+                                  fit: BoxFit.cover,
+                                  gaplessPlayback: true,
+                                )
+                              : Center(
+                                  child: Text(_catEmoji(item.cat),
+                                      style: const TextStyle(fontSize: 40)),
+                                )),
                     ),
                   ),
                   Padding(

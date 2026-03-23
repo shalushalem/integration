@@ -340,19 +340,23 @@ class _BillsScreenState extends State<BillsScreen> with TickerProviderStateMixin
   // ── BUILD ─────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: kBg, 
-        body: Center(child: CircularProgressIndicator(color: kAccent2))
-      );
-    }
-    
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
         backgroundColor: kBg,
         body: Stack(
           children: [
+            if (_isLoading)
+              const Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: LinearProgressIndicator(
+                  minHeight: 2,
+                  color: kAccent2,
+                  backgroundColor: Colors.transparent,
+                ),
+              ),
             _MeshBackground(),
             SafeArea(
               bottom: false,

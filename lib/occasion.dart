@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:appwrite/models.dart' hide Row;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart';
@@ -56,7 +57,7 @@ class _OccasionBoardState extends State<OccasionBoard> {
   Color get _phoneShell => _t.phoneShell;
   Color get _text => _t.textPrimary;
 
-  bool _isLoading = true;
+  bool _isLoading = false;
   String? _toastMessage;
   List<LookItem> _looks = [];
 
@@ -67,6 +68,7 @@ class _OccasionBoardState extends State<OccasionBoard> {
   }
 
   Future<void> _fetchLooks() async {
+    if (mounted) setState(() => _isLoading = true);
     try {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
       // 🔥 Fetch dynamically based on the parameter passed from boards.dart!
@@ -155,17 +157,23 @@ class _OccasionBoardState extends State<OccasionBoard> {
               Expanded(
                 child: Container(
                   color: _bg,
-                  child: _isLoading 
-                      ? Center(child: CircularProgressIndicator(color: _t.accent.primary))
-                      : _looks.isEmpty
-                          ? _EmptyState(title: widget.title, emoji: widget.emptyEmoji)
-                          : _LooksGrid(
-                              looks: _looks,
-                              onDelete: _deleteLook,
-                              onShare: (look) => _showToast('Copied!'),
-                            ),
+                  child: _looks.isEmpty
+                      ? (_isLoading
+                          ? const _LooksLoadingState()
+                          : _EmptyState(title: widget.title, emoji: widget.emptyEmoji))
+                      : _LooksGrid(
+                          looks: _looks,
+                          onDelete: _deleteLook,
+                          onShare: (look) => _showToast('Copied!'),
+                        ),
                 ),
               ),
+              if (_isLoading)
+                LinearProgressIndicator(
+                  minHeight: 2,
+                  color: _t.accent.primary,
+                  backgroundColor: Colors.transparent,
+                ),
             ],
           ),
           // ── TOAST ──
@@ -527,10 +535,18 @@ class _LookCardState extends State<_LookCard> {
                   look.imageUrl != null && look.imageUrl!.isNotEmpty
                       ? AspectRatio(
                           aspectRatio: aspectRatio,
-                          child: Image.network(
-                            look.imageUrl!,
+                          child: CachedNetworkImage(
+                            imageUrl: look.imageUrl!,
                             fit: BoxFit.cover,
                             width: double.infinity,
+                            fadeInDuration: Duration.zero,
+                            placeholder: (_, __) => Container(color: _t.panel),
+                            errorWidget: (_, __, ___) => Container(
+                              decoration: BoxDecoration(gradient: _bgGradient(look.bg)),
+                              child: Center(
+                                child: Text(look.emoji, style: const TextStyle(fontSize: 32)),
+                              ),
+                            ),
                           ),
                         )
                       : AspectRatio(
@@ -671,6 +687,33 @@ class _LookCardState extends State<_LookCard> {
 }
 
 // ── Empty / No-results states ────────────────────────────────────────────────
+class _LooksLoadingState extends StatelessWidget {
+  const _LooksLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return GridView.builder(
+      padding: const EdgeInsets.all(12),
+      physics: const BouncingScrollPhysics(),
+      itemCount: 6,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: 0.72,
+      ),
+      itemBuilder: (_, __) => Container(
+        decoration: BoxDecoration(
+          color: t.panel,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: t.cardBorder),
+        ),
+      ),
+    );
+  }
+}
+
 class _EmptyState extends StatelessWidget {
   final String title;
   final String emoji;

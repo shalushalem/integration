@@ -7,6 +7,8 @@ import 'package:appwrite/models.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:myapp/config/env.dart';
+import 'package:myapp/services/local_data_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ProxyDocument {
   final String $id;
@@ -39,10 +41,13 @@ class ProxyDocument {
 }
 
 class AppwriteService extends ChangeNotifier {
+  static const _lastUserIdKey = 'last_user_id';
   late Client client;
   late Account account;
   late Avatars avatars;
   late String _baseUrl;
+  final LocalDataStore _localStore = LocalDataStore();
+  bool _localReady = false;
 
   AppwriteService() {
     client = Client()
@@ -54,9 +59,97 @@ class AppwriteService extends ChangeNotifier {
     _baseUrl = '${Env.backendApiUrl}/api/data';
   }
 
+  Future<void> _ensureLocalReady() async {
+    if (_localReady) return;
+    await _localStore.init();
+    _localReady = true;
+  }
+
+  bool _isLocalId(String id) => id.startsWith('local_');
+
+  Future<void> _persistLastUserId(String userId) async {
+    if (userId.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_lastUserIdKey, userId);
+  }
+
+  Future<String?> _lastKnownUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getString(_lastUserIdKey)?.trim();
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  Future<void> _clearLastUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_lastUserIdKey);
+  }
+
+  Future<void> _syncPendingLocalChanges(String userId) async {
+    await _ensureLocalReady();
+    final pending = await _localStore.pendingOps(userId);
+    for (final op in pending) {
+      try {
+        if (op.entity == 'wardrobe' && op.op == 'create') {
+          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+          await _createDoc('outfits', data, userId: userId);
+          await _localStore.deleteWardrobeItem(userId, op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+
+        if (op.entity == 'wardrobe' && op.op == 'update') {
+          if (_isLocalId(op.refId)) {
+            await _localStore.deletePendingOp(op.id);
+            continue;
+          }
+          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+          await _updateDoc('outfits', op.refId, data);
+          await _localStore.deleteWardrobeItem(userId, op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+
+        if (op.entity == 'wardrobe' && op.op == 'delete') {
+          if (_isLocalId(op.refId)) {
+            await _localStore.deletePendingOp(op.id);
+            continue;
+          }
+          await _deleteDoc('outfits', op.refId);
+          await _localStore.deleteWardrobeItem(userId, op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+
+        if (op.entity == 'saved_board' && op.op == 'delete') {
+          await _deleteDoc('saved_boards', op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+
+        if (op.entity == 'saved_board' && op.op == 'create') {
+          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+          await _createDoc('saved_boards', data, userId: userId);
+          await _localStore.deleteBoard(userId, op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+      } catch (_) {
+        break;
+      }
+    }
+
+    final remaining = await _localStore.pendingOps(userId);
+    if (remaining.isEmpty) {
+      await _localStore.clearUserBackupData(userId);
+    }
+  }
+
   Future<User?> getCurrentUser() async {
     try {
-      return await account.get();
+      final user = await account.get();
+      await _persistLastUserId(user.$id);
+      return user;
     } catch (e) {
       debugPrint("No active session or error: $e");
       return null;
@@ -66,6 +159,10 @@ class AppwriteService extends ChangeNotifier {
   Future<Session?> loginEmailPassword(String email, String password) async {
     try {
       final session = await account.createEmailPasswordSession(email: email, password: password);
+      final user = await getCurrentUser();
+      if (user != null) {
+        await _persistLastUserId(user.$id);
+      }
       notifyListeners();
       return session;
     } catch (e) {
@@ -77,6 +174,10 @@ class AppwriteService extends ChangeNotifier {
   Future<bool> loginWithGoogle() async {
     try {
       await account.createOAuth2Session(provider: OAuthProvider.google);
+      final user = await getCurrentUser();
+      if (user != null) {
+        await _persistLastUserId(user.$id);
+      }
       notifyListeners();
       return true;
     } catch (e) {
@@ -87,12 +188,14 @@ class AppwriteService extends ChangeNotifier {
 
   Future<User> registerEmailPassword(String email, String password, String name) async {
     try {
-      return await account.create(
+      final user = await account.create(
         userId: ID.unique(),
         email: email,
         password: password,
         name: name,
       );
+      await _persistLastUserId(user.$id);
+      return user;
     } catch (e) {
       debugPrint("Register error: $e");
       rethrow;
@@ -102,6 +205,7 @@ class AppwriteService extends ChangeNotifier {
   Future<void> logout() async {
     try {
       await account.deleteSession(sessionId: 'current');
+      await _clearLastUserId();
       notifyListeners();
     } catch (e) {
       debugPrint("Logout error: $e");
@@ -119,10 +223,14 @@ class AppwriteService extends ChangeNotifier {
 
   Future<String> _requireUserId() async {
     final user = await getCurrentUser();
-    if (user == null) {
-      throw Exception("User not authenticated");
+    if (user != null) {
+      return user.$id;
     }
-    return user.$id;
+    final fallbackUserId = await _lastKnownUserId();
+    if (fallbackUserId != null) {
+      return fallbackUserId;
+    }
+    throw Exception("User not authenticated");
   }
 
   Uri _resourceUri(String resource, {Map<String, String>? query}) {
@@ -231,10 +339,17 @@ class AppwriteService extends ChangeNotifier {
   }
 
   Future<List<Map<String, dynamic>>> getWardrobeItems() async {
+    await _ensureLocalReady();
+    String? userId;
     try {
-      final userId = await _requireUserId();
+      userId = await _requireUserId();
+      await _syncPendingLocalChanges(userId);
+    } catch (_) {}
+
+    try {
+      userId ??= await _requireUserId();
       final docs = await _listDocs('outfits', userId: userId, limit: 200);
-      return docs
+      final mapped = docs
           .map((doc) => {
                 "id": doc.$id,
                 "name": doc.data['name'],
@@ -250,15 +365,149 @@ class AppwriteService extends ChangeNotifier {
                 "liked": doc.data['liked'] ?? false,
               })
           .toList();
+      return mapped;
     } catch (e) {
       debugPrint("Error fetching wardrobe items: $e");
+      if (userId != null) {
+        final cached = await _localStore.loadWardrobeItems(userId);
+        if (cached.isNotEmpty) return cached;
+      }
       return [];
     }
   }
 
   Future<ProxyDocument> createWardrobeItem(Map<String, dynamic> data) async {
+    await _ensureLocalReady();
     final userId = await _requireUserId();
-    return _createDoc('outfits', data, userId: userId);
+    await _syncPendingLocalChanges(userId);
+
+    try {
+      return await _createDoc('outfits', data, userId: userId);
+    } catch (_) {
+      final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
+      final localMap = Map<String, dynamic>.from(data)..['id'] = localId;
+      await _localStore.upsertWardrobeItem(userId, localMap);
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'wardrobe',
+        op: 'create',
+        refId: localId,
+        payload: {'data': data},
+      );
+      return ProxyDocument(
+        $id: localId,
+        data: Map<String, dynamic>.from(data),
+        raw: {
+          r'$id': localId,
+          ...Map<String, dynamic>.from(data),
+          '_local_only': true,
+        },
+      );
+    }
+  }
+
+  Future<ProxyDocument> updateWardrobeItem(
+    String documentId,
+    Map<String, dynamic> data,
+  ) async {
+    await _ensureLocalReady();
+    final userId = await _requireUserId();
+
+    if (_isLocalId(documentId)) {
+      final cached = await _localStore.loadWardrobeItems(userId);
+      final existing = cached
+          .where((i) => (i['id'] ?? '').toString() == documentId)
+          .cast<Map<String, dynamic>>()
+          .toList();
+      final merged = existing.isNotEmpty
+          ? (Map<String, dynamic>.from(existing.first)..addAll(data))
+          : (Map<String, dynamic>.from(data)..['id'] = documentId);
+      await _localStore.upsertWardrobeItem(userId, merged);
+
+      final pending = await _localStore.pendingOps(userId);
+      final createOp = pending.where((op) =>
+          op.entity == 'wardrobe' &&
+          op.op == 'create' &&
+          op.refId == documentId);
+      if (createOp.isNotEmpty) {
+        final op = createOp.first;
+        final payload = Map<String, dynamic>.from(op.payload);
+        final payloadData = Map<String, dynamic>.from(payload['data'] ?? const {});
+        payloadData.addAll(data);
+        payload['data'] = payloadData;
+        await _localStore.updatePendingOpPayload(op.id, payload);
+      }
+      return ProxyDocument(
+        $id: documentId,
+        data: merged,
+        raw: {
+          r'$id': documentId,
+          ...merged,
+          '_local_only': true,
+        },
+      );
+    }
+
+    try {
+      final updated = await _updateDoc('outfits', documentId, data);
+      await _localStore.deleteWardrobeItem(userId, documentId);
+      return updated;
+    } catch (_) {
+      final cached = await _localStore.loadWardrobeItems(userId);
+      final existing = cached
+          .where((i) => (i['id'] ?? '').toString() == documentId)
+          .cast<Map<String, dynamic>>()
+          .toList();
+      final merged = existing.isNotEmpty
+          ? (Map<String, dynamic>.from(existing.first)..addAll(data))
+          : (Map<String, dynamic>.from(data)..['id'] = documentId);
+      await _localStore.upsertWardrobeItem(userId, merged);
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'wardrobe',
+        op: 'update',
+        refId: documentId,
+        payload: {'data': data},
+      );
+      return ProxyDocument(
+        $id: documentId,
+        data: merged,
+        raw: {
+          r'$id': documentId,
+          ...merged,
+          '_local_only': true,
+        },
+      );
+    }
+  }
+
+  Future<void> deleteWardrobeItem(String documentId) async {
+    await _ensureLocalReady();
+    final userId = await _requireUserId();
+    await _localStore.deleteWardrobeItem(userId, documentId);
+
+    if (_isLocalId(documentId)) {
+      await _localStore.deletePendingOpsByRef(
+        userId: userId,
+        entity: 'wardrobe',
+        refId: documentId,
+        op: 'create',
+      );
+      return;
+    }
+
+    try {
+      await _deleteDoc('outfits', documentId);
+      await _syncPendingLocalChanges(userId);
+    } catch (_) {
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'wardrobe',
+        op: 'delete',
+        refId: documentId,
+        payload: const <String, dynamic>{},
+      );
+    }
   }
 
   Future<ProxyDocument> createPlan(Map<String, dynamic> data) async {
@@ -285,27 +534,137 @@ class AppwriteService extends ChangeNotifier {
   }
 
   Future<List<ProxyDocument>> getSavedBoardsByOccasion(String occasion) async {
+    await _ensureLocalReady();
+    String? userId;
     try {
-      final userId = await _requireUserId();
+      userId = await _requireUserId();
+      await _syncPendingLocalChanges(userId);
+    } catch (_) {}
+
+    try {
+      userId ??= await _requireUserId();
       return await _listDocs('saved_boards', userId: userId, occasion: occasion);
     } catch (e) {
       debugPrint("Error fetching $occasion boards: $e");
+      if (userId != null) {
+        final cached = await _localStore.loadBoards(userId, occasion: occasion);
+        if (cached.isNotEmpty) {
+          return cached
+              .map(
+                (row) => ProxyDocument(
+                  $id: (row['id'] ?? '').toString(),
+                  data: Map<String, dynamic>.from(row['data'] ?? const {}),
+                  raw: Map<String, dynamic>.from(
+                    row['raw'] ??
+                        {
+                          r'$id': (row['id'] ?? '').toString(),
+                          ...Map<String, dynamic>.from(row['data'] ?? const {}),
+                        },
+                  ),
+                ),
+              )
+              .toList();
+        }
+      }
       return [];
     }
   }
 
   Future<List<ProxyDocument>> getAllSavedBoards() async {
+    await _ensureLocalReady();
+    String? userId;
     try {
-      final userId = await _requireUserId();
+      userId = await _requireUserId();
+      await _syncPendingLocalChanges(userId);
+    } catch (_) {}
+
+    try {
+      userId ??= await _requireUserId();
       return await _listDocs('saved_boards', userId: userId);
     } catch (e) {
       debugPrint("Error fetching all boards: $e");
+      if (userId != null) {
+        final cached = await _localStore.loadBoards(userId);
+        if (cached.isNotEmpty) {
+          return cached
+              .map(
+                (row) => ProxyDocument(
+                  $id: (row['id'] ?? '').toString(),
+                  data: Map<String, dynamic>.from(row['data'] ?? const {}),
+                  raw: Map<String, dynamic>.from(
+                    row['raw'] ??
+                        {
+                          r'$id': (row['id'] ?? '').toString(),
+                          ...Map<String, dynamic>.from(row['data'] ?? const {}),
+                        },
+                  ),
+                ),
+              )
+              .toList();
+        }
+      }
       return [];
     }
   }
 
+  Future<ProxyDocument> createSavedBoard(Map<String, dynamic> data) async {
+    await _ensureLocalReady();
+    final userId = await _requireUserId();
+    await _syncPendingLocalChanges(userId);
+
+    try {
+      return await _createDoc('saved_boards', data, userId: userId);
+    } catch (_) {
+      final localId = 'local_board_${DateTime.now().millisecondsSinceEpoch}';
+      await _localStore.cacheBoards(
+        userId,
+        [
+          {
+            'id': localId,
+            'data': Map<String, dynamic>.from(data),
+            'raw': {
+              r'$id': localId,
+              ...Map<String, dynamic>.from(data),
+              '_local_only': true,
+            },
+          }
+        ],
+      );
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'saved_board',
+        op: 'create',
+        refId: localId,
+        payload: {'data': data},
+      );
+      return ProxyDocument(
+        $id: localId,
+        data: Map<String, dynamic>.from(data),
+        raw: {
+          r'$id': localId,
+          ...Map<String, dynamic>.from(data),
+          '_local_only': true,
+        },
+      );
+    }
+  }
+
   Future<void> deleteSavedBoard(String documentId) async {
-    await _deleteDoc('saved_boards', documentId);
+    await _ensureLocalReady();
+    final userId = await _requireUserId();
+    await _localStore.deleteBoard(userId, documentId);
+    try {
+      await _deleteDoc('saved_boards', documentId);
+      await _syncPendingLocalChanges(userId);
+    } catch (_) {
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'saved_board',
+        op: 'delete',
+        refId: documentId,
+        payload: const <String, dynamic>{},
+      );
+    }
   }
 
   Future<ProxyDocument?> getSkincareProfile() async {
@@ -480,4 +839,3 @@ class AppwriteService extends ChangeNotifier {
     await _deleteDoc('life_goals', documentId);
   }
 }
-

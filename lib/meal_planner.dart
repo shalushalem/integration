@@ -340,10 +340,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     final kBg = t.backgroundPrimary;
     final filtered = _filteredPlans;
 
-    if (_isLoading) {
-      return Scaffold(backgroundColor: kBg, body: Center(child: CircularProgressIndicator(color: t.accent.primary)));
-    }
-
     return PopScope(
       canPop: !_overlayVisible,
       onPopInvokedWithResult: (didPop, result) {
@@ -355,6 +351,17 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         backgroundColor: kBg,
         body: Stack(
           children: [
+          if (_isLoading)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: LinearProgressIndicator(
+                minHeight: 2,
+                color: t.accent.primary,
+                backgroundColor: Colors.transparent,
+              ),
+            ),
           RepaintBoundary(
             child: TickerMode(
               enabled: !_overlayVisible,

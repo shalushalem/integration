@@ -306,9 +306,7 @@ class _LifeGoalsScreenState extends State<LifeGoalsScreen> with TickerProviderSt
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _t.backgroundPrimary,
-      body: _isLoading 
-        ? Center(child: CircularProgressIndicator(color: _themeAccent))
-        : Stack(
+      body: Stack(
           children: [
             Column(
               children: [
@@ -335,6 +333,17 @@ class _LifeGoalsScreenState extends State<LifeGoalsScreen> with TickerProviderSt
                 ),
               ],
             ),
+            if (_isLoading)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: LinearProgressIndicator(
+                  minHeight: 2,
+                  color: _themeAccent,
+                  backgroundColor: Colors.transparent,
+                ),
+              ),
             Positioned(bottom: 16, right: 16, child: _buildFab()),
             AnimatedPositioned(
               duration: const Duration(milliseconds: 350),
