@@ -838,4 +838,120 @@ class AppwriteService extends ChangeNotifier {
   Future<void> deleteLifeGoal(String documentId) async {
     await _deleteDoc('life_goals', documentId);
   }
+
+  Future<List<ProxyDocument>> getChatThreads({int limit = 50}) async {
+    try {
+      final userId = await _requireUserId();
+      final docs = await _listDocs('chat_threads', userId: userId, limit: limit);
+      await _ensureLocalReady();
+      await _localStore.cacheChatThreads(
+        userId,
+        docs
+            .map((d) => {'id': d.$id, 'data': d.data, 'raw': d.raw})
+            .toList(),
+      );
+      return docs;
+    } catch (e) {
+      debugPrint("Error fetching chat threads: $e");
+      try {
+        final userId = await _requireUserId();
+        await _ensureLocalReady();
+        final cached = await _localStore.loadChatThreads(userId, limit: limit);
+        return cached
+            .map(
+              (r) => ProxyDocument(
+                $id: (r['id'] ?? '').toString(),
+                data: Map<String, dynamic>.from(r['data'] ?? const {}),
+                raw: Map<String, dynamic>.from(r['raw'] ?? const {}),
+              ),
+            )
+            .toList();
+      } catch (_) {
+        return [];
+      }
+    }
+  }
+
+  Future<List<ProxyDocument>> getCachedChatThreads({int limit = 50}) async {
+    try {
+      final userId = await _requireUserId();
+      await _ensureLocalReady();
+      final cached = await _localStore.loadChatThreads(userId, limit: limit);
+      return cached
+          .map(
+            (r) => ProxyDocument(
+              $id: (r['id'] ?? '').toString(),
+              data: Map<String, dynamic>.from(r['data'] ?? const {}),
+              raw: Map<String, dynamic>.from(r['raw'] ?? const {}),
+            ),
+          )
+          .toList();
+    } catch (e) {
+      debugPrint("Error loading cached chat threads: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createChatThread(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    final doc = await _createDoc('chat_threads', data, userId: userId);
+    try {
+      await _ensureLocalReady();
+      await _localStore.cacheChatThreads(userId, [
+        {'id': doc.$id, 'data': doc.data, 'raw': doc.raw},
+      ]);
+    } catch (_) {}
+    return doc;
+  }
+
+  Future<ProxyDocument> updateChatThread(
+    String documentId,
+    Map<String, dynamic> data,
+  ) async {
+    final doc = await _updateDoc('chat_threads', documentId, data);
+    try {
+      final userId = await _requireUserId();
+      await _ensureLocalReady();
+      await _localStore.cacheChatThreads(userId, [
+        {'id': doc.$id, 'data': doc.data, 'raw': doc.raw},
+      ]);
+    } catch (_) {}
+    return doc;
+  }
+
+  Future<void> deleteChatThread(String documentId) async {
+    await _deleteDoc('chat_threads', documentId);
+    try {
+      final userId = await _requireUserId();
+      await _ensureLocalReady();
+      await _localStore.deleteChatThread(userId, documentId);
+    } catch (_) {}
+  }
+
+  Future<List<ProxyDocument>> getChatMessages({
+    required String threadId,
+    int limit = 500,
+  }) async {
+    try {
+      final userId = await _requireUserId();
+      final docs = await _listDocs(
+        'chat_messages',
+        userId: userId,
+        limit: limit,
+      );
+      return docs.where((d) => d.data['threadId'] == threadId).toList();
+    } catch (e) {
+      debugPrint("Error fetching chat messages: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createChatMessage(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('chat_messages', data, userId: userId);
+  }
+
+  Future<void> deleteChatMessage(String documentId) async {
+    await _deleteDoc('chat_messages', documentId);
+  }
 }

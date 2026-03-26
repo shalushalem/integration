@@ -3,6 +3,7 @@ import 'package:flutter/services.dart'; // [ADDED B33: clipboard]
 import 'package:provider/provider.dart'; // <-- Added for Appwrite
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart'; // <-- Added for Appwrite
+import 'package:myapp/services/backend_service.dart';
 
 // ─── Color constants (unchanged) ──────────────────────────────────
 // Colors are resolved from theme tokens in widget builds.
@@ -984,6 +985,8 @@ class _ChatPage extends StatefulWidget {
 class _ChatPageState extends State<_ChatPage> {
   final TextEditingController _inputCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
+  final List<Map<String, String>> _chatHistory = [];
+  String _runningMemory = '';
 
   // [ADDED B22] Track bot typing state
   bool _isTyping = false;
@@ -995,7 +998,7 @@ class _ChatPageState extends State<_ChatPage> {
   final List<Map<String, dynamic>> _messages = [
     {
       'role': 'bot',
-      'text': 'Hi! I\'m AHVI, your AI outfit stylist ✨\n\nTell me what workout you\'re doing, your style preferences, or the weather — and I\'ll suggest the perfect outfit from head to toe!',
+      'text': 'Hi! I\'m AHVI Workout Coach. Tell me your workout goal and I\'ll build a quick outfit + session plan.',
     }
   ];
 
@@ -1004,21 +1007,6 @@ class _ChatPageState extends State<_ChatPage> {
     'HIIT outfit for a woman?', 'What to wear for cycling?', 'Outfit for outdoor training?',
     'Comfortable gym outfit for men?', 'What to wear for Pilates?', 'Cold weather running outfit?',
   ];
-
-  // [ADDED B22] Predefined QA matching HTML logic
-  final List<Map<String, dynamic>> _predefinedQA = [
-    {'q': RegExp(r'morning run|running outfit', caseSensitive: false), 'a': 'Perfect morning run outfit! 🏃‍♀️\n\n• Top: Moisture-wicking tank or lightweight long-sleeve\n• Bottom: 5" running shorts or compression tights\n• Shoes: Road running shoes with cushioning\n• Extras: Running cap, lightweight windbreaker\n\nTip: Layer up in the first mile — you\'ll warm up fast! 🌡️'},
-    {'q': RegExp(r'leg day|gym.*leg|squat|deadlift', caseSensitive: false), 'a': 'Leg day outfit done right! 🏋️‍♀️\n\n• Top: Fitted crop top or breathable gym tee\n• Bottom: High-waist squat-proof leggings\n• Shoes: Flat-soled trainers or weightlifting shoes\n• Extras: Lifting belt (optional), ankle socks\n\nAvoid baggy shorts for leg day — leggings keep form visible! 💪'},
-    {'q': RegExp(r'yoga|pilates|stretch', caseSensitive: false), 'a': 'Yoga & Pilates outfit essentials 🧘‍♀️\n\n• Top: Fitted crop top or flowy tank\n• Bottom: High-waist 7/8 leggings or yoga pants\n• Footwear: Barefoot or grip socks\n• Fabric tip: Opt for cotton blend or bamboo\n\nAvoid slippery fabrics! 🙏'},
-    {'q': RegExp(r'hiit|cardio', caseSensitive: false), 'a': 'HIIT outfit for maximum performance! ⚡\n\n• Top: Moisture-wicking sports bra or crop top\n• Bottom: 3" to 5" shorts or compression shorts\n• Shoes: Cross-training shoes with lateral support\n• Extras: Sweat-wicking headband, grippy socks\n\nChoose 4-way stretch fabrics so nothing holds you back! 🔥'},
-  ];
-
-  String? _getPredefinedAnswer(String text) {
-    for (final qa in _predefinedQA) {
-      if ((qa['q'] as RegExp).hasMatch(text)) return qa['a'] as String;
-    }
-    return null;
-  }
 
   @override
   void dispose() { _inputCtrl.dispose(); _scrollCtrl.dispose(); super.dispose(); }
@@ -1032,26 +1020,88 @@ class _ChatPageState extends State<_ChatPage> {
     });
   }
 
-  // [CHANGED B22: full send logic with typing state + predefined + fallback]
-  void _sendMessage(String text) {
+  Future<Map<String, dynamic>> _loadWorkoutProfile(
+    AppwriteService appwrite,
+    String userId,
+    String fullName,
+  ) async {
+    final base = <String, dynamic>{
+      'user_id': userId,
+      'name': fullName,
+      'first_name': fullName.trim().isEmpty ? 'User' : fullName.split(' ').first,
+      'module_context': 'workout',
+    };
+    try {
+      final doc = await appwrite.getUserProfile();
+      final merged = <String, dynamic>{...Map<String, dynamic>.from(doc.data), ...base};
+      return merged;
+    } catch (_) {
+      return base;
+    }
+  }
+
+  void _sendMessage(String text) async {
     if (text.trim().isEmpty) return;
+    final query = text.trim();
     setState(() {
-      _messages.add({'role': 'user', 'text': text.trim()});
+      _messages.add({'role': 'user', 'text': query});
       _chipsVisible = false; // [ADDED B18] hide chips on first send
       _inputCtrl.clear();
       _isTyping = true; // [ADDED B22/B24]
     });
     _scrollToBottom();
 
-    final predefined = _getPredefinedAnswer(text);
-    Future.delayed(const Duration(milliseconds: 550), () {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final backend = Provider.of<BackendService>(context, listen: false);
+      final user = await appwrite.getCurrentUser();
+      final userId = user?.$id ?? 'workout_user';
+      final profile = await _loadWorkoutProfile(appwrite, userId, user?.name ?? 'User');
+
+      final response = await backend.sendChatQuery(
+        query,
+        userId,
+        List<Map<String, String>>.from(_chatHistory),
+        _runningMemory,
+        userProfile: profile,
+        wardrobeItems: const <Map<String, dynamic>>[],
+        moduleContext: 'workout',
+      );
+
+      final msg = response['message'];
+      final aiText = (() {
+        if (msg is String && msg.trim().isNotEmpty) return msg.trim();
+        if (msg is Map && msg['content'] != null) {
+          final content = msg['content'].toString().trim();
+          if (content.isNotEmpty) return content;
+        }
+        if (response['error'] != null) {
+          final error = response['error'].toString().trim();
+          if (error.isNotEmpty) return error;
+        }
+        return "I could not fetch workout advice right now. Try again in a sec.";
+      })();
+
+      _chatHistory.add({'role': 'user', 'content': query});
+      _chatHistory.add({'role': 'assistant', 'content': aiText});
+      if (response['updated_memory'] != null) {
+        _runningMemory = response['updated_memory'].toString();
+      }
+
       if (!mounted) return;
       setState(() {
-        _isTyping = false; // [ADDED B22/B24]
-        _messages.add({'role': 'bot', 'text': predefined ?? 'Great question! Here\'s my outfit recommendation for that workout. Focus on moisture-wicking fabrics and proper support for best performance. ✨'});
+        _isTyping = false;
+        _messages.add({'role': 'bot', 'text': aiText});
       });
       _scrollToBottom();
-    });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isTyping = false;
+        _messages.add({'role': 'bot', 'text': 'Workout brain is offline for a moment. Retry? 💪'});
+      });
+      _scrollToBottom();
+    }
   }
 
   @override
@@ -1263,7 +1313,7 @@ class _ChatHeader extends StatelessWidget {
           const SizedBox(width: 14),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('AHVI', style: TextStyle(color: t.textPrimary, fontSize: 17, fontWeight: FontWeight.w700, height: 1.2)),
-            Text('Your AI outfit stylist · Online', style: TextStyle(color: t.mutedText, fontSize: 12, fontWeight: FontWeight.w300)),
+            Text('Your AI workout coach · Online', style: TextStyle(color: t.mutedText, fontSize: 12, fontWeight: FontWeight.w300)),
           ])),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1387,10 +1437,36 @@ class _BotMessageActions extends StatefulWidget {
 class _BotMessageActionsState extends State<_BotMessageActions> {
   bool _isSaved = false;  // [ADDED B32]
   bool _isCopied = false; // [ADDED B33]
+  bool _isSaving = false;
 
-  void _save() {
-    setState(() => _isSaved = true); // [ADDED B32] permanent save state
-    showToast(context, 'Workout saved ✓');
+  void _save() async {
+    if (_isSaving || _isSaved) return;
+    setState(() => _isSaving = true);
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final title = widget.text.length > 64
+          ? '${widget.text.substring(0, 64).trim()}...'
+          : widget.text;
+      await appwrite.createSavedBoard({
+        'title': title.isEmpty ? 'Workout Board' : title,
+        'description': widget.text,
+        'occasion': 'Workout',
+        'imageUrl': '',
+        'board_ids': '',
+        'source': 'workout_chat',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      if (!mounted) return;
+      setState(() {
+        _isSaved = true;
+        _isSaving = false;
+      });
+      showToast(context, 'Workout board saved ✓');
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      showToast(context, 'Failed to save workout board');
+    }
   }
 
   void _copy() async {
@@ -1410,22 +1486,22 @@ class _BotMessageActionsState extends State<_BotMessageActions> {
       children: [
         // [ADDED B32] Save button
         GestureDetector(
-          onTap: _isSaved ? null : _save,
+          onTap: (_isSaved || _isSaving) ? null : _save,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             margin: const EdgeInsets.only(right: 6),
             decoration: BoxDecoration(
-              color: _isSaved
+              color: (_isSaved || _isSaving)
                   ? accent.tertiary.withValues(alpha: 0.2)
                   : t.panel,
               borderRadius: BorderRadius.circular(50),
-              border: Border.all(color: _isSaved ? accent.tertiary : accent.primary.withValues(alpha: 0.28)),
+              border: Border.all(color: (_isSaved || _isSaving) ? accent.tertiary : accent.primary.withValues(alpha: 0.28)),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.bookmark_outlined, size: 11, color: _isSaved ? accent.tertiary : accent.primary),
+              Icon(Icons.bookmark_outlined, size: 11, color: (_isSaved || _isSaving) ? accent.tertiary : accent.primary),
               const SizedBox(width: 4),
-              Text(_isSaved ? 'Saved!' : 'Save', style: TextStyle(color: _isSaved ? accent.tertiary : accent.primary, fontSize: 11, fontWeight: FontWeight.w600)),
+              Text(_isSaving ? 'Saving...' : (_isSaved ? 'Saved!' : 'Save'), style: TextStyle(color: (_isSaved || _isSaving) ? accent.tertiary : accent.primary, fontSize: 11, fontWeight: FontWeight.w600)),
             ]),
           ),
         ),

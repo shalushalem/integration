@@ -11,9 +11,13 @@ class BackendService {
     String query,
     String userId,
     List<Map<String, String>> chatHistory,
-    String currentMemory,
-    {bool isRetry = false, List<Map<String, dynamic>>? fetchedWardrobe}
-  ) async {
+    String currentMemory, {
+    bool isRetry = false,
+    List<Map<String, dynamic>>? fetchedWardrobe,
+    Map<String, dynamic>? userProfile,
+    List<Map<String, dynamic>>? wardrobeItems,
+    String? moduleContext,
+  }) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/text'),
@@ -21,23 +25,45 @@ class BackendService {
         body: jsonEncode({
           'messages': [
             ...chatHistory,
-            {'role': 'user', 'content': query}
+            {'role': 'user', 'content': query},
           ],
           'language': 'en',
           'current_memory': currentMemory,
           'user_id': userId,
-          'user_profile': {},
+          'user_profile': userProfile ?? const <String, dynamic>{},
+          'wardrobe_items':
+              wardrobeItems ?? fetchedWardrobe ?? const <Map<String, dynamic>>[],
+          if (moduleContext != null && moduleContext.trim().isNotEmpty)
+            'module_context': moduleContext.trim(),
         }),
       );
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        final dynamic decoded = jsonDecode(response.body);
+        if (decoded is! Map<String, dynamic>) {
+          throw Exception('Unexpected response format from backend');
+        }
+        final data = decoded;
 
-        String rawText = data['message']?['content'] ?? "I'm having trouble thinking right now.";
+        final dynamic rawMessage = data['message'];
+        String rawText;
+        if (rawMessage is Map<String, dynamic>) {
+          rawText =
+              rawMessage['content']?.toString() ??
+              "I'm having trouble thinking right now.";
+        } else if (rawMessage is String) {
+          rawText = rawMessage;
+        } else if (data['content'] is String) {
+          rawText = data['content'] as String;
+        } else {
+          rawText = "I'm having trouble thinking right now.";
+        }
         String cleanText = rawText;
 
         List<dynamic> extractedChips = data['chips'] ?? [];
-        String? extractedBoardData = (data['board_ids'] != null && data['board_ids'].toString().isNotEmpty)
+        String? extractedBoardData =
+            (data['board_ids'] != null &&
+                data['board_ids'].toString().isNotEmpty)
             ? data['board_ids']
             : null;
         String? extractedPackData;
@@ -46,7 +72,11 @@ class BackendService {
         RegExp chipsRegex = RegExp(r'\[CHIPS:\s*(.*?)\]');
         Match? chipsMatch = chipsRegex.firstMatch(cleanText);
         if (chipsMatch != null) {
-          extractedChips = chipsMatch.group(1)!.split(',').map((e) => e.trim()).toList();
+          extractedChips = chipsMatch
+              .group(1)!
+              .split(',')
+              .map((e) => e.trim())
+              .toList();
           cleanText = cleanText.replaceAll(chipsMatch.group(0)!, '').trim();
         }
 
@@ -65,12 +95,13 @@ class BackendService {
           cleanText = "I've prepared your custom Packing Menu!";
         }
 
-        data['message']['content'] = cleanText;
+        data['message'] = {'content': cleanText};
         data['chips'] = extractedChips;
         data['board_ids'] = extractedBoardData;
         data['pack_ids'] = extractedPackData;
         data['full_menu_text'] = hiddenMenuText;
-        data['has_actions'] = (extractedBoardData != null || extractedPackData != null);
+        data['has_actions'] =
+            (extractedBoardData != null || extractedPackData != null);
 
         return data;
       } else {
@@ -108,21 +139,21 @@ class BackendService {
       String base64String = base64Encode(imageBytes);
 
       // 2. Point to the NEW endpoint from your vision.py router
-      final uri = Uri.parse('$baseUrl/api/analyze-image'); 
-      
+      final uri = Uri.parse('$baseUrl/api/analyze-image');
+
       // 3. Send a standard JSON POST request
       final response = await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'image_base64': base64String
-        }),
+        body: jsonEncode({'image_base64': base64String}),
       );
-      
+
       if (response.statusCode == 200) {
-        return jsonDecode(response.body); 
+        return jsonDecode(response.body);
       } else {
-        print("❌ Analyze API Failed: ${response.statusCode} - ${response.body}");
+        print(
+          "❌ Analyze API Failed: ${response.statusCode} - ${response.body}",
+        );
         return null;
       }
     } catch (e) {
@@ -229,6 +260,3 @@ class BackendService {
     }
   }
 }
-
-
-

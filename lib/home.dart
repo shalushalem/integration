@@ -5,8 +5,15 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:myapp/bills_page.dart' as bills_page;
 import 'package:myapp/boards.dart';
+import 'package:myapp/calendar.dart' as calendar_page;
+import 'package:myapp/life_goals.dart' as life_goals_page;
+import 'package:myapp/meal_planner.dart' as meal_planner_page;
+import 'package:myapp/medi_tracker.dart' as medi_tracker_page;
 import 'package:myapp/profile.dart' as profile;
+import 'package:myapp/skincare.dart' as skincare_page;
+import 'package:myapp/workout.dart' as workout_page;
 import 'package:myapp/wardrobe.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:provider/provider.dart';
@@ -36,6 +43,16 @@ const _aiSuggestions = [
   "New drops match your saved style — want to see them?",
   "Your Friday dinner is coming up — let's plan the look.",
   "I noticed you love minimal styles — new picks are in.",
+];
+
+const _organizeBoardChips = <String>[
+  'Meals',
+  'Medicines',
+  'Bills',
+  'Workout',
+  'Calendar',
+  'Skincare',
+  'Life Goals',
 ];
 
 class Screen4 extends StatefulWidget {
@@ -134,6 +151,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
   String _userName = '...';
   Uint8List? _avatarBytes;
+  Map<String, dynamic> _chatUserProfile = <String, dynamic>{};
+  List<Map<String, dynamic>> _chatWardrobe = <Map<String, dynamic>>[];
   final bool _liteUiMode = true;
 
   @override
@@ -236,12 +255,74 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       final firstName =
           user.name.isNotEmpty ? user.name.split(' ').first : 'Stylist';
       final avatar = await appwrite.getUserAvatar(user.name);
+      final profile = await _loadChatProfile(appwrite, user.$id, user.name);
+      final wardrobe = await appwrite.getWardrobeItems();
 
       setState(() {
         _userName = firstName;
         _avatarBytes = avatar;
+        _chatUserProfile = profile;
+        _chatWardrobe = wardrobe;
       });
     }
+  }
+
+  Future<Map<String, dynamic>> _loadChatProfile(
+    AppwriteService appwrite,
+    String userId,
+    String fullName,
+  ) async {
+    final base = <String, dynamic>{
+      'user_id': userId,
+      'name': fullName,
+      'first_name': fullName.trim().isEmpty ? 'User' : fullName.split(' ').first,
+    };
+    try {
+      final doc = await appwrite.getUserProfile();
+      final raw = Map<String, dynamic>.from(doc.data);
+      final merged = <String, dynamic>{...raw, ...base};
+      final gender = (merged['gender'] ??
+              merged['sex'] ??
+              merged['preferredGender'] ??
+              merged['profile_gender'])
+          ?.toString()
+          .trim();
+      if (gender != null && gender.isNotEmpty) merged['gender'] = gender;
+      final pronouns =
+          merged['pronouns'] ?? merged['preferred_pronouns'] ?? merged['pronoun'];
+      if (pronouns != null && pronouns.toString().trim().isNotEmpty) {
+        merged['pronouns'] = pronouns.toString().trim();
+      }
+      final shoppingPrefs =
+          merged['shopping_preferences'] ??
+          merged['shoppingPreferences'] ??
+          merged['style_preferences'] ??
+          merged['stylePreferences'] ??
+          merged['preferred_styles'];
+      if (shoppingPrefs != null) merged['shopping_preferences'] = shoppingPrefs;
+      final dob = (merged['dob_iso'] ?? merged['dob'] ?? merged['dateOfBirth'])
+          ?.toString()
+          .trim();
+      if (dob != null && dob.isNotEmpty) {
+        merged['dob_iso'] = dob;
+      }
+      return merged;
+    } catch (_) {
+      return base;
+    }
+  }
+
+  Future<void> _refreshChatContext() async {
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    final user = await appwrite.getCurrentUser();
+    if (user == null) return;
+    final profile = await _loadChatProfile(appwrite, user.$id, user.name);
+    final wardrobe = await appwrite.getWardrobeItems();
+    if (!mounted) return;
+    setState(() {
+      _chatUserProfile = profile;
+      _chatWardrobe = wardrobe;
+    });
   }
 
   void _updateClock() {
@@ -494,81 +575,106 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   // 🚀 FIXED FUNCTION: REAL API CALL WITH HISTORY & MEMORY
+  // Handles intent queries, including local organize board status cards.
   Future<void> _handleQuery(String question, String intent) async {
     if (_overlayState == _OverlayState.thinking) return;
-
+    final backendIntent = _normalizeIntentForBackend(intent);
     final cfg = _intentConfig[intent] ?? _intentConfig['chat']!;
-    
+
     setState(() {
       _overlayState = _OverlayState.thinking;
       _overlaySuggestions = [];
       _responseTags = cfg.responseTags;
       _tagsRevealed = false;
-      // We DO NOT clear _responses here so the old messages stay on screen!
     });
 
     _ResponseData? resp;
 
     try {
-      final backend = Provider.of<BackendService>(context, listen: false);
-      
-      // Grab the history payload we've been secretly storing
-      final historyPayload = List<Map<String, String>>.from(_chatHistory);
-      
-      final apiResult = await backend.sendChatQuery(
-        question, 
-        'user_$_userName', 
-        historyPayload, 
-        _runningMemory
+      await _refreshChatContext();
+
+      // Local board snapshot path for Organize chips.
+      final localBoardResp = await _maybeBuildLocalOrganizeResponse(
+        question,
+        backendIntent,
       );
-      
-      // Store user's question into history
-      _chatHistory.add({"role": "user", "content": question});
-      
-      if (apiResult['updated_memory'] != null) {
-        _runningMemory = apiResult['updated_memory'];
-      }
+      if (localBoardResp != null) {
+        _chatHistory.add({"role": "user", "content": question});
+        _chatHistory.add({"role": "assistant", "content": localBoardResp.intro});
+        _responseTags = _organizeBoardChips;
+        resp = localBoardResp;
+      } else {
+        final backend = Provider.of<BackendService>(context, listen: false);
+        final historyPayload = List<Map<String, String>>.from(_chatHistory);
 
-      String aiText = "Could not parse response.";
-      
-      if (apiResult.containsKey('message') && apiResult['message'] != null) {
-           aiText = apiResult['message']['content']?.toString() ?? "No content";
-      } else if (apiResult.containsKey('error')) {
-           aiText = apiResult['error']?.toString() ?? "Unknown error occurred";
-      }
+        final apiResult = await backend.sendChatQuery(
+          question,
+          'user_$_userName',
+          historyPayload,
+          _runningMemory,
+          userProfile: _chatUserProfile,
+          wardrobeItems: _chatWardrobe,
+          moduleContext: backendIntent == 'chat' ? null : backendIntent,
+        );
 
-      // Store AHVI's response into history
-      _chatHistory.add({"role": "assistant", "content": aiText});
-
-      // Cleanup tags perfectly
-      aiText = aiText.replaceAll(RegExp(r'\[CHIPS:.*?\]', caseSensitive: false, dotAll: true), '');
-      aiText = aiText.replaceAll(RegExp(r'\[STYLE_BOARD:.*?\]', caseSensitive: false, dotAll: true), '');
-      aiText = aiText.replaceAll(RegExp(r'\[PACK_LIST:.*?\]', caseSensitive: false, dotAll: true), '');
-      aiText = aiText.trim();
-
-      if (aiText.length > 1500) {
-          aiText = aiText.substring(0, 1500) + '... \n\n[Text truncated to prevent UI crash]';
-      }
-
-      if (apiResult.containsKey('chips') && apiResult['chips'] != null && apiResult['chips'] is List) {
-        final List<dynamic> rawChips = apiResult['chips'];
-        if (rawChips.isNotEmpty) {
-          _responseTags = rawChips.map((e) => e.toString()).toList();
+        _chatHistory.add({"role": "user", "content": question});
+        if (apiResult['updated_memory'] != null) {
+          _runningMemory = apiResult['updated_memory'];
         }
-      }
 
-      resp = _ResponseData(
-        type: 'text',
-        question: question,
-        intro: aiText,
-      );
-      
-    } catch (e) {
-      String errorMsg = e.toString();
-      if (errorMsg.length > 150) {
-        errorMsg = errorMsg.substring(0, 150) + '... [Error Truncated]';
+        String aiText = "Could not parse response.";
+        if (apiResult.containsKey('message') && apiResult['message'] != null) {
+          final msg = apiResult['message'];
+          if (msg is String && msg.trim().isNotEmpty) {
+            aiText = msg.trim();
+          } else if (msg is Map && msg['content'] != null) {
+            aiText = msg['content']?.toString() ?? "No content";
+          }
+        } else if (apiResult.containsKey('error')) {
+          aiText = apiResult['error']?.toString() ?? "Unknown error occurred";
+        }
+
+        _chatHistory.add({"role": "assistant", "content": aiText});
+
+        aiText = aiText.replaceAll(
+          RegExp(r'\[CHIPS:.*?\]', caseSensitive: false, dotAll: true),
+          '',
+        );
+        aiText = aiText.replaceAll(
+          RegExp(r'\[STYLE_BOARD:.*?\]', caseSensitive: false, dotAll: true),
+          '',
+        );
+        aiText = aiText.replaceAll(
+          RegExp(r'\[PACK_LIST:.*?\]', caseSensitive: false, dotAll: true),
+          '',
+        );
+        aiText = aiText.trim();
+
+        if (aiText.length > 1500) {
+          aiText =
+              '${aiText.substring(0, 1500)}... \n\n[Text truncated to prevent UI crash]';
+        }
+
+        if (apiResult.containsKey('chips') &&
+            apiResult['chips'] != null &&
+            apiResult['chips'] is List) {
+          final rawChips = apiResult['chips'] as List<dynamic>;
+          if (rawChips.isNotEmpty) {
+            _responseTags = rawChips.map((e) => e.toString()).toList();
+          }
+        }
+
+        resp = _ResponseData(
+          type: 'text',
+          question: question,
+          intro: aiText,
+        );
       }
-      
+    } catch (e) {
+      var errorMsg = e.toString();
+      if (errorMsg.length > 150) {
+        errorMsg = '${errorMsg.substring(0, 150)}... [Error Truncated]';
+      }
       resp = _ResponseData(
         type: 'text',
         question: question,
@@ -577,10 +683,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     }
 
     if (!mounted) return;
-
     setState(() {
       _overlayState = _OverlayState.response;
-      _responses.add(resp!); // 🚀 Add the new message to the list!
+      _responses.add(resp!);
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -593,17 +698,313 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       }
     });
 
-    final tagDelay = 150; 
-                    
-    Future.delayed(Duration(milliseconds: tagDelay), () {
+    Future.delayed(const Duration(milliseconds: 150), () {
       if (!mounted) return;
       setState(() => _tagsRevealed = true);
-      _tagsRevealCtrl.animateTo(1.0,
-          duration: const Duration(milliseconds: 200),
-          curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+      _tagsRevealCtrl.animateTo(
+        1.0,
+        duration: const Duration(milliseconds: 200),
+        curve: const Cubic(0.16, 1.0, 0.3, 1.0),
+      );
     });
   }
 
+  String _normalizeIntentForBackend(String intent) {
+    final normalized = intent.toLowerCase().trim();
+    return normalized == 'prepare' ? 'plan' : normalized;
+  }
+
+  String? _resolveOrganizeBoardKey(String raw) {
+    final q = raw
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (q.isEmpty) return null;
+    if (q.contains('medic') || q.contains('pill')) return 'medicines';
+    if (q.contains('meal') || q.contains('food')) return 'meals';
+    if (q.contains('bill') || q.contains('payment') || q.contains('expense')) {
+      return 'bills';
+    }
+    if (q.contains('workout') || q.contains('gym') || q.contains('exercise')) {
+      return 'workout';
+    }
+    if (q.contains('calendar') || q.contains('event') || q.contains('schedule')) {
+      return 'calendar';
+    }
+    if (q.contains('skin') || q.contains('routine')) return 'skincare';
+    if (q.contains('goal') || q.contains('habit')) return 'life_goals';
+    return null;
+  }
+
+  Future<_ResponseData?> _maybeBuildLocalOrganizeResponse(
+    String question,
+    String backendIntent,
+  ) async {
+    if (backendIntent != 'organize') return null;
+    final key = _resolveOrganizeBoardKey(question);
+    if (key == null) return null;
+    final status = await _buildOrganizeBoardStatus(key);
+    return _ResponseData(
+      type: 'organize_board',
+      question: question,
+      intro: "Today's status for ${status.title}",
+      organizeBoard: status,
+    );
+  }
+
+  String _organizeBoardTitle(String boardKey) {
+    switch (boardKey) {
+      case 'meals':
+        return 'Meals Board';
+      case 'medicines':
+        return 'Medicines Board';
+      case 'bills':
+        return 'Bills Board';
+      case 'workout':
+        return 'Workout Board';
+      case 'calendar':
+        return 'Calendar Board';
+      case 'skincare':
+        return 'Skincare Board';
+      case 'life_goals':
+        return 'Life Goals Board';
+      default:
+        return 'Organize Board';
+    }
+  }
+
+  IconData _organizeBoardIcon(String boardKey) {
+    switch (boardKey) {
+      case 'meals':
+        return Icons.restaurant_menu_rounded;
+      case 'medicines':
+        return Icons.medical_services_rounded;
+      case 'bills':
+        return Icons.receipt_long_rounded;
+      case 'workout':
+        return Icons.fitness_center_rounded;
+      case 'calendar':
+        return Icons.calendar_month_rounded;
+      case 'skincare':
+        return Icons.spa_rounded;
+      case 'life_goals':
+        return Icons.track_changes_rounded;
+      default:
+        return Icons.grid_view_rounded;
+    }
+  }
+
+  DateTime? _toLocalDate(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is DateTime) return raw.toLocal();
+    final parsed = DateTime.tryParse(raw.toString());
+    return parsed?.toLocal();
+  }
+
+  bool _isSameLocalDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  int _intValue(dynamic value, {int fallback = 0}) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
+  int _listLength(dynamic value) {
+    if (value is List) return value.length;
+    return 0;
+  }
+
+  Future<_OrganizeBoardStatus> _buildOrganizeBoardStatus(String boardKey) async {
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    final title = _organizeBoardTitle(boardKey);
+    final icon = _organizeBoardIcon(boardKey);
+    final now = DateTime.now();
+
+    try {
+      switch (boardKey) {
+        case 'medicines':
+          final meds = await appwrite.getMeds();
+          var tracked = 0;
+          var takenToday = 0;
+          for (final med in meds) {
+            final reminder = med.data['reminder'];
+            if (reminder is bool && !reminder) continue;
+            tracked++;
+            final takenAt = _toLocalDate(med.data['lastTaken']);
+            if (takenAt != null && _isSameLocalDay(takenAt, now)) {
+              takenToday++;
+            }
+          }
+          final pending = math.max(0, tracked - takenToday);
+          final done = tracked > 0 && pending == 0;
+          final headline = tracked == 0
+              ? 'No medicines added yet.'
+              : done
+                  ? 'All medicines are done for today.'
+                  : '$pending medicine${pending == 1 ? '' : 's'} pending today.';
+          return _OrganizeBoardStatus(
+            boardKey: boardKey,
+            title: title,
+            icon: icon,
+            done: done,
+            headline: headline,
+            details: [
+              tracked == 0
+                  ? 'Add medicines to start day tracking.'
+                  : 'Taken today: $takenToday / $tracked',
+              if (tracked > 0) 'Pending: $pending',
+            ],
+          );
+
+        case 'meals':
+          final plans = await appwrite.getMealPlans();
+          return _OrganizeBoardStatus(
+            boardKey: boardKey,
+            title: title,
+            icon: icon,
+            done: false,
+            headline: plans.isEmpty
+                ? 'No meal plans saved yet.'
+                : '${plans.length} meal plan(s) available.',
+            details: [
+              plans.isEmpty
+                  ? 'Create a meal plan to organize your day.'
+                  : 'Open the board for meal-wise details.',
+            ],
+          );
+
+        case 'bills':
+          final bills = await appwrite.getBills();
+          final addedToday = bills.where((doc) {
+            final when = _toLocalDate(doc.data['date']);
+            return when != null && _isSameLocalDay(when, now);
+          }).length;
+          return _OrganizeBoardStatus(
+            boardKey: boardKey,
+            title: title,
+            icon: icon,
+            done: addedToday > 0,
+            headline: addedToday > 0
+                ? '$addedToday bill entr${addedToday == 1 ? 'y' : 'ies'} added today.'
+                : 'No bill entries added today.',
+            details: ['Total bills tracked: ${bills.length}'],
+          );
+
+        case 'workout':
+          final outfits = await appwrite.getWorkoutOutfits();
+          return _OrganizeBoardStatus(
+            boardKey: boardKey,
+            title: title,
+            icon: icon,
+            done: false,
+            headline: outfits.isEmpty
+                ? 'No workout outfits saved yet.'
+                : '${outfits.length} workout outfit(s) saved.',
+            details: ['Open the board to review your workout sets.'],
+          );
+
+        case 'calendar':
+          final plans = await appwrite.getUserPlans();
+          final remindersOn =
+              plans.where((p) => p.data['reminder'] == true).length;
+          return _OrganizeBoardStatus(
+            boardKey: boardKey,
+            title: title,
+            icon: icon,
+            done: false,
+            headline: plans.isEmpty
+                ? 'No plans on your calendar board yet.'
+                : '${plans.length} plan(s) available.',
+            details: [
+              if (plans.isNotEmpty) 'Reminders active: $remindersOn',
+              'Open board to view your schedule.',
+            ],
+          );
+
+        case 'skincare':
+          final profile = await appwrite.getSkincareProfile();
+          if (profile == null) {
+            return _OrganizeBoardStatus(
+              boardKey: boardKey,
+              title: title,
+              icon: icon,
+              done: false,
+              headline: 'Skincare profile not set yet.',
+              details: ['Add your AM/PM routine to start tracking.'],
+            );
+          }
+          final daySteps = _listLength(profile.data['daySteps']);
+          final nightSteps = _listLength(profile.data['nightSteps']);
+          return _OrganizeBoardStatus(
+            boardKey: boardKey,
+            title: title,
+            icon: icon,
+            done: false,
+            headline: 'Routine ready: $daySteps day, $nightSteps night steps.',
+            details: ['Open board to follow today''s routine.'],
+          );
+
+        case 'life_goals':
+          final goals = await appwrite.getLifeGoals();
+          var completed = 0;
+          for (final g in goals) {
+            final progress = _intValue(g.data['progress']);
+            final target = _intValue(g.data['target'], fallback: 100);
+            if (target > 0 && progress >= target) completed++;
+          }
+          return _OrganizeBoardStatus(
+            boardKey: boardKey,
+            title: title,
+            icon: icon,
+            done: goals.isNotEmpty && completed == goals.length,
+            headline: goals.isEmpty
+                ? 'No life goals added yet.'
+                : '$completed / ${goals.length} goals completed.',
+            details: ['Open board for full progress tracking.'],
+          );
+      }
+    } catch (_) {}
+
+    return _OrganizeBoardStatus(
+      boardKey: boardKey,
+      title: title,
+      icon: icon,
+      done: false,
+      headline: 'Could not load live status right now.',
+      details: ['Open the board for the latest details.'],
+    );
+  }
+
+  void _openOrganizeBoard(String boardKey) {
+    Widget? page;
+    switch (boardKey) {
+      case 'meals':
+        page = const meal_planner_page.Screen4();
+        break;
+      case 'medicines':
+        page = const medi_tracker_page.MediTrackScreen();
+        break;
+      case 'bills':
+        page = const bills_page.BillsScreen();
+        break;
+      case 'workout':
+        page = const workout_page.WorkoutScreen();
+        break;
+      case 'calendar':
+        page = const calendar_page.CalendarScreen();
+        break;
+      case 'skincare':
+        page = const skincare_page.SkincareScreen();
+        break;
+      case 'life_goals':
+        page = const life_goals_page.LifeGoalsScreen();
+        break;
+    }
+    if (page == null) return;
+    _openNavScreen(page);
+  }
   void _dismissOverlay() {
     _overlayFadeCtrl.animateTo(0.0,
         duration: const Duration(milliseconds: 300),
@@ -1942,6 +2343,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   Widget _buildOverlayContent() {
     switch (_overlayState) {
       case _OverlayState.suggestions:
+        final isOrganize = (_activeIntent ?? '').toLowerCase() == 'organize';
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1955,38 +2357,70 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               ),
             ),
             const SizedBox(height: 8),
-            ..._overlaySuggestions.map((q) => _AnimatedPressable(
-                  scalePressed: 0.97,
-                  onTap: () => _handleQuery(q, _activeIntent ?? 'chat'),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 13),
-                    decoration: BoxDecoration(
-                      color: _surface.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(15),
-                      border: Border.all(color: _border),
-                      boxShadow: [
-                        BoxShadow(color: _shadowMedium, blurRadius: 8)
-                      ],
-                    ),
-                    child: Row(children: [
-                      Container(
-                          width: 6,
-                          height: 6,
+            if (isOrganize)
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _overlaySuggestions
+                    .map(
+                      (q) => _AnimatedPressable(
+                        scalePressed: 0.97,
+                        onTap: () => _handleQuery(q, _activeIntent ?? 'chat'),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
                           decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: _accent.withValues(alpha: 0.55))),
-                      const SizedBox(width: 10),
-                      Expanded(
-                          child: Text(q,
-                              style: TextStyle(
-                                  color: _textSub,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w400))),
-                    ]),
-                  ),
-                )),
+                            color: _surface.withValues(alpha: 0.92),
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                                color: _accent.withValues(alpha: 0.30)),
+                          ),
+                          child: Text(
+                            q,
+                            style: TextStyle(
+                              color: _textSub,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              )
+            else
+              ..._overlaySuggestions.map((q) => _AnimatedPressable(
+                    scalePressed: 0.97,
+                    onTap: () => _handleQuery(q, _activeIntent ?? 'chat'),
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 13),
+                      decoration: BoxDecoration(
+                        color: _surface.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: _border),
+                        boxShadow: [
+                          BoxShadow(color: _shadowMedium, blurRadius: 8)
+                        ],
+                      ),
+                      child: Row(children: [
+                        Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _accent.withValues(alpha: 0.55))),
+                        const SizedBox(width: 10),
+                        Expanded(
+                            child: Text(q,
+                                style: TextStyle(
+                                    color: _textSub,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w400))),
+                      ]),
+                    ),
+                  )),
           ],
         );
 
@@ -2397,10 +2831,122 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                   ]));
         }).toList());
 
+      case 'organize_board':
+        if (resp.organizeBoard == null) return const SizedBox();
+        return _buildOrganizeBoardCard(resp.organizeBoard!);
+
       case 'text':
       default:
         return const SizedBox();
     }
+  }
+
+  Widget _buildOrganizeBoardCard(_OrganizeBoardStatus status) {
+    final accent = status.done ? _accentTertiary : _accent;
+    final iconBg = accent.withValues(alpha: 0.12);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+      decoration: BoxDecoration(
+        color: _surface.withValues(alpha: 0.86),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(status.icon, color: accent, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  status.title,
+                  style: TextStyle(
+                    color: _textHeading,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  status.done ? 'Done' : 'Pending',
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            status.headline,
+            style: TextStyle(
+              color: _textSub,
+              fontSize: 12.5,
+              height: 1.45,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          if (status.details.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ...status.details.map(
+              (line) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '• $line',
+                  style: TextStyle(
+                    color: _textMuted,
+                    fontSize: 11.5,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          _AnimatedPressable(
+            onTap: () => _openOrganizeBoard(status.boardKey),
+            scalePressed: 0.98,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 9),
+              decoration: BoxDecoration(
+                color: _accent.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _accent.withValues(alpha: 0.24)),
+              ),
+              child: Text(
+                'View more',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _accent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildPickSheet() {
@@ -3137,6 +3683,7 @@ class _ResponseData {
   final List<_Task> tasks;
   final List<_WeekDay> weekDays;
   final List<_PlanSection> planSections;
+  final _OrganizeBoardStatus? organizeBoard;
   const _ResponseData({
     required this.type,
     required this.question,
@@ -3145,6 +3692,7 @@ class _ResponseData {
     this.tasks = const [],
     this.weekDays = const [],
     this.planSections = const [],
+    this.organizeBoard,
   });
 }
 
@@ -3175,6 +3723,23 @@ class _PlanSection {
   const _PlanSection(this.title, this.color, this.items);
 }
 
+class _OrganizeBoardStatus {
+  final String boardKey;
+  final String title;
+  final IconData icon;
+  final bool done;
+  final String headline;
+  final List<String> details;
+  const _OrganizeBoardStatus({
+    required this.boardKey,
+    required this.title,
+    required this.icon,
+    required this.done,
+    required this.headline,
+    this.details = const [],
+  });
+}
+
 const _intentConfig = {
   'style': _IntentConfig(
     suggestions: [
@@ -3186,13 +3751,9 @@ const _intentConfig = {
     responseTags: ['Outfit Builder', 'Style Tips', 'Trending Now'],
   ),
   'organize': _IntentConfig(
-    suggestions: [
-      'What tasks are urgent?',
-      'Show this week overview',
-      'Plan my gym schedule'
-    ],
+    suggestions: _organizeBoardChips,
     brandSub: 'Your AI Organiser',
-    responseTags: ['Urgent Tasks', 'Weekly View', 'Gym Plan'],
+    responseTags: _organizeBoardChips,
   ),
   'prepare': _IntentConfig(
     suggestions: [
