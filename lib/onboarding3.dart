@@ -36,7 +36,7 @@ class _Screen3State extends State<Screen3> {
   bool _personalizationEnabled = false;
   bool _faceUploaded = false;
   bool _bodyUploaded = false;
-  int _activeTab = 2;
+  int _activeTab = 3;
 
   bool get _isValid {
     if (!_personalizationEnabled) return true;
@@ -305,7 +305,7 @@ class _TabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const tabs = ['Basics', 'Style', 'All Boards'];
+    const tabs = ['Basics', 'Style', 'Try-On'];
     return Container(
       padding: const EdgeInsets.all(5),
       decoration: BoxDecoration(
@@ -319,18 +319,34 @@ class _TabBar extends StatelessWidget {
       child: Row(
         children: List.generate(tabs.length, (i) {
           final isActive = i == activeTab;
+          final isTryOn = i == 2;
           return Expanded(
             child: GestureDetector(
               onTap: () => onTabSelected(i),
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-                decoration: isActive
+                decoration: (isActive || isTryOn)
                     ? BoxDecoration(
-                  color: _panel2,
+                  gradient: isTryOn
+                      ? const LinearGradient(
+                    colors: [Color(0xFF6B91FF), Color(0xFF8D7DFF)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                      : null,
+                  color: isTryOn ? null : _panel2,
                   borderRadius: BorderRadius.circular(11),
-                  boxShadow: const [
-                    BoxShadow(color: Color(0x336B91FF), blurRadius: 12, offset: Offset(0, 3)),
-                    BoxShadow(color: Color(0x14FFFFFF), blurRadius: 0, offset: Offset(0, 1)),
+                  boxShadow: [
+                    BoxShadow(
+                        color: isTryOn
+                            ? const Color(0x4D6B91FF)
+                            : const Color(0x336B91FF),
+                        blurRadius: isTryOn ? 18 : 12,
+                        offset: Offset(0, isTryOn ? 4 : 3)),
+                    if (!isTryOn)
+                      const BoxShadow(color: Color(0x14FFFFFF), blurRadius: 0, offset: Offset(0, 1)),
+                    if (isTryOn)
+                      const BoxShadow(color: Color(0x2E6B91FF), blurRadius: 6, offset: Offset(0, 2)),
                   ],
                 )
                     : null,
@@ -339,8 +355,8 @@ class _TabBar extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-                    color: isActive ? _text : _muted,
+                    fontWeight: (isActive || isTryOn) ? FontWeight.w600 : FontWeight.w500,
+                    color: (isActive || isTryOn) ? _text : _muted,
                     letterSpacing: 0.065,
                   ),
                 ),

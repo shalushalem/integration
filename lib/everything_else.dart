@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:appwrite/models.dart' hide Row;
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart';
@@ -55,7 +53,7 @@ class _Screen4State extends State<Screen4> {
   Color get _phoneShell => _t.phoneShell;
   Color get _text => _t.textPrimary;
 
-  bool _isLoading = false;
+  bool _isLoading = true;
   String _activeFilter = 'all';
   String? _toastMessage;
   
@@ -72,7 +70,6 @@ class _Screen4State extends State<Screen4> {
   }
 
   Future<void> _fetchDynamicLooks() async {
-    if (mounted) setState(() => _isLoading = true);
     try {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
       final docs = await appwrite.getAllSavedBoards();
@@ -80,8 +77,8 @@ class _Screen4State extends State<Screen4> {
       final Set<String> uniqueCategories = {};
       final List<LookItem> loadedLooks = [];
 
-      for (var doc in docs) {
-        final occasion = doc.data['occasion']?.toString() ?? 'Uncategorized';
+      for (final doc in docs) {
+        final occasion = doc['occasion']?.toString() ?? 'Uncategorized';
         
         // Skip occasions that belong to dedicated boards
         if (_excludedMainCategories.contains(occasion.toLowerCase())) continue;
@@ -94,13 +91,13 @@ class _Screen4State extends State<Screen4> {
         final dynamicBg = LookBgStyle.values[styleIndex];
 
         loadedLooks.add(LookItem(
-          id: doc.$id,
+          id: (doc['\$id'] ?? doc['id'] ?? '').toString(),
           title: occasion.toUpperCase(),
           description: 'Style board generated for $occasion',
           emoji: '✨', 
           category: occasion,
           filter: occasion.toLowerCase(),
-          imageUrl: doc.data['imageUrl'],
+          imageUrl: (doc['imageUrl'] ?? doc['image_url'])?.toString(),
           badge: dynamicBadge,
           bg: dynamicBg,
         ));
@@ -182,23 +179,19 @@ class _Screen4State extends State<Screen4> {
               Expanded(
                 child: Container(
                   color: _bg,
-                  child: _looks.isEmpty
-                      ? (_isLoading ? const _LooksLoadingState() : _EmptyState())
-                      : filtered.isEmpty
-                          ? _NoResultsState()
-                          : _LooksGrid(
-                              looks: filtered,
-                              onDelete: _deleteLook,
-                              onShare: (look) => _showToast('Copied!'),
-                            ),
+                  child: _isLoading 
+                      ? Center(child: CircularProgressIndicator(color: _t.accent.primary))
+                      : _looks.isEmpty
+                          ? _EmptyState()
+                          : filtered.isEmpty
+                              ? _NoResultsState()
+                              : _LooksGrid(
+                                  looks: filtered,
+                                  onDelete: _deleteLook,
+                                  onShare: (look) => _showToast('Copied!'),
+                                ),
                 ),
               ),
-              if (_isLoading)
-                LinearProgressIndicator(
-                  minHeight: 2,
-                  color: _t.accent.primary,
-                  backgroundColor: Colors.transparent,
-                ),
             ],
           ),
           // ── TOAST ──
@@ -289,19 +282,46 @@ class _Header extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // header-top
               Row(
                 children: [
-                  _BackButton(),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Everything else',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: t.textPrimary,
-                      letterSpacing: -0.4,
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: t.panel,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: t.cardBorder),
+                      ),
+                      child: Icon(Icons.chevron_left_rounded, color: t.textPrimary, size: 22),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  RichText(
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: 'Everything ',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 17,
+                            fontWeight: FontWeight.w600,
+                            color: t.textPrimary,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        TextSpan(
+                          text: 'Else',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 17,
+                            fontWeight: FontWeight.w300,
+                            color: t.accent.primary,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -335,32 +355,6 @@ class _Header extends StatelessWidget {
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _BackButton extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final t = context.themeTokens;
-    return GestureDetector(
-      onTap: () => Navigator.maybePop(context),
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: t.panel,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: t.cardBorder, width: 1),
-        ),
-        child: Center(
-          child: Icon(
-            Icons.chevron_left_rounded,
-            size: 20,
-            color: t.textPrimary,
-          ),
-        ),
       ),
     );
   }
@@ -639,18 +633,10 @@ class _LookCardState extends State<_LookCard> {
                   look.imageUrl != null && look.imageUrl!.isNotEmpty
                       ? AspectRatio(
                           aspectRatio: aspectRatio,
-                          child: CachedNetworkImage(
-                            imageUrl: look.imageUrl!,
+                          child: Image.network(
+                            look.imageUrl!,
                             fit: BoxFit.cover,
                             width: double.infinity,
-                            fadeInDuration: Duration.zero,
-                            placeholder: (_, __) => Container(color: _t.panel),
-                            errorWidget: (_, __, ___) => Container(
-                              decoration: BoxDecoration(gradient: _bgGradient(look.bg)),
-                              child: Center(
-                                child: Text(look.emoji, style: const TextStyle(fontSize: 32)),
-                              ),
-                            ),
                           ),
                         )
                       : AspectRatio(
@@ -791,33 +777,6 @@ class _LookCardState extends State<_LookCard> {
 }
 
 // ── Empty / No-results states ────────────────────────────────────────────────
-class _LooksLoadingState extends StatelessWidget {
-  const _LooksLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.themeTokens;
-    return GridView.builder(
-      padding: const EdgeInsets.all(12),
-      physics: const BouncingScrollPhysics(),
-      itemCount: 6,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 0.72,
-      ),
-      itemBuilder: (_, __) => Container(
-        decoration: BoxDecoration(
-          color: t.panel,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: t.cardBorder),
-        ),
-      ),
-    );
-  }
-}
-
 class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {

@@ -1,16 +1,18 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:myapp/bills_page.dart' as bills_page;
 import 'package:myapp/calendar.dart' as calendar_page;
-import 'package:myapp/life_goals.dart' as life_goals_page;
-import 'package:myapp/meal_planner.dart' as meal_planner_page;
+import 'package:myapp/diet_fitness.dart' as diet_fitness_page;
 import 'package:myapp/medi_tracker.dart' as medi_tracker_page;
 import 'package:myapp/services/appwrite_service.dart';
 import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/skincare.dart' as skincare_page;
 import 'package:myapp/theme/theme_tokens.dart';
-import 'package:myapp/workout.dart' as workout_page;
 import 'package:provider/provider.dart';
 
 const _chipsByModule = <String, List<String>>{
@@ -20,13 +22,14 @@ const _chipsByModule = <String, List<String>>{
     'Show trending casual looks',
   ],
   'organize': [
-    'Meals',
-    'Medicines',
-    'Bills',
-    'Workout',
-    'Calendar',
-    'Skincare',
-    'Life Goals',
+    'Today\'s meals',
+    'My medicines',
+    'Pending bills',
+    'Today\'s workout',
+    'Upcoming events',
+    'Today\'s events',
+    'Morning skincare',
+    'My life goals',
   ],
   'plan': [
     'Plan a 3-day Goa trip',
@@ -41,12 +44,14 @@ class _ChatMessage {
   final List<dynamic> chips;
   final String? boardId;
   final String? packId;
+  final _LocalResponse? local;
   _ChatMessage({
     required this.text,
     required this.isMe,
     this.chips = const [],
     this.boardId,
     this.packId,
+    this.local,
   });
 }
 
@@ -97,15 +102,326 @@ class _CardRow {
   const _CardRow(this.done, this.main, this.sub, this.tag);
 }
 
-const _local = <String, _LocalResponse>{};
+const _local = <String, _LocalResponse>{
+  'What should I wear today?': _LocalResponse(
+    type: _RespType.outfits,
+    intro:
+        "Based on today's 14°C partly cloudy weather, here are 3 looks curated for you:",
+    outfits: [
+      _Outfit(
+        'Layered Minimal',
+        ['Casual', 'Today'],
+        'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=220&h=260&fit=crop&crop=top&auto=format',
+      ),
+      _Outfit(
+        'Smart Casual',
+        ['Office', 'Versatile'],
+        'https://images.unsplash.com/photo-1591369822096-ffd140ec948f?w=220&h=260&fit=crop&crop=top&auto=format',
+      ),
+      _Outfit(
+        'Street Edit',
+        ['Urban', 'Fresh'],
+        'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=220&h=260&fit=crop&crop=top&auto=format',
+      ),
+    ],
+  ),
+  'Build a rooftop party outfit': _LocalResponse(
+    type: _RespType.outfits,
+    intro:
+        "Rooftop energy calls for elevated looks. Here's what works perfectly:",
+    outfits: [
+      _Outfit(
+        'Evening Glow',
+        ['Party', 'Night'],
+        'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=220&h=260&fit=crop&crop=top&auto=format',
+      ),
+      _Outfit(
+        'Rooftop Chic',
+        ['Elevated', 'Cool'],
+        'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=220&h=260&fit=crop&crop=top&auto=format',
+      ),
+      _Outfit(
+        'Bold Statement',
+        ['Trendy', 'Standout'],
+        'https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=220&h=260&fit=crop&crop=top&auto=format',
+      ),
+    ],
+  ),
+  'Show trending casual looks': _LocalResponse(
+    type: _RespType.outfits,
+    intro:
+        'Quiet luxury and clean lines are having a moment. Top trending now:',
+    outfits: [
+      _Outfit(
+        'Quiet Luxury',
+        ['Trending', 'Minimal'],
+        'https://images.unsplash.com/photo-1538805060514-97d9cc17730c?w=220&h=260&fit=crop&crop=top&auto=format',
+      ),
+      _Outfit(
+        'Soft Tones',
+        ['Casual', 'Neutral'],
+        'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=220&h=260&fit=crop&crop=top&auto=format',
+      ),
+      _Outfit(
+        'Classic Ease',
+        ['Everyday', 'Fresh'],
+        'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=220&h=260&fit=crop&crop=top&auto=format',
+      ),
+    ],
+  ),
+  'Plan a 3-day Goa trip': _LocalResponse(
+    type: _RespType.checklist,
+    intro: "Here's your expert-curated 3-day Goa itinerary:",
+    plans: [
+      _Plan('Day 1 — Arrival & North Goa', [
+        '☀️ Arrive & check in',
+        '🏖️ Baga Beach',
+        '🍽️ Dinner at Thalassa',
+      ]),
+      _Plan('Day 2 — Culture & South Goa', [
+        '🏛️ Old Goa churches',
+        '🚗 Drive to Palolem',
+        '🌅 Sunset at Cabo de Rama',
+      ]),
+      _Plan('Day 3 — Relax & Depart', [
+        '🧘 Morning yoga',
+        '🛍️ Anjuna flea market',
+        '✈️ Airport by 4pm',
+      ]),
+    ],
+  ),
+  'Pack for business travel': _LocalResponse(
+    type: _RespType.checklist,
+    intro: 'Smart packing list — nothing missing, nothing extra:',
+    plans: [
+      _Plan('👔 Clothing', ['2× formal shirts', '1× blazer', '2× trousers']),
+      _Plan('💼 Work Essentials', [
+        'Laptop + charger',
+        'Notebook + pens',
+        'Portable battery',
+      ]),
+      _Plan('🧴 Toiletries', [
+        'Moisturiser, deodorant',
+        'Toothbrush + paste',
+        'Face wash + razor',
+      ]),
+    ],
+  ),
+  'Create a wedding checklist': _LocalResponse(
+    type: _RespType.checklist,
+    intro: 'Complete wedding checklist — 24 items across 4 categories:',
+    plans: [
+      _Plan('📆 6–12 Months Before', [
+        'Set budget & guest list',
+        'Book venue & caterer',
+        'Book photographer',
+      ]),
+      _Plan('🎨 3–6 Months Before', [
+        'Send invitations',
+        'Finalise menu',
+        'Book hair & makeup',
+      ]),
+      _Plan('✅ Week Of', [
+        'Final dress fitting',
+        'Prepare wedding day kit',
+        'Rest & enjoy 🎉',
+      ]),
+    ],
+  ),
+  'Today\'s meals': _LocalResponse(
+    type: _RespType.card,
+    intro: 'You have 4 meals planned today.',
+    card: _CardData(
+      'Meals',
+      Icons.restaurant_menu_rounded,
+      [
+        _CardRow(
+          true,
+          'Oats with banana & honey',
+          'Breakfast · 380 kcal',
+          'Breakfast',
+        ),
+        _CardRow(true, 'Dal rice with salad', 'Lunch · 620 kcal', 'Lunch'),
+        _CardRow(
+          false,
+          'Grilled paneer with roti',
+          'Dinner · 540 kcal',
+          'Dinner',
+        ),
+      ],
+      'Open Meals',
+      'meal',
+    ),
+  ),
+  'My medicines': _LocalResponse(
+    type: _RespType.card,
+    intro: 'You have 3 medicines tracked.',
+    card: _CardData(
+      'Medicines',
+      Icons.medication_rounded,
+      [
+        _CardRow(true, 'Vitamin D3 — 1 tablet', 'Daily · 08:00', 'Taken'),
+        _CardRow(true, 'Iron Supplement — 1 tablet', 'Daily · 13:00', 'Taken'),
+        _CardRow(false, 'Omega-3 — 2 capsules', 'Daily · 20:00', 'Pending'),
+      ],
+      'Open Medicines',
+      'medi',
+    ),
+  ),
+  'Pending bills': _LocalResponse(
+    type: _RespType.card,
+    intro: 'You have 3 unpaid bills.',
+    card: _CardData(
+      'Bills',
+      Icons.receipt_long_rounded,
+      [
+        _CardRow(false, 'Rent', 'Due: Mar 28 · Rent', '₹12,000'),
+        _CardRow(
+          false,
+          'Netflix + Hotstar',
+          'Due: Apr 03 · Subscription',
+          '₹649',
+        ),
+        _CardRow(false, 'Phone Recharge', 'Due: Apr 05 · Utilities', '₹299'),
+      ],
+      'Open Bills',
+      'bill',
+    ),
+  ),
+  'Today\'s workout': _LocalResponse(
+    type: _RespType.card,
+    intro: 'Today\'s workout has 5 exercises.',
+    card: _CardData(
+      'Workout',
+      Icons.fitness_center_rounded,
+      [
+        _CardRow(true, 'Warm-up cardio', 'Cardio · 1 set · 10 min', 'Cardio'),
+        _CardRow(false, 'Squats', 'Strength · 4 sets · 12 reps', 'Strength'),
+        _CardRow(false, 'Lunges', 'Strength · 3 sets · 15 reps', 'Strength'),
+      ],
+      'Open Workout',
+      'workout',
+    ),
+  ),
+  'Upcoming events': _LocalResponse(
+    type: _RespType.card,
+    intro: 'Here are your upcoming events.',
+    card: _CardData(
+      'Events',
+      Icons.event_note_rounded,
+      [
+        _CardRow(
+          false,
+          'Doctor Appointment',
+          '24 Mar · 11:00 AM · Apollo Clinic',
+          'Health',
+        ),
+        _CardRow(false, 'Dinner with family', '24 Mar · 07:30 PM', 'Personal'),
+        _CardRow(
+          false,
+          'Spanish Class',
+          '28 Mar · 06:00 PM · Online',
+          'Learning',
+        ),
+      ],
+      'Open Calendar',
+      'calendar',
+    ),
+  ),
+  'Today\'s events': _LocalResponse(
+    type: _RespType.card,
+    intro: 'No events scheduled for today.',
+    card: _CardData(
+      'Events',
+      Icons.today_rounded,
+      [
+        _CardRow(
+          false,
+          'Doctor Appointment',
+          '24 Mar · 11:00 AM · Apollo Clinic',
+          'Health',
+        ),
+        _CardRow(false, 'Dinner with family', '24 Mar · 07:30 PM', 'Personal'),
+      ],
+      'Open Calendar',
+      'calendar',
+    ),
+  ),
+  'Morning skincare': _LocalResponse(
+    type: _RespType.card,
+    intro: 'Your morning routine has 4 steps.',
+    card: _CardData(
+      'Skincare',
+      Icons.spa_rounded,
+      [
+        _CardRow(
+          true,
+          'Gentle Cleanser',
+          'CeraVe · Morning · Step 1',
+          'Step 1',
+        ),
+        _CardRow(
+          true,
+          'Vitamin C Serum',
+          'Minimalist · Morning · Step 2',
+          'Step 2',
+        ),
+        _CardRow(
+          true,
+          'SPF 50 Sunscreen',
+          'Biore · Morning · Step 4',
+          'Step 4',
+        ),
+      ],
+      'Open Skincare',
+      'skincare',
+    ),
+  ),
+};
+
+// ── Persistent chat session model ──────────────────────────────────────────
+
+class _ChatSession {
+  final String id;
+  String title;
+  final DateTime createdAt;
+  final List<Map<String, String>> history; // [{role, content}]
+
+  _ChatSession({
+    required this.id,
+    required this.title,
+    required this.createdAt,
+    required this.history,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'createdAt': createdAt.toIso8601String(),
+        'history': history,
+      };
+
+  factory _ChatSession.fromJson(Map<String, dynamic> j) => _ChatSession(
+        id: j['id'] as String,
+        title: j['title'] as String,
+        createdAt: DateTime.parse(j['createdAt'] as String),
+        history: (j['history'] as List)
+            .map((e) => Map<String, String>.from(e as Map))
+            .toList(),
+      );
+}
+
+const _kSessionsKey = 'ahvi_chat_sessions';
 
 class ChatScreen extends StatefulWidget {
   final String moduleContext;
   final String? initialPrompt;
+  final bool showBackButton;
   const ChatScreen({
     super.key,
     this.moduleContext = 'style',
     this.initialPrompt,
+    this.showBackButton = true,
   });
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -113,45 +429,46 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen>
     with SingleTickerProviderStateMixin {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _chatController = TextEditingController();
   final FocusNode _chatFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final List<_ChatMessage> _messages = [];
   final List<Map<String, String>> _chatHistory = [];
-  final List<ProxyDocument> _chatThreads = [];
-  Map<String, dynamic> _chatUserProfile = <String, dynamic>{};
-  List<Map<String, dynamic>> _chatWardrobe = <Map<String, dynamic>>[];
   String _runningMemory = '';
-  String? _chatThreadId;
-  bool _isRestoringHistory = false;
-  bool _isThreadsLoading = false;
   bool _isTyping = false;
   String _userName = 'User';
-  bool _chatHasText = false;
+  String _userId = 'user_1';
   final Map<String, List<List<bool>>> _checklistChecksByTitle = {};
   final Map<String, List<List<String>>> _checklistItemsByTitle = {};
   final Map<String, List<TextEditingController>> _checklistAddCtrlsByTitle = {};
   final Map<String, bool> _checklistSavedByTitle = {};
-  final Set<int> _savedMessageIndexes = <int>{};
+
+  // ── Voice ──────────────────────────────────────────────────────────────────
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _isListening = false;
+  bool _speechAvailable = false;
+
+  // ── History ────────────────────────────────────────────────────────────────
+  List<_ChatSession> _sessions = [];
+  late String _currentSessionId;
   String get _module => widget.moduleContext.toLowerCase().trim() == 'prepare'
       ? 'plan'
       : widget.moduleContext.toLowerCase().trim();
 
-  _ChatMessage _defaultGreeting() => _ChatMessage(
-    text: "Hi! I'm AHVI. How can I help you style or plan your day?",
-    isMe: false,
-  );
-
   @override
   void initState() {
     super.initState();
-    _chatController.addListener(() {
-      final hasText = _chatController.text.trim().isNotEmpty;
-      if (hasText != _chatHasText) setState(() => _chatHasText = hasText);
-    });
+    _currentSessionId = DateTime.now().millisecondsSinceEpoch.toString();
     _fetchUser();
-    _messages.add(_defaultGreeting());
+    _loadSessions();
+    _initSpeech();
+    _messages.add(
+      _ChatMessage(
+        text: "Hi! I'm AHVI. How can I help you style or plan your day?",
+        isMe: false,
+      ),
+    );
     final pendingPrompt = widget.initialPrompt?.trim();
     if (pendingPrompt != null && pendingPrompt.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -163,342 +480,196 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _fetchUser() async {
     final appwrite = Provider.of<AppwriteService>(context, listen: false);
     final user = await appwrite.getCurrentUser();
-    if (user != null) {
-      final firstName = user.name.isNotEmpty
-          ? user.name.split(' ').first
-          : 'Stylist';
-      final profile = await _loadChatProfile(appwrite, user.$id, user.name);
-      final wardrobe = await appwrite.getWardrobeItems();
-      if (!mounted) return;
-      setState(() {
-        _userName = firstName;
-        _chatUserProfile = profile;
-        _chatWardrobe = wardrobe;
-      });
-      await _restoreChatHistory(appwrite);
+    if (user != null && mounted) {
+      setState(
+        () {
+          _userName = user.name.isNotEmpty ? user.name.split(' ').first : 'Stylist';
+          _userId = user.$id;
+        },
+      );
     }
   }
 
-  Future<void> _restoreChatHistory(AppwriteService appwrite) async {
-    if (_isRestoringHistory) return;
-    _isRestoringHistory = true;
+  Future<void> _initSpeech() async {
     try {
-      final threads = await _reloadThreads(appwrite, cacheFirst: true);
-      if (threads.isEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _chatThreadId = null;
-          _chatHistory.clear();
-          _messages
-            ..clear()
-            ..add(_defaultGreeting());
-        });
-        return;
-      }
-      final thread = threads.first;
-      _chatThreadId = thread.$id;
-      await _openThread(thread.$id, appwrite: appwrite);
-    } catch (_) {
-      // Keep current in-memory fallback.
-    } finally {
-      _isRestoringHistory = false;
-    }
-  }
-
-  Future<List<ProxyDocument>> _reloadThreads(
-    AppwriteService appwrite, {
-    bool cacheFirst = false,
-  }) async {
-    if (!mounted) return const <ProxyDocument>[];
-    setState(() => _isThreadsLoading = true);
-    var cachedThreads = const <ProxyDocument>[];
-    try {
-      if (cacheFirst) {
-        cachedThreads = await appwrite.getCachedChatThreads(limit: 100);
-        if (cachedThreads.isNotEmpty && mounted) {
-          setState(() {
-            _chatThreads
-              ..clear()
-              ..addAll(cachedThreads);
-          });
+      _speechAvailable = await _speech.initialize(
+        onStatus: (status) {
+          if (status == 'done' || status == 'notListening') {
+            if (mounted) setState(() => _isListening = false);
+          }
+        },
+        onError: (e) {
+          if (mounted) setState(() => _isListening = false);
+        },
+      );
+    } on PlatformException catch (e) {
+      if (e.code == 'multipleRequests') {
+        await Future.delayed(const Duration(milliseconds: 350));
+        try {
+          _speechAvailable = await _speech.initialize(
+            onStatus: (status) {
+              if (status == 'done' || status == 'notListening') {
+                if (mounted) setState(() => _isListening = false);
+              }
+            },
+            onError: (err) {
+              if (mounted) setState(() => _isListening = false);
+            },
+          );
+        } catch (_) {
+          _speechAvailable = false;
         }
+      } else {
+        _speechAvailable = false;
       }
-
-      final threads = await appwrite.getChatThreads(limit: 100);
-      if (!mounted) return threads.isNotEmpty ? threads : cachedThreads;
-      setState(() {
-        _chatThreads
-          ..clear()
-          ..addAll(threads);
-      });
-      return threads.isNotEmpty ? threads : cachedThreads;
     } catch (_) {
-      return cachedThreads;
-    } finally {
-      if (mounted) setState(() => _isThreadsLoading = false);
+      _speechAvailable = false;
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _toggleListening() async {
+    if (!_speechAvailable) return;
+    if (_isListening) {
+      await _speech.stop();
+      setState(() => _isListening = false);
+    } else {
+      setState(() => _isListening = true);
+      await _speech.listen(
+        onResult: (result) {
+          setState(() {
+            _chatController.text = result.recognizedWords;
+            _chatController.selection = TextSelection.fromPosition(
+              TextPosition(offset: _chatController.text.length),
+            );
+          });
+          if (result.finalResult && result.recognizedWords.trim().isNotEmpty) {
+            _speech.stop();
+            setState(() => _isListening = false);
+          }
+        },
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 4),
+        localeId: 'en_IN',
+        cancelOnError: true,
+        partialResults: true,
+      );
     }
   }
 
-  Map<String, dynamic> _decodeMeta(dynamic metaRaw) {
-    if (metaRaw is Map) return Map<String, dynamic>.from(metaRaw);
-    if (metaRaw is String && metaRaw.trim().isNotEmpty) {
-      try {
-        final decoded = jsonDecode(metaRaw);
-        if (decoded is Map) return Map<String, dynamic>.from(decoded);
-      } catch (_) {}
-    }
-    return const <String, dynamic>{};
+  // ── Session persistence ────────────────────────────────────────────────────
+
+  Future<void> _loadSessions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kSessionsKey);
+    if (raw == null) return;
+    try {
+      final List decoded = jsonDecode(raw) as List;
+      if (mounted) {
+        setState(() {
+          _sessions = decoded
+              .map((e) => _ChatSession.fromJson(e as Map<String, dynamic>))
+              .toList()
+            ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        });
+      }
+    } catch (_) {}
   }
 
-  Future<void> _openThread(
-    String threadId, {
-    AppwriteService? appwrite,
-  }) async {
-    final svc = appwrite ?? Provider.of<AppwriteService>(context, listen: false);
-    final docs = await svc.getChatMessages(threadId: threadId, limit: 1000);
-    docs.sort((a, b) {
-      final ad = DateTime.tryParse(
-            a.raw[r'$createdAt']?.toString() ?? a.data['createdAt']?.toString() ?? '',
-          ) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      final bd = DateTime.tryParse(
-            b.raw[r'$createdAt']?.toString() ?? b.data['createdAt']?.toString() ?? '',
-          ) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      return ad.compareTo(bd);
-    });
+  Future<void> _saveCurrentSession() async {
+    if (_chatHistory.isEmpty) return; // nothing to persist yet
+    final prefs = await SharedPreferences.getInstance();
 
-    final restoredMessages = <_ChatMessage>[];
-    final restoredHistory = <Map<String, String>>[];
-    for (final d in docs) {
-      final role = (d.data['role'] ?? '').toString().trim().toLowerCase();
-      final content = (d.data['content'] ?? '').toString();
-      if (content.trim().isEmpty) continue;
-      final meta = _decodeMeta(d.data['meta']);
-      final chips = meta['chips'] is List
-          ? List<dynamic>.from(meta['chips'] as List)
-          : const <dynamic>[];
-      final isMe = role == 'user';
-      restoredMessages.add(
-        _ChatMessage(
-          text: content,
-          isMe: isMe,
-          chips: chips,
-          boardId: meta['boardId']?.toString(),
-          packId: meta['packId']?.toString(),
+    // Build a readable title from the first user message
+    final firstUser = _chatHistory.firstWhere(
+      (m) => m['role'] == 'user',
+      orElse: () => {'content': 'Chat'},
+    );
+    final title = (firstUser['content'] ?? 'Chat').length > 40
+        ? '${firstUser['content']!.substring(0, 40)}…'
+        : firstUser['content']!;
+
+    final existing = _sessions.indexWhere((s) => s.id == _currentSessionId);
+    if (existing >= 0) {
+      _sessions[existing].history
+        ..clear()
+        ..addAll(_chatHistory);
+      _sessions[existing].title = title;
+    } else {
+      _sessions.insert(
+        0,
+        _ChatSession(
+          id: _currentSessionId,
+          title: title,
+          createdAt: DateTime.now(),
+          history: List.from(_chatHistory),
         ),
       );
-      restoredHistory.add({
-        'role': isMe ? 'user' : 'assistant',
-        'content': content,
-      });
     }
 
-    if (!mounted) return;
+    await prefs.setString(
+      _kSessionsKey,
+      jsonEncode(_sessions.map((s) => s.toJson()).toList()),
+    );
+  }
+
+  Future<void> _deleteSession(String id) async {
+    setState(() => _sessions.removeWhere((s) => s.id == id));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _kSessionsKey,
+      jsonEncode(_sessions.map((s) => s.toJson()).toList()),
+    );
+  }
+
+  void _startNewChat() {
+    Navigator.of(context).pop(); // close drawer
     setState(() {
-      _chatThreadId = threadId;
+      _currentSessionId = DateTime.now().millisecondsSinceEpoch.toString();
       _messages
         ..clear()
-        ..addAll(
-          restoredMessages.isEmpty
-              ? [
-                  _defaultGreeting(),
-                ]
-              : restoredMessages,
-        );
-      _chatHistory
-        ..clear()
-        ..addAll(restoredHistory);
+        ..add(_ChatMessage(
+          text: "Hi! I'm AHVI. How can I help you style or plan your day?",
+          isMe: false,
+        ));
+      _chatHistory.clear();
+      _runningMemory = '';
     });
     _scrollToBottom();
   }
 
-  Future<void> _startNewChat() async {
-    if (!mounted) return;
+  void _loadSession(_ChatSession session) {
+    Navigator.of(context).pop(); // close drawer
     setState(() {
-      _chatThreadId = null;
-      _messages
+      _currentSessionId = session.id;
+      _chatHistory
         ..clear()
-        ..add(_defaultGreeting());
-      _chatHistory.clear();
+        ..addAll(session.history);
+      _messages.clear();
+      // Rebuild _messages from history for display
+      _messages.add(_ChatMessage(
+        text: "Hi! I'm AHVI. How can I help you style or plan your day?",
+        isMe: false,
+      ));
+      for (final h in session.history) {
+        _messages.add(_ChatMessage(
+          text: h['content'] ?? '',
+          isMe: h['role'] == 'user',
+        ));
+      }
+      _runningMemory = '';
     });
-    _chatController.clear();
-    Navigator.of(context).maybePop();
-  }
-
-  Future<void> _deleteThread(String threadId) async {
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    try {
-      final docs = await appwrite.getChatMessages(threadId: threadId, limit: 1000);
-      for (final d in docs) {
-        await appwrite.deleteChatMessage(d.$id);
-      }
-      await appwrite.deleteChatThread(threadId);
-      await _reloadThreads(appwrite);
-
-      if (!mounted) return;
-      if (_chatThreadId == threadId) {
-        setState(() {
-          _chatThreadId = null;
-          _chatHistory.clear();
-          _messages
-            ..clear()
-            ..add(_defaultGreeting());
-        });
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Chat thread deleted')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete thread: $e')),
-      );
-    }
-  }
-
-  Future<void> _persistMessage({
-    required String role,
-    required String content,
-    List<dynamic> chips = const [],
-    String? boardId,
-    String? packId,
-  }) async {
-    final trimmed = content.trim();
-    if (trimmed.isEmpty) return;
-    try {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      if (_chatThreadId == null) {
-        final newThread = await appwrite.createChatThread({
-          'title': 'New Chat',
-          'module': _module,
-          'lastMessage': '',
-        });
-        _chatThreadId = newThread.$id;
-      }
-
-      await appwrite.createChatMessage({
-        'threadId': _chatThreadId,
-        'role': role,
-        'content': trimmed,
-        'meta': jsonEncode({
-          'chips': chips,
-          'boardId': boardId,
-          'packId': packId,
-          'module': _module,
-        }),
-      });
-
-      final title = trimmed.length > 60 ? '${trimmed.substring(0, 60)}...' : trimmed;
-      await appwrite.updateChatThread(_chatThreadId!, {
-        'lastMessage': trimmed,
-        if (role == 'user' && title.isNotEmpty) 'title': title,
-      });
-      await _reloadThreads(appwrite);
-    } catch (e) {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      // If thread was just created but message failed, delete it to avoid empty thread.
-      try {
-        final threadId = _chatThreadId;
-        if (threadId != null) {
-          final docs = await appwrite.getChatMessages(threadId: threadId, limit: 1);
-          if (docs.isEmpty) {
-            await appwrite.deleteChatThread(threadId);
-            _chatThreadId = null;
-            await _reloadThreads(appwrite);
-          }
-        }
-      } catch (_) {}
-      // Non-blocking persistence failure; UI continues.
-      debugPrint('Chat persist failed: $e');
-    }
-  }
-
-  Future<Map<String, dynamic>> _loadChatProfile(
-    AppwriteService appwrite,
-    String userId,
-    String fullName,
-  ) async {
-    final base = <String, dynamic>{
-      'user_id': userId,
-      'name': fullName,
-      'first_name': fullName.trim().isEmpty ? 'User' : fullName.split(' ').first,
-    };
-    try {
-      final doc = await appwrite.getUserProfile();
-      final raw = Map<String, dynamic>.from(doc.data);
-      final merged = <String, dynamic>{...raw, ...base};
-      final gender = (merged['gender'] ??
-              merged['sex'] ??
-              merged['preferredGender'] ??
-              merged['profile_gender'])
-          ?.toString()
-          .trim();
-      if (gender != null && gender.isNotEmpty) {
-        merged['gender'] = gender;
-      }
-
-      final shoppingPrefs =
-          merged['shopping_preferences'] ??
-          merged['shoppingPreferences'] ??
-          merged['style_preferences'] ??
-          merged['stylePreferences'] ??
-          merged['preferred_styles'];
-      if (shoppingPrefs != null) {
-        merged['shopping_preferences'] = shoppingPrefs;
-      }
-
-      final pronouns =
-          merged['pronouns'] ?? merged['preferred_pronouns'] ?? merged['pronoun'];
-      if (pronouns != null && pronouns.toString().trim().isNotEmpty) {
-        merged['pronouns'] = pronouns.toString().trim();
-      }
-
-      final dob = (merged['dob_iso'] ?? merged['dob'] ?? merged['dateOfBirth'])
-          ?.toString()
-          .trim();
-      if (dob != null && dob.isNotEmpty) {
-        merged['dob_iso'] = dob;
-        final age = _ageFromDob(dob);
-        if (age != null) merged['age'] = age;
-      }
-      return merged;
-    } catch (_) {
-      return base;
-    }
-  }
-
-  int? _ageFromDob(String dobIso) {
-    try {
-      final dob = DateTime.parse(dobIso);
-      final now = DateTime.now();
-      var age = now.year - dob.year;
-      final hadBirthday =
-          now.month > dob.month ||
-          (now.month == dob.month && now.day >= dob.day);
-      if (!hadBirthday) age -= 1;
-      return age < 0 ? null : age;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> _refreshChatContext() async {
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    final user = await appwrite.getCurrentUser();
-    if (user == null) return;
-
-    final profile = await _loadChatProfile(appwrite, user.$id, user.name);
-    final wardrobe = await appwrite.getWardrobeItems();
-    if (!mounted) return;
-    setState(() {
-      _chatUserProfile = profile;
-      _chatWardrobe = wardrobe;
-    });
+    _scrollToBottom();
   }
 
   void _handleChipTap(String chip) {
-    _sendMessage(chip);
+    final local = _local[chip];
+    if (local == null) return _sendMessage(chip);
+    setState(() {
+      _messages.add(_ChatMessage(text: chip, isMe: true));
+      _messages.add(_ChatMessage(text: local.intro, isMe: false, local: local));
+    });
+    _scrollToBottom();
   }
 
   void _sendMessage([String? chipText]) async {
@@ -510,65 +681,35 @@ class _ChatScreenState extends State<ChatScreen>
       _chatHistory.add({'role': 'user', 'content': text});
       _isTyping = true;
     });
-    _persistMessage(role: 'user', content: text);
     _scrollToBottom();
     try {
-      await _refreshChatContext();
       final backend = Provider.of<BackendService>(context, listen: false);
-      final historyPayload = List<Map<String, String>>.from(_chatHistory);
-      if (historyPayload.isNotEmpty &&
-          historyPayload.last['role'] == 'user' &&
-          historyPayload.last['content'] == text) {
-        historyPayload.removeLast();
-      }
       final response = await backend.sendChatQuery(
         text,
-        'user_$_userName',
-        historyPayload,
+        _userId,
+        List<Map<String, String>>.from(_chatHistory),
         _runningMemory,
-        userProfile: _chatUserProfile,
-        wardrobeItems: _chatWardrobe,
-        moduleContext: _module,
       );
       if (!mounted) return;
       if (response['updated_memory'] != null) {
         _runningMemory = response['updated_memory'];
       }
-      final msg = response['message'];
-      final aiText = (() {
-        if (msg is String && msg.trim().isNotEmpty) return msg.trim();
-        if (msg is Map && msg['content'] != null) {
-          final content = msg['content'].toString().trim();
-          if (content.isNotEmpty) return content;
-        }
-        if (response['error'] != null) {
-          final error = response['error'].toString().trim();
-          if (error.isNotEmpty) return error;
-        }
-        return "I'm having trouble connecting.";
-      })();
+      final aiText =
+          response['message']?['content']?.toString() ??
+          "I'm having trouble connecting.";
       _chatHistory.add({'role': 'assistant', 'content': aiText});
-      final aiChips = response['chips'] is List
-          ? List<dynamic>.from(response['chips'] as List)
-          : const <dynamic>[];
-      _persistMessage(
-        role: 'assistant',
-        content: aiText,
-        chips: aiChips,
-        boardId: response['board_ids']?.toString(),
-        packId: response['pack_ids']?.toString(),
-      );
       setState(
         () => _messages.add(
           _ChatMessage(
             text: aiText,
             isMe: false,
-            chips: aiChips,
+            chips: response['chips'] ?? [],
             boardId: response['board_ids'],
             packId: response['pack_ids'],
           ),
         ),
       );
+      _saveCurrentSession();
     } catch (e) {
       if (!mounted) return;
       setState(
@@ -592,64 +733,11 @@ class _ChatScreenState extends State<ChatScreen>
     }
   });
 
-  String _normalizeBoardOccasion(String boardLabel) {
-    final v = boardLabel.trim().toLowerCase();
-    switch (v) {
-      case 'party looks':
-      case 'party':
-        return 'Party';
-      case 'office fit':
-      case 'office':
-        return 'Office';
-      case 'vacation':
-        return 'Vacation';
-      default:
-        return 'Occasion';
-    }
-  }
-
-  Future<void> _saveMessageToBoard({
-    required int index,
-    required _ChatMessage message,
-    required String boardLabel,
-  }) async {
-    try {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      final occasion = _normalizeBoardOccasion(boardLabel);
-      final title = message.text.length > 60
-          ? '${message.text.substring(0, 60).trim()}...'
-          : message.text;
-      final payload = <String, dynamic>{
-        'title': title.isEmpty ? 'Style Board' : title,
-        'description': message.text,
-        'occasion': occasion,
-        'imageUrl': '',
-        'board_ids': message.boardId ?? '',
-        'chips': message.chips.map((e) => e.toString()).toList(),
-        'source': 'chat',
-        'created_at': DateTime.now().toIso8601String(),
-      };
-      await appwrite.createSavedBoard(payload);
-      if (!mounted) return;
-      setState(() {
-        _savedMessageIndexes.add(index);
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved to $occasion board')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save board: $e')),
-      );
-    }
-  }
-
   void _openOrganizePage(String pageKey) {
     Widget? page;
     switch (pageKey) {
       case 'meal':
-        page = const meal_planner_page.Screen4();
+        page = const diet_fitness_page.DietAndFitnessScreen();
         break;
       case 'medi':
         page = const medi_tracker_page.MediTrackScreen();
@@ -658,168 +746,22 @@ class _ChatScreenState extends State<ChatScreen>
         page = const bills_page.BillsScreen();
         break;
       case 'workout':
-        page = const workout_page.WorkoutScreen();
+        page = const diet_fitness_page.DietAndFitnessScreen();
         break;
       case 'calendar':
-        page = const calendar_page.CalendarScreen();
+        page = const calendar_page.CalendarShell();
         break;
       case 'skincare':
         page = const skincare_page.SkincareScreen();
-        break;
-      case 'lifegoals':
-        page = const life_goals_page.LifeGoalsScreen();
         break;
     }
     if (page == null) return;
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page!));
   }
 
-  Widget _buildHistoryDrawer(AppThemeTokens t) {
-    return Drawer(
-      backgroundColor: t.backgroundSecondary,
-      child: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-              child: Row(
-                children: [
-                  Text(
-                    'Chat History',
-                    style: TextStyle(
-                      color: t.textPrimary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: _startNewChat,
-                    icon: Icon(Icons.add_rounded, size: 16, color: t.accent.primary),
-                    label: Text(
-                      'New',
-                      style: TextStyle(
-                        color: t.accent.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Divider(color: t.cardBorder, height: 1),
-            Expanded(
-              child: _isThreadsLoading
-                  ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-                  : _chatThreads.isEmpty
-                      ? Center(
-                          child: Text(
-                            'No chats yet.',
-                            style: TextStyle(color: t.mutedText),
-                          ),
-                        )
-                      : ListView.builder(
-                          itemCount: _chatThreads.length,
-                          itemBuilder: (_, i) {
-                            final th = _chatThreads[i];
-                            final id = th.$id;
-                            final selected = id == _chatThreadId;
-                            final title =
-                                (th.data['title'] ?? 'New Chat').toString();
-                            final preview =
-                                (th.data['lastMessage'] ?? '').toString();
-                            return ListTile(
-                              selected: selected,
-                              selectedTileColor:
-                                  t.accent.primary.withValues(alpha: 0.12),
-                              title: Text(
-                                title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: t.textPrimary,
-                                  fontWeight: selected
-                                      ? FontWeight.w700
-                                      : FontWeight.w600,
-                                ),
-                              ),
-                              subtitle: preview.trim().isEmpty
-                                  ? null
-                                  : Text(
-                                      preview,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: t.mutedText,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                              trailing: IconButton(
-                                tooltip: 'Delete thread',
-                                icon: Icon(
-                                  Icons.delete_outline_rounded,
-                                  color: t.mutedText,
-                                ),
-                                onPressed: () async {
-                                  final ok = await showDialog<bool>(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                      backgroundColor: t.backgroundSecondary,
-                                      title: Text(
-                                        'Delete chat?',
-                                        style: TextStyle(color: t.textPrimary),
-                                      ),
-                                      content: Text(
-                                        'This will permanently remove this chat history.',
-                                        style: TextStyle(color: t.mutedText),
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.of(ctx).pop(false),
-                                          child: Text(
-                                            'Cancel',
-                                            style: TextStyle(
-                                              color: t.mutedText,
-                                            ),
-                                          ),
-                                        ),
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.of(ctx).pop(true),
-                                          child: Text(
-                                            'Delete',
-                                            style: TextStyle(
-                                              color: Colors.redAccent,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                  if (ok == true) {
-                                    await _deleteThread(id);
-                                  }
-                                },
-                              ),
-                              onTap: () async {
-                                await _openThread(id);
-                                if (!mounted) return;
-                                Navigator.of(context).maybePop();
-                              },
-                            );
-                          },
-                        ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
+    _speech.stop();
     _chatController.dispose();
     _chatFocusNode.dispose();
     _scrollController.dispose();
@@ -837,58 +779,231 @@ class _ChatScreenState extends State<ChatScreen>
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: t.backgroundPrimary,
+      drawer: _historyDrawer(t),
       appBar: AppBar(
         backgroundColor: t.backgroundPrimary,
         elevation: 0,
         iconTheme: IconThemeData(color: t.textPrimary),
-        title: Text(
-          'AHVI',
-          style: TextStyle(
-            color: t.textPrimary,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 2.0,
-          ),
-        ),
+        automaticallyImplyLeading: false,
+        leading: widget.showBackButton
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                tooltip: 'Back',
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : Padding(
+                padding: const EdgeInsets.only(left: 16),
+                child: Text(
+                  'AHVI',
+                  style: GoogleFonts.anton(
+                    color: t.textPrimary,
+                    fontSize: 36,
+                    fontWeight: FontWeight.w400,
+                    letterSpacing: 3.2,
+                    height: 1.0,
+                  ),
+                ),
+              ),
+        leadingWidth: widget.showBackButton ? 56 : 100,
+        title: widget.showBackButton
+            ? Text(
+                'AHVI',
+                style: GoogleFonts.anton(
+                  color: t.textPrimary,
+                  fontSize: 36,
+                  fontWeight: FontWeight.w400,
+                  letterSpacing: 3.2,
+                  height: 1.0,
+                ),
+              )
+            : null,
         centerTitle: true,
         actions: [
           IconButton(
-            tooltip: 'History',
-            onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
-            icon: Icon(Icons.history_rounded, color: t.textPrimary),
+            icon: const Icon(Icons.history_rounded),
+            tooltip: 'Chat History',
+            onPressed: () => _scaffoldKey.currentState?.openDrawer(),
           ),
         ],
       ),
-      endDrawer: _buildHistoryDrawer(t),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
+      resizeToAvoidBottomInset: true,
+      body: Column(
+        children: [
+          Expanded(
+            child: SafeArea(
+              bottom: false,
               child: ListView.builder(
                 controller: _scrollController,
                 padding: const EdgeInsets.all(16),
                 itemCount: _messages.length,
-                itemBuilder: (_, i) => _msg(_messages[i], t, i),
+                itemBuilder: (_, i) => _msg(_messages[i], t),
               ),
             ),
-            if (_isTyping)
-              Padding(
-                padding: const EdgeInsets.only(left: 20, bottom: 10),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'AHVI is typing...',
-                    style: TextStyle(color: t.mutedText, fontSize: 12),
-                  ),
+          ),
+          if (_isTyping)
+            Padding(
+              padding: const EdgeInsets.only(left: 20, bottom: 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'AHVI is typing...',
+                  style: TextStyle(color: t.mutedText, fontSize: 12),
                 ),
               ),
-            _input(t),
+            ),
+          _input(t),
+          SizedBox(
+            height: MediaQuery.of(context).viewPadding.bottom +
+                (widget.showBackButton ? 0 : 80),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _historyDrawer(AppThemeTokens t) {
+    return Drawer(
+      backgroundColor: t.backgroundSecondary,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 16, 4),
+              child: Row(
+                children: [
+                  Text(
+                    'Chats',
+                    style: TextStyle(
+                      color: t.textPrimary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: _startNewChat,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [t.accent.primary, t.accent.secondary],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.add, color: Colors.white, size: 14),
+                          const SizedBox(width: 4),
+                          const Text(
+                            'New',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Divider(color: t.cardBorder, height: 1),
+            // Session list
+            Expanded(
+              child: _sessions.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No past chats yet.\nStart a conversation!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: t.mutedText, fontSize: 13),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: _sessions.length,
+                      itemBuilder: (ctx, i) {
+                        final s = _sessions[i];
+                        final isActive = s.id == _currentSessionId;
+                        final date = _formatDate(s.createdAt);
+                        return Dismissible(
+                          key: ValueKey(s.id),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.only(right: 20),
+                            color: Colors.red.withValues(alpha: 0.15),
+                            child: const Icon(Icons.delete_outline,
+                                color: Colors.redAccent),
+                          ),
+                          onDismissed: (_) => _deleteSession(s.id),
+                          child: ListTile(
+                            selected: isActive,
+                            selectedTileColor:
+                                t.accent.primary.withValues(alpha: 0.1),
+                            onTap: () => _loadSession(s),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 2),
+                            leading: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: isActive
+                                    ? t.accent.primary.withValues(alpha: 0.2)
+                                    : t.panel,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: t.cardBorder),
+                              ),
+                              child: Icon(
+                                Icons.chat_bubble_outline_rounded,
+                                size: 16,
+                                color: isActive ? t.accent.primary : t.mutedText,
+                              ),
+                            ),
+                            title: Text(
+                              s.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: t.textPrimary,
+                                fontSize: 13,
+                                fontWeight: isActive
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                            subtitle: Text(
+                              date,
+                              style:
+                                  TextStyle(color: t.mutedText, fontSize: 11),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _msg(_ChatMessage m, AppThemeTokens t, int index) => Column(
+  String _formatDate(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inDays == 0) return 'Today';
+    if (diff.inDays == 1) return 'Yesterday';
+    if (diff.inDays < 7) return '${diff.inDays} days ago';
+    return '${dt.day}/${dt.month}/${dt.year}';
+  }
+
+  Widget _msg(_ChatMessage m, AppThemeTokens t) => Column(
     crossAxisAlignment: m.isMe
         ? CrossAxisAlignment.end
         : CrossAxisAlignment.start,
@@ -921,88 +1036,7 @@ class _ChatScreenState extends State<ChatScreen>
           ),
         ),
       ),
-      if (!m.isMe && _module == 'style')
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 14),
-          child: GestureDetector(
-            onTap: _savedMessageIndexes.contains(index)
-                ? null
-                : () {
-                    showModalBottomSheet(
-                      context: context,
-                      backgroundColor: t.backgroundSecondary,
-                      shape: const RoundedRectangleBorder(
-                        borderRadius: BorderRadius.vertical(
-                          top: Radius.circular(20),
-                        ),
-                      ),
-                      builder: (_) => SafeArea(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox(height: 12),
-                            Text(
-                              'Save to a Style Board',
-                              style: TextStyle(
-                                color: t.textPrimary,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            ...[
-                              'Party Looks',
-                              'Occasion',
-                              'Office Fit',
-                              'Vacation',
-                            ].map(
-                              (b) => ListTile(
-                                title: Text(
-                                  b,
-                                  style: TextStyle(color: t.textPrimary),
-                                ),
-                                trailing: Icon(
-                                  Icons.chevron_right_rounded,
-                                  color: t.mutedText,
-                                ),
-                                onTap: () {
-                                  Navigator.pop(context);
-                                  _saveMessageToBoard(
-                                    index: index,
-                                    message: m,
-                                    boardLabel: b,
-                                  );
-                                },
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: _savedMessageIndexes.contains(index)
-                    ? t.accent.tertiary.withValues(alpha: 0.2)
-                    : t.panel,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: t.cardBorder),
-              ),
-              child: Text(
-                _savedMessageIndexes.contains(index)
-                    ? 'Saved to Board'
-                    : 'Save to Board',
-                style: TextStyle(
-                  color: t.textPrimary,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-        ),
+      if (!m.isMe && m.local != null) _localView(m.local!, t),
       if (!m.isMe && m.chips.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(bottom: 16, left: 4),
@@ -1049,6 +1083,8 @@ class _ChatScreenState extends State<ChatScreen>
                       o.image,
                       fit: BoxFit.cover,
                       width: double.infinity,
+                      cacheWidth: 260,
+                      cacheHeight: 288,
                       errorBuilder: (context, error, stackTrace) => Container(
                         color: t.accent.primary.withValues(alpha: 0.1),
                       ),
@@ -1304,7 +1340,7 @@ class _ChatScreenState extends State<ChatScreen>
       (
         name: 'Documents',
         emoji: '📄',
-        color: Color(0xFF04D7C8),
+        color: Color(0xFF04D7C8), // teal - keep as semantic category color
         items: [
           'Passport / ID',
           'Boarding pass',
@@ -1392,359 +1428,374 @@ class _ChatScreenState extends State<ChatScreen>
       }
     }
 
-    final totalItems = itemsState.fold<int>(
-      0,
-      (sum, items) => sum + items.length,
-    );
-    final totalChecked = checksState.fold<int>(
-      0,
-      (sum, items) => sum + items.where((v) => v).length,
-    );
-    final progress = totalItems == 0 ? 0.0 : totalChecked / totalItems;
+    return StatefulBuilder(
+      builder: (context, checklistSetState) {
+        final totalItems = itemsState.fold<int>(
+          0,
+          (sum, items) => sum + items.length,
+        );
+        final totalChecked = checksState.fold<int>(
+          0,
+          (sum, items) => sum + items.where((v) => v).length,
+        );
+        final progress = totalItems == 0 ? 0.0 : totalChecked / totalItems;
 
-    return Container(
-      margin: const EdgeInsets.only(left: 4, right: 28, bottom: 16),
-      decoration: BoxDecoration(
-        color: t.backgroundSecondary,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: t.cardBorder),
-      ),
-      clipBehavior: Clip.hardEdge,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            color: t.phoneShell,
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  r.intro,
-                  style: TextStyle(
-                    color: t.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$totalChecked of $totalItems items',
-                  style: TextStyle(
-                    color: t.mutedText,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Container(
-                  width: double.infinity,
-                  height: 7,
-                  decoration: BoxDecoration(
-                    color: t.cardBorder.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(99),
-                    child: AnimatedFractionallySizedBox(
-                      duration: const Duration(milliseconds: 300),
-                      widthFactor: progress,
-                      alignment: Alignment.centerLeft,
-                      child: Container(color: t.accent.tertiary),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+        return Container(
+          margin: const EdgeInsets.only(left: 4, right: 28, bottom: 16),
+          decoration: BoxDecoration(
+            color: t.backgroundSecondary,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: t.cardBorder),
           ),
-          ...List.generate(sections.length, (sIdx) {
-            final s = sections[sIdx];
-            return Container(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-              decoration: BoxDecoration(
-                color: t.card,
-                border: Border(
-                  top: BorderSide(color: t.cardBorder.withValues(alpha: 0.7)),
+          clipBehavior: Clip.hardEdge,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                color: t.phoneShell,
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      r.intro,
+                      style: TextStyle(
+                        color: t.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '$totalChecked of $totalItems items',
+                      style: TextStyle(
+                        color: t.mutedText,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: t.cardBorder.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(99),
+                        child: AnimatedFractionallySizedBox(
+                          duration: const Duration(milliseconds: 300),
+                          widthFactor: progress,
+                          alignment: Alignment.centerLeft,
+                          child: Container(color: t.accent.tertiary),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(s.emoji),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          s.name,
-                          style: TextStyle(
-                            color: t.textPrimary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
+              ...List.generate(sections.length, (sIdx) {
+                final s = sections[sIdx];
+                return Container(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+                  decoration: BoxDecoration(
+                    color: t.card,
+                    border: Border(
+                      top: BorderSide(
+                        color: t.cardBorder.withValues(alpha: 0.7),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: 64,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: sectionImages[sIdx].length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 8),
-                      itemBuilder: (_, imgIdx) {
-                        final img = sectionImages[sIdx][imgIdx];
-                        return Container(
-                          width: 88,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: t.cardBorder.withValues(alpha: 0.85),
-                            ),
-                          ),
-                          clipBehavior: Clip.hardEdge,
-                          child: Image.network(
-                            img,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              color: t.panel.withValues(alpha: 0.75),
-                              alignment: Alignment.center,
-                              child: Icon(
-                                Icons.image_outlined,
-                                size: 16,
-                                color: t.mutedText,
-                              ),
-                            ),
-                          ),
-                        );
-                      },
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  ...List.generate(itemsState[sIdx].length, (i) {
-                    final done = checksState[sIdx][i];
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: t.panel.withValues(alpha: 0.75),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: t.cardBorder.withValues(alpha: 0.8),
-                        ),
-                      ),
-                      child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
                         children: [
-                          GestureDetector(
-                            onTap: () =>
-                                setState(() => checksState[sIdx][i] = !done),
-                            child: Icon(
-                              done
-                                  ? Icons.check_box_rounded
-                                  : Icons.check_box_outline_blank_rounded,
-                              size: 18,
-                              color: done ? s.color : t.mutedText,
-                            ),
-                          ),
+                          Text(s.emoji),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              itemsState[sIdx][i],
+                              s.name,
                               style: TextStyle(
-                                color: done ? t.mutedText : t.textPrimary,
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
-                                decoration: done
-                                    ? TextDecoration.lineThrough
-                                    : TextDecoration.none,
-                              ),
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                itemsState[sIdx].removeAt(i);
-                                checksState[sIdx].removeAt(i);
-                              });
-                            },
-                            child: Text(
-                              '×',
-                              style: TextStyle(
-                                color: t.mutedText,
-                                fontSize: 16,
+                                color: t.textPrimary,
+                                fontSize: 13,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
                           ),
                         ],
                       ),
-                    );
-                  }),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: t.phoneShellInner.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: addCtrls[sIdx],
-                            style: TextStyle(
-                              color: t.textPrimary,
-                              fontSize: 12,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: '+ Add item…',
-                              hintStyle: TextStyle(
-                                color: t.mutedText,
-                                fontSize: 12,
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 64,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: sectionImages[sIdx].length,
+                          itemExtent: 88,
+                          itemBuilder: (_, imgIdx) {
+                            final img = sectionImages[sIdx][imgIdx];
+                            return Padding(
+                              padding: EdgeInsets.only(
+                                right: imgIdx == sectionImages[sIdx].length - 1
+                                    ? 0
+                                    : 8,
                               ),
-                              border: InputBorder.none,
-                              isDense: true,
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                            onSubmitted: (_) {
-                              final v = addCtrls[sIdx].text.trim();
-                              if (v.isEmpty) return;
-                              setState(() {
-                                itemsState[sIdx].add(v);
-                                checksState[sIdx].add(false);
-                                addCtrls[sIdx].clear();
-                              });
-                            },
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () {
-                            final v = addCtrls[sIdx].text.trim();
-                            if (v.isEmpty) return;
-                            setState(() {
-                              itemsState[sIdx].add(v);
-                              checksState[sIdx].add(false);
-                              addCtrls[sIdx].clear();
-                            });
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: t.cardBorder.withValues(alpha: 0.85),
+                                  ),
+                                ),
+                                clipBehavior: Clip.hardEdge,
+                                child: Image.network(
+                                  img,
+                                  fit: BoxFit.cover,
+                                  cacheWidth: 264,
+                                  cacheHeight: 192,
+                                  errorBuilder: (_, _, _) => Container(
+                                    color: t.panel.withValues(alpha: 0.75),
+                                    alignment: Alignment.center,
+                                    child: Icon(
+                                      Icons.image_outlined,
+                                      size: 16,
+                                      color: t.mutedText,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
                           },
-                          child: Container(
-                            width: 26,
-                            height: 26,
-                            decoration: BoxDecoration(
-                              color: s.color,
-                              borderRadius: BorderRadius.circular(7),
-                            ),
-                            alignment: Alignment.center,
-                            child: const Text(
-                              '+',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF10131B),
-                                height: 1,
-                              ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ...List.generate(itemsState[sIdx].length, (i) {
+                        final done = checksState[sIdx][i];
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: t.panel.withValues(alpha: 0.75),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: t.cardBorder.withValues(alpha: 0.8),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-            child: GestureDetector(
-              onTap: isSaved
-                  ? null
-                  : () {
-                      showModalBottomSheet(
-                        context: context,
-                        backgroundColor: t.backgroundSecondary,
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.vertical(
-                            top: Radius.circular(20),
-                          ),
-                        ),
-                        builder: (_) => SafeArea(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
+                          child: Row(
                             children: [
-                              const SizedBox(height: 12),
-                              Text(
-                                'Save to a Style Board',
-                                style: TextStyle(
-                                  color: t.textPrimary,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
+                              GestureDetector(
+                                onTap: () => checklistSetState(
+                                  () => checksState[sIdx][i] = !done,
+                                ),
+                                child: Icon(
+                                  done
+                                      ? Icons.check_box_rounded
+                                      : Icons.check_box_outline_blank_rounded,
+                                  size: 18,
+                                  color: done ? s.color : t.mutedText,
                                 ),
                               ),
-                              const SizedBox(height: 12),
-                              ...[
-                                'Party Looks',
-                                'Occasion',
-                                'Office Fit',
-                                'Vacation',
-                              ].map(
-                                (b) => ListTile(
-                                  title: Text(
-                                    b,
-                                    style: TextStyle(color: t.textPrimary),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  itemsState[sIdx][i],
+                                  style: TextStyle(
+                                    color: done ? t.mutedText : t.textPrimary,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                    decoration: done
+                                        ? TextDecoration.lineThrough
+                                        : TextDecoration.none,
                                   ),
-                                  trailing: Icon(
-                                    Icons.chevron_right_rounded,
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () {
+                                  checklistSetState(() {
+                                    itemsState[sIdx].removeAt(i);
+                                    checksState[sIdx].removeAt(i);
+                                  });
+                                },
+                                child: Text(
+                                  '×',
+                                  style: TextStyle(
                                     color: t.mutedText,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
                                   ),
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    setState(
-                                      () =>
-                                          _checklistSavedByTitle[title] = true,
-                                    );
-                                  },
                                 ),
                               ),
-                              const SizedBox(height: 12),
                             ],
                           ),
+                        );
+                      }),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
                         ),
-                      );
-                    },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  gradient: isSaved
-                      ? LinearGradient(
-                          colors: [t.accent.tertiary, t.accent.tertiary],
-                        )
-                      : LinearGradient(
-                          colors: [t.accent.tertiary, t.accent.primary],
+                        decoration: BoxDecoration(
+                          color: t.phoneShellInner.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  isSaved ? 'List Saved!' : 'Save to Style Board',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: addCtrls[sIdx],
+                                style: TextStyle(
+                                  color: t.textPrimary,
+                                  fontSize: 12,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText: '+ Add item…',
+                                  hintStyle: TextStyle(
+                                    color: t.mutedText,
+                                    fontSize: 12,
+                                  ),
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                                onSubmitted: (_) {
+                                  final v = addCtrls[sIdx].text.trim();
+                                  if (v.isEmpty) return;
+                                  checklistSetState(() {
+                                    itemsState[sIdx].add(v);
+                                    checksState[sIdx].add(false);
+                                    addCtrls[sIdx].clear();
+                                  });
+                                },
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () {
+                                final v = addCtrls[sIdx].text.trim();
+                                if (v.isEmpty) return;
+                                checklistSetState(() {
+                                  itemsState[sIdx].add(v);
+                                  checksState[sIdx].add(false);
+                                  addCtrls[sIdx].clear();
+                                });
+                              },
+                              child: Container(
+                                width: 26,
+                                height: 26,
+                                decoration: BoxDecoration(
+                                  color: s.color,
+                                  borderRadius: BorderRadius.circular(7),
+                                ),
+                                alignment: Alignment.center,
+                                child: const Text(
+                                  '+',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.black,
+                                    height: 1,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                child: GestureDetector(
+                  onTap: isSaved
+                      ? null
+                      : () {
+                          showModalBottomSheet(
+                            context: context,
+                            backgroundColor: t.backgroundSecondary,
+                            shape: const RoundedRectangleBorder(
+                              borderRadius: BorderRadius.vertical(
+                                top: Radius.circular(20),
+                              ),
+                            ),
+                            builder: (_) => SafeArea(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'Save to a Style Board',
+                                    style: TextStyle(
+                                      color: t.textPrimary,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  ...[
+                                    'Party Looks',
+                                    'Occasion',
+                                    'Office Fit',
+                                    'Vacation',
+                                  ].map(
+                                    (b) => ListTile(
+                                      title: Text(
+                                        b,
+                                        style: TextStyle(color: t.textPrimary),
+                                      ),
+                                      trailing: Icon(
+                                        Icons.chevron_right_rounded,
+                                        color: t.mutedText,
+                                      ),
+                                      onTap: () {
+                                        Navigator.pop(context);
+                                        checklistSetState(
+                                          () => _checklistSavedByTitle[title] =
+                                              true,
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      gradient: isSaved
+                          ? LinearGradient(
+                              colors: [t.accent.tertiary, t.accent.tertiary],
+                            )
+                          : LinearGradient(
+                              colors: [t.accent.tertiary, t.accent.primary],
+                            ),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      isSaved ? 'List Saved!' : 'Save to Style Board',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1804,6 +1855,27 @@ class _ChatScreenState extends State<ChatScreen>
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
             child: Row(
               children: [
+                GestureDetector(
+                  onTap: () {
+                    showModalBottomSheet<void>(
+                      context: context,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) => _LensActionSheet(t: t),
+                    );
+                  },
+                  child: SizedBox(
+                    width: 26,
+                    height: 26,
+                    child: Center(
+                      child: Icon(
+                        Icons.search_rounded,
+                        color: t.accent.primary,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: _chatController,
@@ -1824,28 +1896,77 @@ class _ChatScreenState extends State<ChatScreen>
                   ),
                 ),
                 const SizedBox(width: 6),
+                // ── Voice Button ──────────────────────────────────────────
                 GestureDetector(
-                  onTap: () => _sendMessage(),
+                  onTap: _toggleListening,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
                     width: 38,
                     height: 38,
                     decoration: BoxDecoration(
-                      gradient: _chatHasText
-                          ? grad
+                      gradient: _isListening
+                          ? LinearGradient(
+                              colors: [
+                                Colors.redAccent,
+                                Colors.red.shade700,
+                              ],
+                            )
                           : LinearGradient(
                               colors: [
-                                t.accent.primary.withValues(alpha: 0.35),
-                                t.accent.secondary.withValues(alpha: 0.35),
+                                t.accent.primary.withValues(alpha: 0.18),
+                                t.accent.secondary.withValues(alpha: 0.18),
                               ],
                             ),
                       borderRadius: BorderRadius.circular(13),
+                      boxShadow: _isListening
+                          ? [
+                              BoxShadow(
+                                color: Colors.redAccent.withValues(alpha: 0.45),
+                                blurRadius: 16,
+                                offset: const Offset(0, 4),
+                              ),
+                            ]
+                          : [],
                     ),
-                    child: Icon(
-                      Icons.arrow_forward_rounded,
-                      color: Theme.of(context).colorScheme.onPrimary,
-                      size: 16,
-                    ),
+                    child: _isListening
+                        ? const _PulsingMicIcon()
+                        : Icon(
+                            Icons.mic_none_rounded,
+                            color: t.accent.primary,
+                            size: 18,
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: () => _sendMessage(),
+                  child: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _chatController,
+                    builder: (context, value, _) {
+                      final hasText = value.text.trim().isNotEmpty;
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          gradient: hasText
+                              ? grad
+                              : LinearGradient(
+                                  colors: [
+                                    t.accent.primary.withValues(alpha: 0.35),
+                                    t.accent.secondary.withValues(alpha: 0.35),
+                                  ],
+                                ),
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                        child: Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Theme.of(context).colorScheme.onPrimary,
+                          size: 16,
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],
@@ -1858,4 +1979,344 @@ class _ChatScreenState extends State<ChatScreen>
   }
 }
 
+class _LensActionSheet extends StatelessWidget {
+  final AppThemeTokens t;
+  const _LensActionSheet({required this.t});
 
+  @override
+  Widget build(BuildContext context) {
+      final t = context.themeTokens;
+    final accent = t.accent.primary;
+    final accentSecondary = t.accent.secondary;
+    final textHeading = t.textPrimary;
+    final textMuted = t.mutedText;
+    final panel = t.panel;
+    final surface = t.phoneShellInner;
+    final bgSecondary = t.backgroundSecondary;
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [surface, bgSecondary],
+        ),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border.all(color: accent.withValues(alpha: 0.15), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: 0.15),
+            blurRadius: 48,
+            offset: const Offset(0, -12),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // drag handle
+          Container(
+            width: 40,
+            height: 4,
+            margin: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.30),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          // header
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(
+                          color: accent.withValues(alpha: 0.25),
+                          width: 1,
+                        ),
+                      ),
+                      child: Icon(Icons.search, color: accent, size: 17),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'AHVI Lens',
+                      style: TextStyle(
+                        color: textHeading,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: accent.withValues(alpha: 0.08),
+                      border: Border.all(
+                        color: accent.withValues(alpha: 0.20),
+                        width: 1,
+                      ),
+                    ),
+                    child: Icon(Icons.close, color: textMuted, size: 14),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // info card
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: panel,
+              border: Border.all(color: accent.withValues(alpha: 0.15), width: 1),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: accent.withValues(alpha: 0.5),
+                      width: 2,
+                    ),
+                    color: accent.withValues(alpha: 0.08),
+                  ),
+                  child: Icon(Icons.circle, color: accent, size: 12),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Visual AI Search',
+                        style: TextStyle(
+                          color: textHeading,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Point at any item to find, save, or get styling advice.',
+                        style: TextStyle(
+                          color: textMuted,
+                          fontSize: 11.5,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // options
+          _LensOptionTile(
+            icon: Icons.search,
+            name: 'Find Similar',
+            desc: 'Discover similar items with shopping links',
+            color: accent,
+            textHeading: textHeading,
+            textMuted: textMuted,
+            panel: panel,
+            accentBorder: accent,
+            onTap: () => Navigator.pop(context),
+          ),
+          _LensOptionTile(
+            icon: Icons.add_photo_alternate_outlined,
+            name: 'Add to Wardrobe',
+            desc: 'Save to your collection',
+            color: accentSecondary,
+            textHeading: textHeading,
+            textMuted: textMuted,
+            panel: panel,
+            accentBorder: accent,
+            onTap: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LensOptionTile extends StatefulWidget {
+  final IconData icon;
+  final String name;
+  final String desc;
+  final Color color;
+  final Color textHeading;
+  final Color textMuted;
+  final Color panel;
+  final Color accentBorder;
+  final VoidCallback onTap;
+
+  const _LensOptionTile({
+    required this.icon,
+    required this.name,
+    required this.desc,
+    required this.color,
+    required this.textHeading,
+    required this.textMuted,
+    required this.panel,
+    required this.accentBorder,
+    required this.onTap,
+  });
+
+  @override
+  State<_LensOptionTile> createState() => _LensOptionTileState();
+}
+
+class _LensOptionTileState extends State<_LensOptionTile> {
+  bool _hovered = false;
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+      final t = context.themeTokens;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() { _hovered = false; _pressed = false; }),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTapCancel: () => setState(() => _pressed = false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.98 : 1.0,
+          duration: const Duration(milliseconds: 120),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? widget.color.withValues(alpha: 0.08)
+                  : widget.panel,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _hovered
+                    ? widget.color.withValues(alpha: 0.30)
+                    : widget.accentBorder.withValues(alpha: 0.12),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: widget.color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: widget.color.withValues(alpha: 0.25),
+                      width: 1,
+                    ),
+                  ),
+                  child: Icon(widget.icon, color: widget.color, size: 18),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.name,
+                        style: TextStyle(
+                          color: widget.textHeading,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        widget.desc,
+                        style: TextStyle(
+                          color: widget.textMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  transform: Matrix4.translationValues(
+                    _hovered ? 3.0 : 0.0, 0, 0,
+                  ),
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    color: _hovered ? widget.color : widget.textMuted,
+                    size: 20,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Pulsing mic animation when listening ────────────────────────────────────
+class _PulsingMicIcon extends StatefulWidget {
+  const _PulsingMicIcon();
+
+  @override
+  State<_PulsingMicIcon> createState() => _PulsingMicIconState();
+}
+
+class _PulsingMicIconState extends State<_PulsingMicIcon>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..repeat(reverse: true);
+    _scale = Tween<double>(begin: 0.85, end: 1.15).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+      final t = context.themeTokens;
+    return ScaleTransition(
+      scale: _scale,
+      child: const Icon(
+        Icons.mic_rounded,
+        color: Colors.white,
+        size: 18,
+      ),
+    );
+  }
+}

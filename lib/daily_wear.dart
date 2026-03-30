@@ -5,8 +5,11 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
-import 'package:myapp/services/backend_service.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:myapp/theme/theme_tokens.dart';
+import 'package:myapp/widgets/ahvi_chat_prompt_bar.dart';
+import 'package:myapp/widgets/ahvi_lens_sheet.dart';
 
 enum _TryOnStage { preview, loading, camera, captured }
 
@@ -17,7 +20,8 @@ class DailyWearScreen extends StatefulWidget {
   State<DailyWearScreen> createState() => _DailyWearScreenState();
 }
 
-class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderStateMixin {
+class _DailyWearScreenState extends State<DailyWearScreen>
+    with TickerProviderStateMixin {
   AppThemeTokens get _t => context.themeTokens;
   Color get _bg => _t.backgroundPrimary;
   Color get _bg2 => _t.backgroundSecondary;
@@ -68,7 +72,7 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
   bool _isTyping = false;
   bool _quickPromptsVisible = true;
   Timer? _chatGreetingTimer;
-  
+
   int? _speakingMessageId;
 
   String _liveDay = 'THU';
@@ -99,7 +103,7 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
       ],
       'tags': ['Breezy', 'Linen', 'Relaxed Fit', 'Warm Weather'],
       'img':
-      'https://i.pinimg.com/736x/dc/f4/05/dcf405a9b3fa1734bf1a68c689295012.jpg',
+          'https://i.pinimg.com/736x/dc/f4/05/dcf405a9b3fa1734bf1a68c689295012.jpg',
     },
     {
       'id': 'o1',
@@ -116,7 +120,7 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
       ],
       'tags': ['Cosy', 'Casual', 'Everyday', 'Comfortable'],
       'img':
-      'https://i.pinimg.com/736x/a3/f2/18/a3f218d89461024773e4b0c0a0b52de2.jpg',
+          'https://i.pinimg.com/736x/a3/f2/18/a3f218d89461024773e4b0c0a0b52de2.jpg',
     },
     {
       'id': 'o2',
@@ -133,7 +137,7 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
       ],
       'tags': ['Smart', 'Formal', 'Polished', 'Work-ready'],
       'img':
-      'https://i.pinimg.com/736x/e0/c1/9d/e0c19d4fc4c0afe55a832318c50c5b8a.jpg',
+          'https://i.pinimg.com/736x/e0/c1/9d/e0c19d4fc4c0afe55a832318c50c5b8a.jpg',
     },
     {
       'id': 'o3',
@@ -150,7 +154,7 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
       ],
       'tags': ['Earth Tones', 'Trendy', 'Textured', 'Date Night'],
       'img':
-      'https://i.pinimg.com/474x/33/f8/a6/33f8a65105a50fbc1948e176221182d0.jpg',
+          'https://i.pinimg.com/474x/33/f8/a6/33f8a65105a50fbc1948e176221182d0.jpg',
     },
   ];
   late List<Map<String, dynamic>> _displayedOutfits;
@@ -160,7 +164,7 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
   bool _frontCamera = true;
   int _selectedSwatchIndex = 0;
   int _visibleArTags = 0;
-  
+
   Timer? _tryOnStageTimer;
   final List<Timer> _arTagTimers = [];
   String _tryOnLoadingMessage = 'Requesting camera…';
@@ -200,7 +204,6 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
   Timer? _toastTimer;
 
   final FocusNode _chatFocusNode = FocusNode();
-  bool _chatInputFocused = false;
   bool _micActive = false;
   Timer? _clockAlignTimer;
 
@@ -219,15 +222,15 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     final gradients = [
       [
         accentColor.withValues(alpha: 0.14),
-        accentColor.withValues(alpha: 0.06)
+        accentColor.withValues(alpha: 0.06),
       ],
       [
         accent3Color.withValues(alpha: 0.12),
-        accent3Color.withValues(alpha: 0.05)
+        accent3Color.withValues(alpha: 0.05),
       ],
       [
         accent2Color.withValues(alpha: 0.13),
-        accent2Color.withValues(alpha: 0.06)
+        accent2Color.withValues(alpha: 0.06),
       ],
     ];
     return List.generate(options.length, (index) {
@@ -243,18 +246,17 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     });
   }
 
-  Map<String, dynamic> get _currentOutfit =>
-      _displayedOutfits[_carouselIndex];
+  Map<String, dynamic> get _currentOutfit => _displayedOutfits[_carouselIndex];
 
   @override
   void initState() {
     super.initState();
     _displayedOutfits = List<Map<String, dynamic>>.from(_allOutfits);
     _savedCarouselById = {
-      for (final outfit in _allOutfits) outfit['id'] as String: false
+      for (final outfit in _allOutfits) outfit['id'] as String: false,
     };
     _savedOptionById = {
-      for (final outfit in _allOutfits) outfit['id'] as String: false
+      for (final outfit in _allOutfits) outfit['id'] as String: false,
     };
     _tryOnOutfitId = _displayedOutfits.first['id'] as String;
 
@@ -280,84 +282,123 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     });
 
     _optCard0Ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 500));
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
     _optCard1Ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 500));
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
     _optCard2Ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 500));
-    _optCard0Slide =
-        Tween<Offset>(begin: const Offset(0, 0.35), end: Offset.zero).animate(
-            CurvedAnimation(parent: _optCard0Ctrl, curve: Curves.easeOut));
-    _optCard1Slide =
-        Tween<Offset>(begin: const Offset(0, 0.35), end: Offset.zero).animate(
-            CurvedAnimation(parent: _optCard1Ctrl, curve: Curves.easeOut));
-    _optCard2Slide =
-        Tween<Offset>(begin: const Offset(0, 0.35), end: Offset.zero).animate(
-            CurvedAnimation(parent: _optCard2Ctrl, curve: Curves.easeOut));
-    _optCard0Fade = Tween<double>(begin: 0, end: 1).animate(
-        CurvedAnimation(parent: _optCard0Ctrl, curve: Curves.easeOut));
-    _optCard1Fade = Tween<double>(begin: 0, end: 1).animate(
-        CurvedAnimation(parent: _optCard1Ctrl, curve: Curves.easeOut));
-    _optCard2Fade = Tween<double>(begin: 0, end: 1).animate(
-        CurvedAnimation(parent: _optCard2Ctrl, curve: Curves.easeOut));
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _optCard0Slide = Tween<Offset>(
+      begin: const Offset(0, 0.35),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _optCard0Ctrl, curve: Curves.easeOut));
+    _optCard1Slide = Tween<Offset>(
+      begin: const Offset(0, 0.35),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _optCard1Ctrl, curve: Curves.easeOut));
+    _optCard2Slide = Tween<Offset>(
+      begin: const Offset(0, 0.35),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _optCard2Ctrl, curve: Curves.easeOut));
+    _optCard0Fade = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _optCard0Ctrl, curve: Curves.easeOut));
+    _optCard1Fade = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _optCard1Ctrl, curve: Curves.easeOut));
+    _optCard2Fade = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _optCard2Ctrl, curve: Curves.easeOut));
     _restartOptionCardAnimations();
 
     _fabEntryCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 600));
-    _fabEntryScale = Tween<double>(begin: 0.4, end: 1.0).animate(
-        CurvedAnimation(
-            parent: _fabEntryCtrl, curve: Curves.elasticOut));
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _fabEntryScale = Tween<double>(
+      begin: 0.4,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _fabEntryCtrl, curve: Curves.elasticOut));
     _fabEntryOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-            parent: _fabEntryCtrl,
-            curve: const Interval(0.0, 0.5, curve: Curves.easeOut)));
+      CurvedAnimation(
+        parent: _fabEntryCtrl,
+        curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
+      ),
+    );
     Future.delayed(const Duration(milliseconds: 900), () {
       if (mounted) _fabEntryCtrl.forward();
     });
 
-    _fabPulseCtrl =
-    AnimationController(vsync: this, duration: const Duration(milliseconds: 2500))
-      ..repeat();
-    _fabPulseScale = Tween<double>(begin: 1.0, end: 1.1).animate(
-        CurvedAnimation(parent: _fabPulseCtrl, curve: Curves.easeOut));
-    _fabPulseOpacity = Tween<double>(begin: 0.55, end: 0.0).animate(
-        CurvedAnimation(parent: _fabPulseCtrl, curve: Curves.easeOut));
+    _fabPulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2500),
+    )..repeat();
+    _fabPulseScale = Tween<double>(
+      begin: 1.0,
+      end: 1.1,
+    ).animate(CurvedAnimation(parent: _fabPulseCtrl, curve: Curves.easeOut));
+    _fabPulseOpacity = Tween<double>(
+      begin: 0.55,
+      end: 0.0,
+    ).animate(CurvedAnimation(parent: _fabPulseCtrl, curve: Curves.easeOut));
 
     _chatSlideCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 440));
-    _chatSlideAnim =
-        Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(
-            CurvedAnimation(
-                parent: _chatSlideCtrl,
-                curve: const Cubic(0.32, 0.72, 0, 1)));
-    _chatFadeAnim = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(
-        parent: _chatSlideCtrl, curve: const Interval(0, 0.4)));
+      vsync: this,
+      duration: const Duration(milliseconds: 440),
+    );
+    _chatSlideAnim = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _chatSlideCtrl,
+            curve: const Cubic(0.32, 0.72, 0, 1),
+          ),
+        );
+    _chatFadeAnim = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _chatSlideCtrl, curve: const Interval(0, 0.4)),
+    );
 
     _tryOnSlideCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 420));
-    _tryOnSlideAnim =
-        Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(
-            CurvedAnimation(
-                parent: _tryOnSlideCtrl,
-                curve: const Cubic(0.32, 0.72, 0, 1)));
-    _tryOnFadeAnim = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(
-        parent: _tryOnSlideCtrl, curve: const Interval(0, 0.4)));
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+    );
+    _tryOnSlideAnim = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _tryOnSlideCtrl,
+            curve: const Cubic(0.32, 0.72, 0, 1),
+          ),
+        );
+    _tryOnFadeAnim = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _tryOnSlideCtrl, curve: const Interval(0, 0.4)),
+    );
 
     _micPulseCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1200));
-    _micPulseScale = Tween<double>(begin: 1.0, end: 1.08).animate(
-        CurvedAnimation(parent: _micPulseCtrl, curve: Curves.easeInOut));
-    _scanCtrl =
-    AnimationController(vsync: this, duration: const Duration(milliseconds: 3000))
-      ..repeat();
-    _scanLineY = Tween<double>(begin: 0.10, end: 0.85).animate(
-        CurvedAnimation(parent: _scanCtrl, curve: Curves.easeInOut));
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _micPulseScale = Tween<double>(
+      begin: 1.0,
+      end: 1.08,
+    ).animate(CurvedAnimation(parent: _micPulseCtrl, curve: Curves.easeInOut));
+    _scanCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    )..repeat();
+    _scanLineY = Tween<double>(
+      begin: 0.10,
+      end: 0.85,
+    ).animate(CurvedAnimation(parent: _scanCtrl, curve: Curves.easeInOut));
 
     _startAutoPlay();
     _pageController.addListener(_onPageScroll);
-    _chatFocusNode.addListener(() {
-      if (mounted) setState(() => _chatInputFocused = _chatFocusNode.hasFocus);
-    });
     _fetchWeather();
   }
 
@@ -375,14 +416,24 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     final now = DateTime.now();
     const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
     const months = [
-      'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-      'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
     ];
     setState(() {
       _liveDay = days[now.weekday % 7];
       _liveDate = '${months[now.month - 1]} ${now.day}';
       _liveTime =
-      '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
     });
   }
 
@@ -401,26 +452,30 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
 
   void _startAutoPlay() {
     _autoPlayTimer?.cancel();
-    _autoPlayTimer =
-        Timer.periodic(const Duration(seconds: 5), (_) {
-          if (!mounted || _userScrolling || _displayedOutfits.isEmpty) return;
-          final next = (_carouselIndex + 1) % _displayedOutfits.length;
-          _pageController.animateToPage(next,
-              duration: const Duration(milliseconds: 450),
-              curve: Curves.easeInOut);
-        });
+    _autoPlayTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || _userScrolling || _displayedOutfits.isEmpty) return;
+      final next = (_carouselIndex + 1) % _displayedOutfits.length;
+      _pageController.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeInOut,
+      );
+    });
   }
 
   Future<void> _fetchWeather() async {
     const fallbackLat = 16.5062;
     const fallbackLon = 80.648;
     try {
-      final backend = BackendService();
-      final data = await backend.fetchWeather(
-        latitude: fallbackLat,
-        longitude: fallbackLon,
+      final url = Uri.parse(
+        'https://api.open-meteo.com/v1/forecast'
+        '?latitude=$fallbackLat&longitude=$fallbackLon'
+        '&current=temperature_2m,weathercode,apparent_temperature'
+        '&timezone=auto',
       );
-      if (data != null) {
+      final res = await http.get(url).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
         final current = data['current'] as Map<String, dynamic>;
         final temp = (current['temperature_2m'] as num).round();
         final feel = (current['apparent_temperature'] as num).round();
@@ -430,13 +485,36 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     } catch (_) {
       final hour = DateTime.now().hour;
       const baseTemps = [
-        22, 21, 21, 21, 22, 23, 25, 27, 29, 31, 32, 33,
-        33, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23
+        22,
+        21,
+        21,
+        21,
+        22,
+        23,
+        25,
+        27,
+        29,
+        31,
+        32,
+        33,
+        33,
+        33,
+        32,
+        31,
+        30,
+        29,
+        28,
+        27,
+        26,
+        25,
+        24,
+        23,
       ];
       final t = baseTemps[hour];
       final feel = t + (hour >= 10 && hour <= 16 ? 2 : 0);
-      final code =
-      (hour >= 6 && hour <= 18) ? (hour >= 11 && hour <= 14 ? 1 : 2) : 0;
+      final code = (hour >= 6 && hour <= 18)
+          ? (hour >= 11 && hour <= 14 ? 1 : 2)
+          : 0;
       _applyWeather(t, feel, code);
     }
   }
@@ -466,7 +544,7 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
         : feel >= 10
         ? 'Cool'
         : 'Cold';
-    
+
     final w = wm[code] ?? wm[2]!;
     if (!mounted) return;
     setState(() {
@@ -526,7 +604,7 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     _scanCtrl.dispose();
     _autoPlayTimer?.cancel();
     _toastTimer?.cancel();
-    
+
     try {
       _toastEntry?.remove();
     } catch (_) {}
@@ -550,11 +628,11 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     _toastTimer?.cancel();
     late OverlayEntry entry;
     entry = OverlayEntry(
-        builder: (_) => _ToastWidget(message: message, green: green));
+      builder: (_) => _ToastWidget(message: message, green: green),
+    );
     _toastEntry = entry;
     Overlay.of(context).insert(entry);
     _toastTimer = Timer(const Duration(milliseconds: 2800), () {
-      
       try {
         entry.remove();
       } catch (_) {}
@@ -581,13 +659,15 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
       _chatGreetingTimer = Timer(const Duration(milliseconds: 700), () {
         if (!mounted || !_chatOpen || _messages.isNotEmpty) return;
         setState(() {
-          _messages.add(_ChatMessage(
-            id: DateTime.now().microsecondsSinceEpoch,
-            text:
-            "Hi! I'm AHVI, your personal AI stylist ✦\n\nI can see today's weather and your outfit options. What would you like help with — styling tips, what to wear, or outfit advice for any occasion?",
-            isUser: false,
-            createdAt: DateTime.now(),
-          ));
+          _messages.add(
+            _ChatMessage(
+              id: DateTime.now().microsecondsSinceEpoch,
+              text:
+                  "Hi! I'm AHVI, your personal AI stylist ✦\n\nI can see today's weather and your outfit options. What would you like help with — styling tips, what to wear, or outfit advice for any occasion?",
+              isUser: false,
+              createdAt: DateTime.now(),
+            ),
+          );
         });
         _scrollChatToBottom();
       });
@@ -619,20 +699,6 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     });
   }
 
-  bool get _hasOpenOverlay => _chatOpen || _tryOnOpen;
-
-  void _handleBackNavigation() {
-    if (_tryOnOpen) {
-      _closeTryOn();
-      return;
-    }
-    if (_chatOpen) {
-      _closeChat();
-      return;
-    }
-    Navigator.of(context).maybePop();
-  }
-
   void _resetTryOnSimulation() {
     _tryOnStageTimer?.cancel();
     for (final timer in _arTagTimers) {
@@ -656,7 +722,6 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     }
   }
 
-  
   void _startTryOnCamera() {
     setState(() {
       _tryOnStage = _TryOnStage.loading;
@@ -678,8 +743,8 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
   }
 
   void _scheduleArTags() {
-    final tags =
-    (_selectedTryOnOutfit['arTags'] as List).cast<Map<String, dynamic>>();
+    final tags = (_selectedTryOnOutfit['arTags'] as List)
+        .cast<Map<String, dynamic>>();
     for (var i = 0; i < tags.length; i++) {
       final timer = Timer(Duration(milliseconds: i * 300), () {
         if (mounted && _tryOnStage == _TryOnStage.camera) {
@@ -733,12 +798,14 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     if (trimmed.isEmpty || _isTyping) return;
     _chatController.clear();
     setState(() {
-      _messages.add(_ChatMessage(
-        id: DateTime.now().microsecondsSinceEpoch,
-        text: trimmed,
-        isUser: true,
-        createdAt: DateTime.now(),
-      ));
+      _messages.add(
+        _ChatMessage(
+          id: DateTime.now().microsecondsSinceEpoch,
+          text: trimmed,
+          isUser: true,
+          createdAt: DateTime.now(),
+        ),
+      );
       _isTyping = true;
       _quickPromptsVisible = false;
     });
@@ -761,28 +828,39 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
         'Outfits available: Linen & Air (hot/linen/casual), Coffee Run (mild/cosy/weekend), Office Hours (work/formal), Golden Hour (evnings/earth tones).\n'
         'Keep responses concise — 2–4 sentences max or a short list. Be specific. Reference outfit names when relevant. Light emoji (1–2). Never be generic.';
 
-    
     final history = _messages
         .take(_messages.length - 1)
-        .map((m) => {'role': m.isUser ? 'user' : 'assistant', 'content': m.text})
+        .map(
+          (m) => {'role': m.isUser ? 'user' : 'assistant', 'content': m.text},
+        )
         .toList();
     history.add({'role': 'user', 'content': userText});
 
+    const apiKey = String.fromEnvironment(
+      'ANTHROPIC_API_KEY',
+      defaultValue: '',
+    );
+
     try {
-      final backend = BackendService();
-      final data = await backend
-          .sendAnthropicMessages(
-            model: 'claude-sonnet-4-20250514',
-            maxTokens: 380,
-            system: systemPrompt,
-            messages: history,
+      final response = await http
+          .post(
+            Uri.parse('https://api.anthropic.com/v1/messages'),
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+            },
+            body: jsonEncode({
+              'model': 'claude-sonnet-4-20250514',
+              'max_tokens': 380,
+              'system': systemPrompt,
+              'messages': history,
+            }),
           )
           .timeout(const Duration(seconds: 15));
 
       if (!mounted) return;
-      if (data == null) {
-        throw Exception('No response from backend');
-      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       final content = data['content'];
       final replyText = (content is List && content.isNotEmpty)
           ? content[0]['text'] as String?
@@ -821,7 +899,6 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     }
   }
 
-  
   void _speakMessage(_ChatMessage message) {
     setState(() => _speakingMessageId = message.id);
     // ignore: deprecated_member_use
@@ -833,7 +910,6 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     });
   }
 
-  
   String _stripMarkdown(String text) {
     return text
         .replaceAll(RegExp(r'\*\*(.*?)\*\*'), r'$1')
@@ -852,8 +928,18 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
 
   String _formatCapturedDate(DateTime date) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${date.day} ${months[date.month - 1]} ${date.year}';
   }
@@ -861,22 +947,20 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !_hasOpenOverlay,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) {
-          _handleBackNavigation();
-        }
-      },
+      canPop: true,
       child: Scaffold(
         backgroundColor: bgColor,
         body: Stack(
           children: [
             Positioned.fill(
-                child: CustomPaint(
-                    painter: _BgGradientPainter(
-                        primary: accentColor,
-                        secondary: accent2Color,
-                        tertiary: accent3Color))),
+              child: CustomPaint(
+                painter: _BgGradientPainter(
+                  primary: accentColor,
+                  secondary: accent2Color,
+                  tertiary: accent3Color,
+                ),
+              ),
+            ),
             SafeArea(
               bottom: false,
               child: SingleChildScrollView(
@@ -920,46 +1004,44 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     child: LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 380;
+        final backBtn = GestureDetector(
+          onTap: () => Navigator.of(context).pop(),
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: panelColor,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: cardBorderColor),
+            ),
+            child: Icon(Icons.chevron_left_rounded, color: textColor, size: 22),
+          ),
+        );
         final leftBlock = Row(
           children: [
-            _PressScaleButton(
-              scaleDown: 0.94,
-              onTap: _handleBackNavigation,
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: panel2Color,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: cardBorderColor),
-                  boxShadow: [
-                    BoxShadow(
-                        color: bgColor.withValues(alpha: 0.25),
-                        blurRadius: 14,
-                        offset: const Offset(0, 4))
-                  ],
-                ),
-                child: Icon(Icons.chevron_left, color: textColor, size: 20),
-              ),
-            ),
-            const SizedBox(width: 12),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Daily Wear',
-                    style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w700,
-                        color: textColor,
-                        letterSpacing: -0.5,
-                        height: 1)),
+                Text(
+                  'Daily Wear',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                    letterSpacing: -0.5,
+                    height: 1,
+                  ),
+                ),
                 const SizedBox(height: 5),
-                Text('CURATED FOR YOU · TODAY',
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: mutedColor.withValues(alpha: 0.7),
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.8)),
+                Text(
+                  'CURATED FOR YOU · TODAY',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: mutedColor.withValues(alpha: 0.7),
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.8,
+                  ),
+                ),
               ],
             ),
           ],
@@ -968,17 +1050,34 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              leftBlock,
+              Row(
+                children: [
+                  backBtn,
+                  const SizedBox(width: 12),
+                  leftBlock,
+                ],
+              ),
               const SizedBox(height: 10),
               _buildDatePill(),
             ],
           );
         }
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            leftBlock,
-            _buildDatePill(),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    backBtn,
+                    const SizedBox(width: 12),
+                    leftBlock,
+                  ],
+                ),
+                _buildDatePill(),
+              ],
+            ),
           ],
         );
       },
@@ -986,47 +1085,59 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
   );
 
   Widget _buildDatePill() => Container(
-    padding:
-    const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
     decoration: BoxDecoration(
       color: panel2Color,
       borderRadius: BorderRadius.circular(30),
       border: Border.all(color: cardBorderColor),
       boxShadow: [
         BoxShadow(
-            color: bgColor.withValues(alpha: 0.2),
-            blurRadius: 20,
-            offset: const Offset(0, 4))
+          color: bgColor.withValues(alpha: 0.2),
+          blurRadius: 20,
+          offset: const Offset(0, 4),
+        ),
       ],
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(_liveDay,
-            style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: textColor,
-                letterSpacing: 1.2)),
-        Text(' · ',
-            style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: textColor,
-                letterSpacing: 1.2)),
-        Text(_liveDate,
-            style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: textColor,
-                letterSpacing: 1.2)),
+        Text(
+          _liveDay,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: textColor,
+            letterSpacing: 1.2,
+          ),
+        ),
+        Text(
+          ' · ',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: textColor,
+            letterSpacing: 1.2,
+          ),
+        ),
+        Text(
+          _liveDate,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: textColor,
+            letterSpacing: 1.2,
+          ),
+        ),
         const SizedBox(width: 6),
-        Text(_liveTime,
-            style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w500,
-                color: textColor.withValues(alpha: 0.7),
-                letterSpacing: 0.5)),
+        Text(
+          _liveTime,
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w500,
+            color: textColor.withValues(alpha: 0.7),
+            letterSpacing: 0.5,
+          ),
+        ),
       ],
     ),
   );
@@ -1034,8 +1145,7 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
   Widget _buildWeatherBar() => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16),
     child: Container(
-      padding:
-      const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       constraints: const BoxConstraints(minHeight: 68),
       decoration: BoxDecoration(
         color: panel2Color,
@@ -1043,9 +1153,10 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
         border: Border.all(color: cardBorderColor),
         boxShadow: [
           BoxShadow(
-              color: bgColor.withValues(alpha: 0.25),
-              blurRadius: 32,
-              offset: const Offset(0, 8))
+            color: bgColor.withValues(alpha: 0.25),
+            blurRadius: 32,
+            offset: const Offset(0, 8),
+          ),
         ],
       ),
       child: LayoutBuilder(
@@ -1054,48 +1165,52 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
           final left = Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(_weatherIcon,
-                  style: const TextStyle(fontSize: 30)),
+              Text(_weatherIcon, style: const TextStyle(fontSize: 30)),
               const SizedBox(width: 14),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_weatherLabel,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: mutedColor)),
+                  Text(
+                    _weatherLabel,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: mutedColor,
+                    ),
+                  ),
                   const SizedBox(height: 3),
-                  Text(_weatherDetail,
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w400,
-                          color: mutedColor,
-                          letterSpacing: 0.2)),
+                  Text(
+                    _weatherDetail,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w400,
+                      color: mutedColor,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
                 ],
               ),
             ],
           );
           final temp = ShaderMask(
             shaderCallback: (bounds) => LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [accentColor, accent3Color])
-                .createShader(bounds),
-            child: Text(_weatherTemp,
-                style: TextStyle(
-                    fontSize: 36,
-                    fontWeight: FontWeight.w300,
-                    color: textColor)),
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [accentColor, accent3Color],
+            ).createShader(bounds),
+            child: Text(
+              _weatherTemp,
+              style: TextStyle(
+                fontSize: 36,
+                fontWeight: FontWeight.w300,
+                color: textColor,
+              ),
+            ),
           );
           if (compact) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                left,
-                const SizedBox(height: 8),
-                temp,
-              ],
+              children: [left, const SizedBox(height: 8), temp],
             );
           }
           return Row(
@@ -1116,18 +1231,17 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
-        padding:
-        const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
         decoration: BoxDecoration(
           color: accentColor.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(18),
-          border:
-          Border.all(color: accentColor.withValues(alpha: 0.25)),
+          border: Border.all(color: accentColor.withValues(alpha: 0.25)),
           boxShadow: [
             BoxShadow(
-                color: accentColor.withValues(alpha: 0.10),
-                blurRadius: 20,
-                offset: const Offset(0, 4))
+              color: accentColor.withValues(alpha: 0.10),
+              blurRadius: 20,
+              offset: const Offset(0, 4),
+            ),
           ],
         ),
         child: Row(
@@ -1135,13 +1249,16 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
             Text(icon, style: const TextStyle(fontSize: 20)),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(body,
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: textColor,
-                      letterSpacing: 0.2,
-                      height: 1.4)),
+              child: Text(
+                body,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                  letterSpacing: 0.2,
+                  height: 1.4,
+                ),
+              ),
             ),
           ],
         ),
@@ -1163,20 +1280,21 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
                 border: Border.all(color: cardBorderColor),
                 boxShadow: [
                   BoxShadow(
-                      color: bgColor.withValues(alpha: 0.45),
-                      blurRadius: 48,
-                      offset: const Offset(0, 16)),
+                    color: bgColor.withValues(alpha: 0.45),
+                    blurRadius: 48,
+                    offset: const Offset(0, 16),
+                  ),
                   BoxShadow(
-                      color: accentColor.withValues(alpha: 0.1),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4)),
+                    color: accentColor.withValues(alpha: 0.1),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
                 ],
               ),
               child: PageView.builder(
                 controller: _pageController,
                 itemCount: _displayedOutfits.length,
-                onPageChanged: (i) =>
-                    setState(() => _carouselIndex = i),
+                onPageChanged: (i) => setState(() => _carouselIndex = i),
                 itemBuilder: (_, i) =>
                     _buildCarouselSlide(_displayedOutfits[i], i),
               ),
@@ -1190,23 +1308,23 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
             right: 0,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children:
-              List.generate(_displayedOutfits.length, (i) {
+              children: List.generate(_displayedOutfits.length, (i) {
                 final isOn = i == _carouselIndex;
                 return GestureDetector(
-                  onTap: () => _pageController.animateToPage(i,
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOut),
+                  onTap: () => _pageController.animateToPage(
+                    i,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                  ),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 280),
                     width: isOn ? 22 : 6,
                     height: 6,
-                    margin:
-                    const EdgeInsets.symmetric(horizontal: 3),
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
                     decoration: BoxDecoration(
-                        color: isOn ? accentColor : mutedColor,
-                        borderRadius:
-                        BorderRadius.circular(isOn ? 3 : 50)),
+                      color: isOn ? accentColor : mutedColor,
+                      borderRadius: BorderRadius.circular(isOn ? 3 : 50),
+                    ),
                   ),
                 );
               }),
@@ -1235,16 +1353,18 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
             onTap: disabled
                 ? null
                 : () {
-              if (left) {
-                _pageController.previousPage(
-                    duration: const Duration(milliseconds: 450),
-                    curve: Curves.easeInOut);
-              } else {
-                _pageController.nextPage(
-                    duration: const Duration(milliseconds: 450),
-                    curve: Curves.easeInOut);
-              }
-            },
+                    if (left) {
+                      _pageController.previousPage(
+                        duration: const Duration(milliseconds: 450),
+                        curve: Curves.easeInOut,
+                      );
+                    } else {
+                      _pageController.nextPage(
+                        duration: const Duration(milliseconds: 450),
+                        curve: Curves.easeInOut,
+                      );
+                    }
+                  },
             child: Container(
               width: 40,
               height: 40,
@@ -1254,14 +1374,18 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
                 border: Border.all(color: cardBorderColor),
                 boxShadow: [
                   BoxShadow(
-                      color: bgColor.withValues(alpha: 0.3),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4))
+                    color: bgColor.withValues(alpha: 0.3),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
                 ],
               ),
               child: Center(
-                  child: Text(left ? '‹' : '›',
-                      style: TextStyle(color: textColor, fontSize: 20))),
+                child: Text(
+                  left ? '‹' : '›',
+                  style: TextStyle(color: textColor, fontSize: 20),
+                ),
+              ),
             ),
           ),
         ),
@@ -1269,8 +1393,7 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     );
   }
 
-  Widget _buildCarouselSlide(
-      Map<String, dynamic> outfit, int index) {
+  Widget _buildCarouselSlide(Map<String, dynamic> outfit, int index) {
     final outfitId = outfit['id'] as String;
     final saved = _savedCarouselById[outfitId] ?? false;
     return Stack(
@@ -1278,10 +1401,26 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
       children: [
         ColorFiltered(
           colorFilter: const ColorFilter.matrix([
-            0.72, 0, 0, 0, 0, 
-            0, 0.72, 0, 0, 0, 
-            0, 0, 0.72, 0, 0, 
-            0, 0, 0, 1, 0
+            0.72,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0.72,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0.72,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
           ]),
           child: Image.network(
             outfit['img'] as String,
@@ -1318,28 +1457,32 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 6),
+                  horizontal: 14,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
-                    color: panelColor,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: cardBorderColor)),
-                child: Text('✦ AHVI\'s pick',
-                    style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: textColor,
-                        letterSpacing: 0.8)),
+                  color: panelColor,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: cardBorderColor),
+                ),
+                child: Text(
+                  '✦ AHVI\'s pick',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                    letterSpacing: 0.8,
+                  ),
+                ),
               ),
               Row(
                 children: [
                   _circleAction(saved ? '❤️' : '🤍', () {
-                    setState(
-                            () => _savedCarouselById[outfitId] = !saved);
+                    setState(() => _savedCarouselById[outfitId] = !saved);
                     if (!saved) _showToast('Saved to wardrobe ❤️');
                   }),
                   const SizedBox(width: 8),
-                  _circleShare(
-                      '${outfit['name']} · ${outfit['desc']}'),
+                  _circleShare('${outfit['name']} · ${outfit['desc']}'),
                 ],
               ),
             ],
@@ -1360,33 +1503,42 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(outfit['name'] as String,
-                            style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w600,
-                                color: textColor,
-                                letterSpacing: -0.3,
-                                height: 1.05)),
+                        Text(
+                          outfit['name'] as String,
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w600,
+                            color: textColor,
+                            letterSpacing: -0.3,
+                            height: 1.05,
+                          ),
+                        ),
                         const SizedBox(height: 4),
-                        Text(outfit['desc'] as String,
-                            style:
-                            TextStyle(fontSize: 11, color: mutedColor)),
+                        Text(
+                          outfit['desc'] as String,
+                          style: TextStyle(fontSize: 11, color: mutedColor),
+                        ),
                       ],
                     ),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 5),
+                      horizontal: 12,
+                      vertical: 5,
+                    ),
                     decoration: BoxDecoration(
-                        color: panelColor,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: cardBorderColor)),
+                      color: panelColor,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: cardBorderColor),
+                    ),
                     child: Text(
-                        '${index + 1} / ${_displayedOutfits.length}',
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: textColor)),
+                      '${index + 1} / ${_displayedOutfits.length}',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: textColor,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1395,20 +1547,27 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
                 spacing: 5,
                 runSpacing: 5,
                 children: (outfit['tags'] as List<String>)
-                    .map((t) => Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 11, vertical: 4),
-                  decoration: BoxDecoration(
-                      color: panelColor,
-                      borderRadius: BorderRadius.circular(10),
-                      border:
-                      Border.all(color: cardBorderColor)),
-                  child: Text(t,
-                      style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: textColor)),
-                ))
+                    .map(
+                      (t) => Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 11,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: panelColor,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: cardBorderColor),
+                        ),
+                        child: Text(
+                          t,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: textColor,
+                          ),
+                        ),
+                      ),
+                    )
                     .toList(),
               ),
               const SizedBox(height: 14),
@@ -1421,23 +1580,29 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [accentColor, accent3Color]),
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [accentColor, accent3Color],
+                    ),
                     borderRadius: BorderRadius.circular(18),
                     boxShadow: [
                       BoxShadow(
-                          color: accentColor.withValues(alpha: 0.35),
-                          blurRadius: 24,
-                          offset: const Offset(0, 6))
+                        color: accentColor.withValues(alpha: 0.35),
+                        blurRadius: 24,
+                        offset: const Offset(0, 6),
+                      ),
                     ],
                   ),
                   child: Center(
-                      child: Text('✦  Virtual Try‑On',
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: tileTextColor))),
+                    child: Text(
+                      '✦  Virtual Try‑On',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: tileTextColor,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -1447,22 +1612,22 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     );
   }
 
-  Widget _circleAction(String icon, VoidCallback onTap) =>
-      _PressScaleButton(
-        scaleDown: 0.92,
-        onTap: onTap,
-        child: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-              color: panelColor,
-              shape: BoxShape.circle,
-              border: Border.all(color: cardBorderColor)),
-          child: Center(
-              child: Text(icon,
-                  style: TextStyle(fontSize: 15, color: textColor))),
-        ),
-      );
+  Widget _circleAction(String icon, VoidCallback onTap) => _PressScaleButton(
+    scaleDown: 0.92,
+    onTap: onTap,
+    child: Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: panelColor,
+        shape: BoxShape.circle,
+        border: Border.all(color: cardBorderColor),
+      ),
+      child: Center(
+        child: Text(icon, style: TextStyle(fontSize: 15, color: textColor)),
+      ),
+    ),
+  );
 
   Widget _circleShare(String text) => _PressScaleButton(
     scaleDown: 0.92,
@@ -1474,31 +1639,37 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-          color: panelColor,
-          shape: BoxShape.circle,
-          border: Border.all(color: cardBorderColor)),
+        color: panelColor,
+        shape: BoxShape.circle,
+        border: Border.all(color: cardBorderColor),
+      ),
       child: Center(
-          child: CustomPaint(
-              size: const Size(16, 16),
-              painter: _ShareIconPainter(color: textColor))),
+        child: CustomPaint(
+          size: const Size(16, 16),
+          painter: _ShareIconPainter(color: textColor),
+        ),
+      ),
     ),
   );
 
   Widget _buildSectionTitle() => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 20),
-    child: Text('Other good options',
-        style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-            color: textColor,
-            letterSpacing: 0.2)),
+    child: Text(
+      'Other good options',
+      style: TextStyle(
+        fontSize: 20,
+        fontWeight: FontWeight.w600,
+        color: textColor,
+        letterSpacing: 0.2,
+      ),
+    ),
   );
 
   Widget _buildOptionCards() {
     final controllers = [
       (_optCard0Slide, _optCard0Fade),
       (_optCard1Slide, _optCard1Fade),
-      (_optCard2Slide, _optCard2Fade)
+      (_optCard2Slide, _optCard2Fade),
     ];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1511,7 +1682,7 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: optionCards.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                separatorBuilder: (_, _) => const SizedBox(width: 10),
                 itemBuilder: (context, i) {
                   return SizedBox(
                     width: 180,
@@ -1534,8 +1705,9 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
                   child: FadeTransition(
                     opacity: controllers[i].$2,
                     child: SlideTransition(
-                        position: controllers[i].$1,
-                        child: _buildOptCard(optionCards[i])),
+                      position: controllers[i].$1,
+                      child: _buildOptCard(optionCards[i]),
+                    ),
                   ),
                 ),
                 if (i < optionCards.length - 1) const SizedBox(width: 10),
@@ -1554,9 +1726,10 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
-            begin: const Alignment(-0.58, -0.58),
-            end: const Alignment(0.58, 0.58),
-            colors: (card['gradient'] as List).cast<Color>()),
+          begin: const Alignment(-0.58, -0.58),
+          end: const Alignment(0.58, 0.58),
+          colors: (card['gradient'] as List).cast<Color>(),
+        ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: cardBorderColor),
       ),
@@ -1580,13 +1753,14 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            stops: const [0.28, 1.0],
-                            colors: [
-                              bgColor.withValues(alpha: 0),
-                              bgColor.withValues(alpha: 0.72)
-                            ]),
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: const [0.28, 1.0],
+                          colors: [
+                            bgColor.withValues(alpha: 0),
+                            bgColor.withValues(alpha: 0.72),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -1598,25 +1772,32 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(card['name'] as String,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: textColor)),
+                  Text(
+                    card['name'] as String,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: textColor,
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(card['sub'] as String,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 9, color: mutedColor, height: 1.4)),
+                  Text(
+                    card['sub'] as String,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: mutedColor,
+                      height: 1.4,
+                    ),
+                  ),
                   const SizedBox(height: 9),
                   Row(
                     children: [
                       _smallIcon(saved ? '❤️' : '🤍', () {
-                        setState(
-                                () => _savedOptionById[outfitId] = !saved);
+                        setState(() => _savedOptionById[outfitId] = !saved);
                         if (!saved) _showToast('Outfit saved!');
                       }),
                       const SizedBox(width: 5),
@@ -1627,19 +1808,24 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
                   Row(
                     children: [
                       Expanded(
-                          child: _smallButton(
-                              isWorn ? '✓ Wearing' : 'Wear',
-                              isWorn ? null : () => _wearOutfit(outfitId),
-                              primary: !isWorn,
-                              activeLabelColor: isWorn
-                                  ? accent3Color
-                                  : tileTextColor)),
+                        child: _smallButton(
+                          isWorn ? '✓ Wearing' : 'Wear',
+                          isWorn ? null : () => _wearOutfit(outfitId),
+                          primary: !isWorn,
+                          activeLabelColor: isWorn
+                              ? accent3Color
+                              : tileTextColor,
+                        ),
+                      ),
                       const SizedBox(width: 5),
                       Expanded(
-                          child: _smallButton(
-                              'Try On', () => _openTryOn(outfitId),
-                              primary: false,
-                              activeLabelColor: accent5Color)),
+                        child: _smallButton(
+                          'Try On',
+                          () => _openTryOn(outfitId),
+                          primary: false,
+                          activeLabelColor: accent5Color,
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -1651,24 +1837,28 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     );
   }
 
-  Widget _smallIcon(String icon, VoidCallback onTap) =>
-      _PressScaleButton(
-        scaleDown: 0.92,
-        onTap: onTap,
-        child: Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-              color: panelColor,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: cardBorderColor)),
-          child: Center(
-              child: Text(icon,
-                  style: TextStyle(
-                      fontSize: 13,
-                      color: icon == '❤️' ? accent4Color : mutedColor))),
+  Widget _smallIcon(String icon, VoidCallback onTap) => _PressScaleButton(
+    scaleDown: 0.92,
+    onTap: onTap,
+    child: Container(
+      width: 30,
+      height: 30,
+      decoration: BoxDecoration(
+        color: panelColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cardBorderColor),
+      ),
+      child: Center(
+        child: Text(
+          icon,
+          style: TextStyle(
+            fontSize: 13,
+            color: icon == '❤️' ? accent4Color : mutedColor,
+          ),
         ),
-      );
+      ),
+    ),
+  );
 
   Widget _smallShare(String text) => _PressScaleButton(
     scaleDown: 0.92,
@@ -1680,44 +1870,55 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
       width: 30,
       height: 30,
       decoration: BoxDecoration(
-          color: panelColor,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: cardBorderColor)),
+        color: panelColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cardBorderColor),
+      ),
       child: Center(
-          child: CustomPaint(
-              size: const Size(13, 13),
-              painter: _ShareIconPainter(color: mutedColor))),
+        child: CustomPaint(
+          size: const Size(13, 13),
+          painter: _ShareIconPainter(color: mutedColor),
+        ),
+      ),
     ),
   );
 
-  Widget _smallButton(String label, VoidCallback? onTap,
-      {required bool primary, required Color activeLabelColor}) =>
-      _PressScaleButton(
-        scaleDown: 0.96,
-        opacityDown: 0.7,
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          height: 34,
-          decoration: BoxDecoration(
-            gradient: primary
-                ? LinearGradient(
+  Widget _smallButton(
+    String label,
+    VoidCallback? onTap, {
+    required bool primary,
+    required Color activeLabelColor,
+  }) => _PressScaleButton(
+    scaleDown: 0.96,
+    opacityDown: 0.7,
+    onTap: onTap,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      height: 34,
+      decoration: BoxDecoration(
+        gradient: primary
+            ? LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [accentColor, accent3Color])
-                : null,
-            color: primary ? null : panelColor,
-            borderRadius: BorderRadius.circular(10),
-            border: primary ? null : Border.all(color: cardBorderColor),
+                colors: [accentColor, accent3Color],
+              )
+            : null,
+        color: primary ? null : panelColor,
+        borderRadius: BorderRadius.circular(10),
+        border: primary ? null : Border.all(color: cardBorderColor),
+      ),
+      child: Center(
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
+            color: activeLabelColor,
           ),
-          child: Center(
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      color: activeLabelColor))),
         ),
-      );
+      ),
+    ),
+  );
 
   Widget _buildChatFab() => Positioned.fill(
     child: IgnorePointer(
@@ -1725,9 +1926,8 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
       child: Align(
         alignment: Alignment.bottomRight,
         child: AnimatedBuilder(
-          animation:
-          Listenable.merge([_fabEntryCtrl, _fabPulseCtrl]),
-          builder: (_, __) => Opacity(
+          animation: Listenable.merge([_fabEntryCtrl, _fabPulseCtrl]),
+          builder: (_, _) => Opacity(
             opacity: _fabEntryOpacity.value,
             child: Transform.scale(
               scale: _fabEntryScale.value,
@@ -1743,12 +1943,12 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
                           scale: _fabPulseScale.value,
                           child: Container(
                             decoration: BoxDecoration(
-                                borderRadius:
-                                BorderRadius.circular(50),
-                                border: Border.all(
-                                    color: accentColor
-                                        .withValues(alpha: 0.35),
-                                    width: 1.5)),
+                              borderRadius: BorderRadius.circular(50),
+                              border: Border.all(
+                                color: accentColor.withValues(alpha: 0.35),
+                                width: 1.5,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -1757,42 +1957,49 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
                       scaleDown: 0.95,
                       onTap: _openChat,
                       child: Container(
-                        padding: const EdgeInsets.fromLTRB(
-                            14, 13, 20, 13),
+                        padding: const EdgeInsets.fromLTRB(14, 13, 20, 13),
                         decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [accentColor, accent3Color]),
+                          color: _t.textPrimary,
                           borderRadius: BorderRadius.circular(50),
                         ),
                         child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              CircleAvatar(
-                                  radius: 14,
-                                  backgroundColor: panelColor,
-                                  child: Text('✦',
-                                      style: TextStyle(
-                                          color: textColor))),
-                              const SizedBox(width: 10),
-                              Column(
-                                  crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text('AI Stylist',
-                                        style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600,
-                                            color: tileTextColor)),
-                                    Text('Ask me anything',
-                                        style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w500,
-                                            color: tileTextColor)),
-                                  ]),
-                            ]),
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircleAvatar(
+                              radius: 14,
+                              backgroundColor: _t.backgroundPrimary.withValues(
+                                alpha: 0.14,
+                              ),
+                              child: Text(
+                                '✦',
+                                style: TextStyle(color: _t.backgroundPrimary),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'Ask AHVI',
+                                  style: GoogleFonts.anton(
+                                    fontSize: 13,
+                                    letterSpacing: 0.4,
+                                    color: _t.backgroundPrimary,
+                                  ),
+                                ),
+                                Text(
+                                  'Ask me Anything',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500,
+                                    color: _t.backgroundPrimary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -1824,19 +2031,23 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
               child: Container(
                 height: MediaQuery.of(context).size.height * 0.88,
                 decoration: BoxDecoration(
-                    color: bg2Color,
-                    borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(28)),
-                    border: Border.all(color: cardBorderColor)),
+                  color: bg2Color,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(28),
+                  ),
+                  border: Border.all(color: cardBorderColor),
+                ),
                 child: Column(
                   children: [
                     const SizedBox(height: 8),
                     Container(
-                        width: 36,
-                        height: 4,
-                        decoration: BoxDecoration(
-                            color: panel2Color,
-                            borderRadius: BorderRadius.circular(2))),
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: panel2Color,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
                     _chatHeader(),
                     Expanded(child: _chatMessages()),
                     if (_quickPromptsVisible) _chatQuickPrompts(),
@@ -1859,85 +2070,122 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient:
-              LinearGradient(colors: [accentColor, accent3Color])),
+            shape: BoxShape.circle,
+            gradient: LinearGradient(colors: [accentColor, accent3Color]),
+          ),
           child: Center(
-              child: Text('✦',
-                  style: TextStyle(
-                      fontSize: 18, color: tileTextColor))),
+            child: Text(
+              '✦',
+              style: TextStyle(fontSize: 18, color: tileTextColor),
+            ),
+          ),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('AHVI Stylist',
-                    style: TextStyle(
-                        fontSize: 21,
-                        fontWeight: FontWeight.w600,
-                        color: textColor)),
-                const SizedBox(height: 3),
-                Text('Your personal AI stylist',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: mutedColor)),
-              ]),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'AHVI Stylist',
+                style: TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Your personal AI stylist',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: mutedColor,
+                ),
+              ),
+            ],
+          ),
         ),
         _PressScaleButton(
           scaleDown: 0.90,
           onTap: _closeChat,
           child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                  color: panelColor,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: cardBorderColor)),
-              child: Center(
-                  child: Text('✕',
-                      style: TextStyle(color: mutedColor)))),
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: panelColor,
+              shape: BoxShape.circle,
+              border: Border.all(color: cardBorderColor),
+            ),
+            child: Center(
+              child: Text('✕', style: TextStyle(color: mutedColor)),
+            ),
+          ),
         ),
       ],
     ),
   );
 
-  Widget _chatMessages() => ListView(
-    controller: _chatScrollController,
-    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-    children: [
-      if (_messages.isEmpty)
-        Padding(
-          padding: const EdgeInsets.only(top: 20),
-          child: Column(children: [
-            CircleAvatar(
-                radius: 34,
-                backgroundColor: accentColor,
-                child: Text('✦',
+  Widget _chatMessages() {
+    final showEmptyState = _messages.isEmpty;
+    final itemCount =
+        (showEmptyState ? 1 : _messages.length) + (_isTyping ? 1 : 0);
+    return ListView.builder(
+      controller: _chatScrollController,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      itemCount: itemCount,
+      itemBuilder: (context, i) {
+        if (showEmptyState) {
+          if (i == 0) {
+            return Padding(
+              padding: const EdgeInsets.only(top: 20),
+              child: Column(
+                children: [
+                  CircleAvatar(
+                    radius: 34,
+                    backgroundColor: accentColor,
+                    child: Text(
+                      '*',
+                      style: TextStyle(fontSize: 28, color: tileTextColor),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    "Hello, I'm AHVI",
                     style: TextStyle(
-                        fontSize: 28, color: tileTextColor))),
-            const SizedBox(height: 10),
-            Text("Hello, I'm AHVI",
-                style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w600,
-                    color: textColor)),
-            const SizedBox(height: 10),
-            Text(
-                'Your personal AI stylist. Ask me about outfits, styling tips, what to wear today, or advice for any occasion.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 13, color: mutedColor, height: 1.6)),
-          ]),
-        ),
-      ..._messages.map((m) => _ChatBubble(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w600,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Your personal AI stylist. Ask me about outfits, styling tips, what to wear today, or advice for any occasion.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: mutedColor,
+                      height: 1.6,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          return const _TypingBubble();
+        }
+
+        if (_isTyping && i == _messages.length) {
+          return const _TypingBubble();
+        }
+        final m = _messages[i];
+        return _ChatBubble(
           message: m,
           isSpeaking: _speakingMessageId == m.id,
-          onSpeak: m.isUser ? null : () => _speakMessage(m))),
-      if (_isTyping) const _TypingBubble(),
-    ],
-  );
+          onSpeak: m.isUser ? null : () => _speakMessage(m),
+        );
+      },
+    );
+  }
 
   Widget _chatQuickPrompts() => SizedBox(
     height: 52,
@@ -1945,127 +2193,57 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
       itemCount: quickPrompts.length,
-      separatorBuilder: (_, __) => const SizedBox(width: 8),
+      separatorBuilder: (_, _) => const SizedBox(width: 8),
       itemBuilder: (_, i) => _PressScaleButton(
         scaleDown: 0.94,
         onTap: () => _sendMessage(quickPrompts[i]),
         child: Container(
-          padding: const EdgeInsets.symmetric(
-              horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-              color: panelColor,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: cardBorderColor)),
+            color: panelColor,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: cardBorderColor),
+          ),
           child: Center(
-              child: Text(quickPrompts[i],
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: accent5Color))),
+            child: Text(
+              quickPrompts[i],
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: accent5Color,
+              ),
+            ),
+          ),
         ),
       ),
     ),
   );
 
   Widget _chatBar() {
-    final sendDisabled =
-        _isTyping || _chatController.text.trim().isEmpty;
     return Container(
-      padding: EdgeInsets.fromLTRB(
-          16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
       decoration: BoxDecoration(
-          color: phoneShellInnerColor,
-          border: Border(top: BorderSide(color: cardBorderColor))),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 360;
-          return Row(
-            children: [
-              if (!compact) ...[
-                AnimatedBuilder(
-                  animation: _micPulseCtrl,
-                  builder: (_, child) => Transform.scale(
-                      scale: _micActive ? _micPulseScale.value : 1,
-                      child: child),
-                  child: _PressScaleButton(
-                    scaleDown: 0.92,
-                    onTap: _toggleMic,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        gradient: _micActive
-                            ? LinearGradient(colors: [accentColor, accent3Color])
-                            : null,
-                        color: _micActive ? null : panel2Color,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                            color: _micActive
-                                ? bgColor.withValues(alpha: 0)
-                                : cardBorderColor),
-                      ),
-                      child: Icon(Icons.mic,
-                          color: _micActive ? tileTextColor : accent5Color,
-                          size: 17),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-              ],
-              Expanded(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.fromLTRB(16, 4, 6, 4),
-                  decoration: BoxDecoration(
-                      color: panelColor,
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(
-                          color: _chatInputFocused
-                              ? accentColor.withValues(alpha: 0.45)
-                              : cardBorderColor)),
-                  child: TextField(
-                    controller: _chatController,
-                    focusNode: _chatFocusNode,
-                    style: TextStyle(fontSize: 14, color: textColor),
-                    decoration: InputDecoration(
-                        hintText: _micActive
-                            ? '🎙 Listening…'
-                            : 'Ask your stylist…',
-                        hintStyle: TextStyle(color: mutedColor),
-                        border: InputBorder.none),
-                    maxLines: null,
-                    onChanged: (_) => setState(() {}),
-                    onSubmitted: _sendMessage,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              IgnorePointer(
-                ignoring: sendDisabled,
-                child: AnimatedOpacity(
-                  opacity: sendDisabled ? 0.28 : 1,
-                  duration: const Duration(milliseconds: 180),
-                  child: _PressScaleButton(
-                    scaleDown: 0.90,
-                    onTap: sendDisabled
-                        ? null
-                        : () => _sendMessage(_chatController.text),
-                    child: Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                              colors: [accentColor, accent3Color])),
-                      child: Icon(Icons.send, color: tileTextColor, size: 17),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
+        color: phoneShellInnerColor,
+        border: Border(top: BorderSide(color: cardBorderColor)),
+      ),
+      child: AhviChatPromptBar(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        controller: _chatController,
+        focusNode: _chatFocusNode,
+        hintText: 'Ask your stylist�',
+        hasTextListenable: _chatController,
+        surface: phoneShellInnerColor,
+        border: cardBorderColor,
+        accent: accentColor,
+        accentSecondary: accent2Color,
+        textHeading: textColor,
+        textMuted: mutedColor,
+        shadowMedium: bgColor.withValues(alpha: 0.20),
+        onAccent: tileTextColor,
+        onSubmitted: _sendMessage,
+        onSend: () => _sendMessage(_chatController.text),
+        onEmptySend: () {},
+        onAddTap: () => showAhviLensSheet(context, t: context.themeTokens),
       ),
     );
   }
@@ -2083,63 +2261,75 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
             child: FadeTransition(
               opacity: _tryOnFadeAnim,
               child: Container(
-                height:
-                MediaQuery.of(context).size.height * 0.90,
+                height: MediaQuery.of(context).size.height * 0.90,
                 decoration: BoxDecoration(
-                    color: bg2Color,
-                    borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(28)),
-                    border: Border.all(color: cardBorderColor)),
+                  color: bg2Color,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(28),
+                  ),
+                  border: Border.all(color: cardBorderColor),
+                ),
                 child: SingleChildScrollView(
                   padding: EdgeInsets.fromLTRB(
-                      20,
-                      24,
-                      20,
-                      32 + MediaQuery.of(context).padding.bottom),
+                    20,
+                    24,
+                    20,
+                    32 + MediaQuery.of(context).padding.bottom,
+                  ),
                   child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Center(
-                            child: Container(
-                                width: 40,
-                                height: 4,
-                                decoration: BoxDecoration(
-                                    color: panel2Color,
-                                    borderRadius:
-                                    BorderRadius.circular(2)))),
-                        const SizedBox(height: 18),
-                        Align(
-                          alignment: Alignment.topRight,
-                          child: _PressScaleButton(
-                              scaleDown: 0.90,
-                              onTap: _closeTryOn,
-                              child: Container(
-                                  width: 36,
-                                  height: 36,
-                                  decoration: BoxDecoration(
-                                      color: panelColor,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                          color: cardBorderColor)),
-                                  child: Center(
-                                      child: Text('✕',
-                                          style: TextStyle(
-                                              color: mutedColor))))),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: panel2Color,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
-                        const SizedBox(height: 8),
-                        Text('Virtual Try‑On',
-                            style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w600,
-                                color: textColor)),
-                        const SizedBox(height: 4),
-                        Text(
-                            'Fitting: ${_selectedTryOnOutfit['name']}',
-                            style: TextStyle(
-                                fontSize: 13, color: mutedColor)),
-                        const SizedBox(height: 18),
-                        _tryOnBody(),
-                      ]),
+                      ),
+                      const SizedBox(height: 18),
+                      Align(
+                        alignment: Alignment.topRight,
+                        child: _PressScaleButton(
+                          scaleDown: 0.90,
+                          onTap: _closeTryOn,
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: panelColor,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: cardBorderColor),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '✕',
+                                style: TextStyle(color: mutedColor),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Virtual Try‑On',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w600,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Fitting: ${_selectedTryOnOutfit['name']}',
+                        style: TextStyle(fontSize: 13, color: mutedColor),
+                      ),
+                      const SizedBox(height: 18),
+                      _tryOnBody(),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -2153,345 +2343,468 @@ class _DailyWearScreenState extends State<DailyWearScreen> with TickerProviderSt
     final outfit = _selectedTryOnOutfit;
     if (_tryOnStage == _TryOnStage.loading) {
       return SizedBox(
-          height: 260,
-          child: Center(
-              child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                        width: 44,
-                        height: 44,
-                        child: CircularProgressIndicator(
-                            color: accentColor, strokeWidth: 2)),
-                    const SizedBox(height: 14),
-                    Text(_tryOnLoadingMessage,
-                        style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: textColor)),
-                    const SizedBox(height: 6),
-                    Text('Preparing AR',
-                        style: TextStyle(color: mutedColor))
-                  ])));
+        height: 260,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 44,
+                height: 44,
+                child: CircularProgressIndicator(
+                  color: accentColor,
+                  strokeWidth: 2,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                _tryOnLoadingMessage,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text('Preparing AR', style: TextStyle(color: mutedColor)),
+            ],
+          ),
+        ),
+      );
     }
     if (_tryOnStage == _TryOnStage.camera) {
       final colors = (outfit['colors'] as List).cast<String>();
-      final tags =
-      (outfit['arTags'] as List).cast<Map<String, dynamic>>();
-      return Column(children: [
-        AspectRatio(
-          aspectRatio: 3 / 4,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: LayoutBuilder(
-              builder: (_, constraints) => Stack(children: [
-                Positioned.fill(
-                    child: Transform(
+      final tags = (outfit['arTags'] as List).cast<Map<String, dynamic>>();
+      return Column(
+        children: [
+          AspectRatio(
+            aspectRatio: 3 / 4,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: LayoutBuilder(
+                builder: (_, constraints) => Stack(
+                  children: [
+                    Positioned.fill(
+                      child: Transform(
                         alignment: Alignment.center,
                         transform: Matrix4.diagonal3Values(
-                            _frontCamera ? -1 : 1, 1, 1),
+                          _frontCamera ? -1 : 1,
+                          1,
+                          1,
+                        ),
                         child: Image.network(
                           outfit['img'] as String,
                           fit: BoxFit.cover,
-                          cacheWidth:
-                              _cacheWidth(context, constraints.maxWidth),
+                          cacheWidth: _cacheWidth(
+                            context,
+                            constraints.maxWidth,
+                          ),
                           filterQuality: FilterQuality.low,
-                        ))),
-                Positioned(
-                    top: 12,
-                    left: 14,
-                    child: Row(children: [
-                      const _LiveDot(),
-                      const SizedBox(width: 6),
-                      Text('LIVE AR',
-                          style: TextStyle(
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 12,
+                      left: 14,
+                      child: Row(
+                        children: [
+                          const _LiveDot(),
+                          const SizedBox(width: 6),
+                          Text(
+                            'LIVE AR',
+                            style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
-                              color: textColor)),
-                      const SizedBox(width: 8),
-                      Text(_frontCamera ? 'HD · FRONT' : 'HD · BACK',
-                          style: TextStyle(
-                              fontSize: 10, color: mutedColor))
-                    ])),
-                Center(
-                    child: Container(
+                              color: textColor,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _frontCamera ? 'HD · FRONT' : 'HD · BACK',
+                            style: TextStyle(fontSize: 10, color: mutedColor),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Center(
+                      child: Container(
                         width: constraints.maxWidth * 0.52,
                         height: constraints.maxHeight * 0.80,
                         decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(120),
-                            border: Border.all(
-                                color: accentColor.withValues(alpha: 0.4),
-                                width: 2)))),
-                TickerMode(
-                  enabled: _tryOnOpen && _tryOnStage == _TryOnStage.camera,
-                  child: AnimatedBuilder(
-                      animation: _scanCtrl,
-                      builder: (_, __) => Positioned(
+                          borderRadius: BorderRadius.circular(120),
+                          border: Border.all(
+                            color: accentColor.withValues(alpha: 0.4),
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                    ),
+                    TickerMode(
+                      enabled: _tryOnOpen && _tryOnStage == _TryOnStage.camera,
+                      child: AnimatedBuilder(
+                        animation: _scanCtrl,
+                        builder: (_, _) => Positioned(
                           top: constraints.maxHeight * _scanLineY.value,
                           left: 0,
                           right: 0,
                           child: Container(
-                              height: 2,
-                              color: accentColor.withValues(alpha: 0.8)))),
-                ),
-                ...List.generate(
-                    math.min(_visibleArTags, tags.length),
-                        (index) => Positioned(
-                        left: constraints.maxWidth *
+                            height: 2,
+                            color: accentColor.withValues(alpha: 0.8),
+                          ),
+                        ),
+                      ),
+                    ),
+                    ...List.generate(
+                      math.min(_visibleArTags, tags.length),
+                      (index) => Positioned(
+                        left:
+                            constraints.maxWidth *
                             (tags[index]['left'] as double),
-                        top: constraints.maxHeight *
+                        top:
+                            constraints.maxHeight *
                             (tags[index]['top'] as double),
-                        child:
-                        _ArTag(label: tags[index]['t'] as String))),
-                Positioned(
-                  bottom: 14,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                          color: bgColor.withValues(alpha: 0.55),
-                          borderRadius: BorderRadius.circular(30),
-                          border: Border.all(color: cardBorderColor)),
-                      child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children:
-                          List.generate(colors.length, (i) {
-                            final selected = i == _selectedSwatchIndex;
-                            return GestureDetector(
-                              onTap: () => setState(
-                                      () => _selectedSwatchIndex = i),
-                              child: AnimatedContainer(
-                                  duration:
-                                  const Duration(milliseconds: 200),
+                        child: _ArTag(label: tags[index]['t'] as String),
+                      ),
+                    ),
+                    Positioned(
+                      bottom: 14,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: bgColor.withValues(alpha: 0.55),
+                            borderRadius: BorderRadius.circular(30),
+                            border: Border.all(color: cardBorderColor),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(colors.length, (i) {
+                              final selected = i == _selectedSwatchIndex;
+                              return GestureDetector(
+                                onTap: () =>
+                                    setState(() => _selectedSwatchIndex = i),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
                                   width: 26,
                                   height: 26,
                                   margin: const EdgeInsets.symmetric(
-                                      horizontal: 4),
+                                    horizontal: 4,
+                                  ),
                                   decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color:
-                                      _parseHexColor(colors[i]),
-                                      border: Border.all(
-                                          color: selected
-                                              ? accentColor
-                                              : cardBorderColor,
-                                          width: selected ? 2.5 : 2))),
-                            );
-                          })),
+                                    shape: BoxShape.circle,
+                                    color: _parseHexColor(colors[i]),
+                                    border: Border.all(
+                                      color: selected
+                                          ? accentColor
+                                          : cardBorderColor,
+                                      width: selected ? 2.5 : 2,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _actionBtn('📸 Capture', _captureTryOn, primary: true),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 56,
+                child: _actionBtn('🔄', _flipCamera, primary: false),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 56,
+                child: _actionBtn(
+                  '✕',
+                  () => setState(() => _tryOnStage = _TryOnStage.preview),
+                  primary: false,
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+    if (_tryOnStage == _TryOnStage.captured) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: Stack(
+              children: [
+                AspectRatio(
+                  aspectRatio: 3 / 4,
+                  child: Image.network(
+                    outfit['img'] as String,
+                    fit: BoxFit.cover,
+                    cacheWidth: _cacheWidth(context, 320),
+                    filterQuality: FilterQuality.low,
+                  ),
+                ),
+                Positioned(
+                  top: 14,
+                  left: 14,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: accent3Color.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: accent3Color.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Text(
+                      '✓ CAPTURED',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: accent3Color,
+                      ),
                     ),
                   ),
                 ),
-              ]),
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(children: [
-          Expanded(
-              child: _actionBtn('📸 Capture', _captureTryOn,
-                  primary: true)),
-          const SizedBox(width: 10),
-          SizedBox(
-              width: 56,
-              child:
-              _actionBtn('🔄', _flipCamera, primary: false)),
-          const SizedBox(width: 10),
-          SizedBox(
-              width: 56,
-              child: _actionBtn(
-                  '✕',
-                      () => setState(
-                          () => _tryOnStage = _TryOnStage.preview),
-                  primary: false)),
-        ]),
-      ]);
-    }
-    if (_tryOnStage == _TryOnStage.captured) {
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Stack(children: [
-            AspectRatio(
-                aspectRatio: 3 / 4,
-                child: Image.network(
-                  outfit['img'] as String,
-                  fit: BoxFit.cover,
-                  cacheWidth: _cacheWidth(context, 320),
-                  filterQuality: FilterQuality.low,
-                )),
-            Positioned(
-                top: 14,
-                left: 14,
-                child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 5),
-                    decoration: BoxDecoration(
-                        color: accent3Color.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                            color:
-                            accent3Color.withValues(alpha: 0.35))),
-                    child: Text('✓ CAPTURED',
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: accent3Color)))),
-            Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: Container(
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
                     color: bgColor.withValues(alpha: 0.55),
                     padding: const EdgeInsets.all(16),
                     child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('✦ ${outfit['name']} · AHVI',
-                              style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: textColor)),
-                          Text(_formatCapturedDate(DateTime.now()),
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: textColor.withValues(alpha: 0.42)))
-                        ]))),
-          ]),
-        ),
-        const SizedBox(height: 16),
-        Row(children: [
-          Expanded(
-              child: _actionBtn('💾  Save Look', _saveCapturedLook,
-                  primary: true)),
-          const SizedBox(width: 10),
-          Expanded(
-              child: _actionBtn('🔄  Retake', _startTryOnCamera,
-                  primary: false))
-        ]),
-        const SizedBox(height: 10),
-        SizedBox(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '✦ ${outfit['name']} · AHVI',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: textColor,
+                          ),
+                        ),
+                        Text(
+                          _formatCapturedDate(DateTime.now()),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: textColor.withValues(alpha: 0.42),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _actionBtn(
+                  '💾  Save Look',
+                  _saveCapturedLook,
+                  primary: true,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _actionBtn(
+                  '🔄  Retake',
+                  _startTryOnCamera,
+                  primary: false,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
             width: double.infinity,
             child: _actionBtn(
-                '✓  Wear Today',
-                    () => _wearOutfit(outfit['id'] as String,
-                    closeModal: true),
-                primary: false)),
-      ]);
+              '✓  Wear Today',
+              () => _wearOutfit(outfit['id'] as String, closeModal: true),
+              primary: false,
+            ),
+          ),
+        ],
+      );
     }
-    
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: Stack(children: [
-          SizedBox(
-              height: 260,
-              width: double.infinity,
-              child: Image.network(
-                outfit['img'] as String,
-                fit: BoxFit.cover,
-                alignment: Alignment.topCenter,
-                cacheWidth: _cacheWidth(context, MediaQuery.of(context).size.width),
-                filterQuality: FilterQuality.low,
-              )),
-          Positioned.fill(
-              child: DecoratedBox(
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Stack(
+            children: [
+              SizedBox(
+                height: 260,
+                width: double.infinity,
+                child: Image.network(
+                  outfit['img'] as String,
+                  fit: BoxFit.cover,
+                  alignment: Alignment.topCenter,
+                  cacheWidth: _cacheWidth(
+                    context,
+                    MediaQuery.of(context).size.width,
+                  ),
+                  filterQuality: FilterQuality.low,
+                ),
+              ),
+              Positioned.fill(
+                child: DecoratedBox(
                   decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          stops: const [0.4, 1.0],
-                          colors: [
-                            bgColor.withValues(alpha: 0),
-                            bgColor.withValues(alpha: 0.85)
-                          ])))),
-          Positioned(
-              top: 14,
-              right: 14,
-              child: Container(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: const [0.4, 1.0],
+                      colors: [
+                        bgColor.withValues(alpha: 0),
+                        bgColor.withValues(alpha: 0.85),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 14,
+                right: 14,
+                child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 5),
+                    horizontal: 12,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
-                      color: accentColor.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: accentColor.withValues(alpha: 0.4))),
-                  child: Text('AR MODE',
-                      style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          color: accentColor)))),
-          Positioned(
-              bottom: 18,
-              left: 18,
-              child: Text(outfit['name'] as String,
+                    color: accentColor.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: accentColor.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Text(
+                    'AR MODE',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: accentColor,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: 18,
+                left: 18,
+                child: Text(
+                  outfit['name'] as String,
                   style: TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w600,
-                      color: textColor))),
-        ]),
-      ),
-      const SizedBox(height: 18),
-      Container(
-        width: double.infinity,
-        padding:
-        const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w600,
+                    color: textColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
             color: accentColor.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
-            border:
-            Border.all(color: accentColor.withValues(alpha: 0.2))),
-        child: Row(children: [
-          const Text('💡'),
-          const SizedBox(width: 10),
-          Expanded(
-              child: Text(outfit['tip'] as String,
+            border: Border.all(color: accentColor.withValues(alpha: 0.2)),
+          ),
+          child: Row(
+            children: [
+              const Text('💡'),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  outfit['tip'] as String,
                   style: TextStyle(
-                      fontSize: 12, color: mutedColor, height: 1.4)))
-        ]),
-      ),
-      const SizedBox(height: 18),
-      Row(children: [
-        Expanded(
-            child: _actionBtn('📷  Start Try‑On', _startTryOnCamera,
-                primary: true)),
-        const SizedBox(width: 10),
-        Expanded(
-            child: _actionBtn(
+                    fontSize: 12,
+                    color: mutedColor,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            Expanded(
+              child: _actionBtn(
+                '📷  Start Try‑On',
+                _startTryOnCamera,
+                primary: true,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _actionBtn(
                 '✓  Wear Today',
-                    () => _wearOutfit(outfit['id'] as String,
-                    closeModal: true),
-                primary: false)),
-      ]),
-    ]);
+                () => _wearOutfit(outfit['id'] as String, closeModal: true),
+                primary: false,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
-  Widget _actionBtn(String label, VoidCallback onTap,
-      {required bool primary}) =>
-      _PressScaleButton(
-        scaleDown: 0.97,
-        opacityDown: 0.78,
-        onTap: onTap,
-        child: Container(
-          height: 52,
-          decoration: BoxDecoration(
-            gradient: primary
-                ? LinearGradient(colors: [accentColor, accent3Color])
-                : null,
-            color: primary ? null : panel2Color,
-            borderRadius: BorderRadius.circular(16),
-            border: primary ? null : Border.all(color: cardBorderColor),
+  Widget _actionBtn(
+    String label,
+    VoidCallback onTap, {
+    required bool primary,
+  }) => _PressScaleButton(
+    scaleDown: 0.97,
+    opacityDown: 0.78,
+    onTap: onTap,
+    child: Container(
+      height: 52,
+      decoration: BoxDecoration(
+        gradient: primary
+            ? LinearGradient(colors: [accentColor, accent3Color])
+            : null,
+        color: primary ? null : panel2Color,
+        borderRadius: BorderRadius.circular(16),
+        border: primary ? null : Border.all(color: cardBorderColor),
+      ),
+      child: Center(
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: primary ? tileTextColor : accent5Color,
           ),
-          child: Center(
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: primary ? tileTextColor : accent5Color))),
         ),
-      );
+      ),
+    ),
+  );
 }
 
 class _PressScaleButton extends StatefulWidget {
@@ -2499,11 +2812,12 @@ class _PressScaleButton extends StatefulWidget {
   final VoidCallback? onTap;
   final double scaleDown;
   final double opacityDown;
-  const _PressScaleButton(
-      {required this.child,
-        required this.onTap,
-        this.scaleDown = 0.94,
-        this.opacityDown = 1.0});
+  const _PressScaleButton({
+    required this.child,
+    required this.onTap,
+    this.scaleDown = 0.94,
+    this.opacityDown = 1.0,
+  });
   @override
   State<_PressScaleButton> createState() => _PressScaleButtonState();
 }
@@ -2517,11 +2831,17 @@ class _PressScaleButtonState extends State<_PressScaleButton>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 120));
-    _scale = Tween<double>(begin: 1, end: widget.scaleDown)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
-    _opacity = Tween<double>(begin: 1, end: widget.opacityDown)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+    );
+    _scale = Tween<double>(
+      begin: 1,
+      end: widget.scaleDown,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+    _opacity = Tween<double>(
+      begin: 1,
+      end: widget.opacityDown,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
   }
 
   @override
@@ -2536,15 +2856,16 @@ class _PressScaleButtonState extends State<_PressScaleButton>
     onTapUp: widget.onTap == null
         ? null
         : (_) {
-      _ctrl.reverse();
-      widget.onTap?.call();
-    },
+            _ctrl.reverse();
+            widget.onTap?.call();
+          },
     onTapCancel: () => _ctrl.reverse(),
     child: AnimatedBuilder(
       animation: _ctrl,
       builder: (_, child) => Opacity(
-          opacity: _opacity.value,
-          child: Transform.scale(scale: _scale.value, child: child)),
+        opacity: _opacity.value,
+        child: Transform.scale(scale: _scale.value, child: child),
+      ),
       child: widget.child,
     ),
   );
@@ -2555,21 +2876,23 @@ class _ChatMessage {
   final String text;
   final bool isUser;
   final DateTime createdAt;
-  _ChatMessage(
-      {required this.id,
-        required this.text,
-        required this.isUser,
-        required this.createdAt});
+  _ChatMessage({
+    required this.id,
+    required this.text,
+    required this.isUser,
+    required this.createdAt,
+  });
 }
 
 class _ChatBubble extends StatelessWidget {
   final _ChatMessage message;
   final bool isSpeaking;
   final VoidCallback? onSpeak;
-  const _ChatBubble(
-      {required this.message,
-        required this.isSpeaking,
-        required this.onSpeak});
+  const _ChatBubble({
+    required this.message,
+    required this.isSpeaking,
+    required this.onSpeak,
+  });
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
@@ -2579,73 +2902,88 @@ class _ChatBubble extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Row(
-        mainAxisAlignment:
-        isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: isUser
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isUser)
             CircleAvatar(
-                radius: 15,
-                backgroundColor: t.accent.primary,
-                child: Text('✦', style: TextStyle(color: t.tileText))),
+              radius: 15,
+              backgroundColor: t.accent.primary,
+              child: Text('✦', style: TextStyle(color: t.tileText)),
+            ),
           if (!isUser) const SizedBox(width: 9),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 260),
             child: Column(
-              crossAxisAlignment:
-              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              crossAxisAlignment: isUser
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.start,
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     gradient: isUser
                         ? LinearGradient(
-                        colors: [t.accent.primary, t.accent.tertiary])
+                            colors: [t.accent.primary, t.accent.tertiary],
+                          )
                         : null,
                     color: isUser ? null : t.panel,
                     borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(20),
-                        topRight: const Radius.circular(20),
-                        bottomLeft: isUser
-                            ? const Radius.circular(20)
-                            : const Radius.circular(4),
-                        bottomRight: isUser
-                            ? const Radius.circular(4)
-                            : const Radius.circular(20)),
-                    border: isUser
-                        ? null
-                        : Border.all(color: t.cardBorder),
+                      topLeft: const Radius.circular(20),
+                      topRight: const Radius.circular(20),
+                      bottomLeft: isUser
+                          ? const Radius.circular(20)
+                          : const Radius.circular(4),
+                      bottomRight: isUser
+                          ? const Radius.circular(4)
+                          : const Radius.circular(20),
+                    ),
+                    border: isUser ? null : Border.all(color: t.cardBorder),
                   ),
                   child: _RichChatText(
-                      text: message.text,
-                      color: isUser ? t.tileText : t.textPrimary),
+                    text: message.text,
+                    color: isUser ? t.tileText : t.textPrimary,
+                  ),
                 ),
                 const SizedBox(height: 4),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text(time,
-                      style: TextStyle(fontSize: 10, color: t.mutedText)),
-                  if (!isUser && onSpeak != null) ...[
-                    const SizedBox(width: 6),
-                    GestureDetector(
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      time,
+                      style: TextStyle(fontSize: 10, color: t.mutedText),
+                    ),
+                    if (!isUser && onSpeak != null) ...[
+                      const SizedBox(width: 6),
+                      GestureDetector(
                         onTap: onSpeak,
-                        child: Icon(Icons.volume_up_rounded,
-                            size: 14,
-                            color: isSpeaking
-                                ? t.accent.secondary
-                                : t.mutedText)),
+                        child: Icon(
+                          Icons.volume_up_rounded,
+                          size: 14,
+                          color: isSpeaking ? t.accent.secondary : t.mutedText,
+                        ),
+                      ),
+                    ],
                   ],
-                ]),
+                ),
               ],
             ),
           ),
           if (isUser) const SizedBox(width: 9),
           if (isUser)
             CircleAvatar(
-                radius: 15,
-                backgroundColor: t.panelBorder,
-                child: Text('👤',
-                    style: TextStyle(fontSize: 12, color: t.mutedText))),
+              radius: 15,
+              backgroundColor: t.panelBorder,
+              child: Text(
+                '👤',
+                style: TextStyle(fontSize: 12, color: t.mutedText),
+              ),
+            ),
         ],
       ),
     );
@@ -2665,8 +3003,9 @@ class _TypingBubbleState extends State<_TypingBubble>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1200))
-      ..repeat();
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
   }
 
   @override
@@ -2678,26 +3017,30 @@ class _TypingBubbleState extends State<_TypingBubble>
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
-    return Row(children: [
-      CircleAvatar(
+    return Row(
+      children: [
+        CircleAvatar(
           radius: 15,
           backgroundColor: t.accent.primary,
-          child: Text('✦', style: TextStyle(color: t.tileText))),
-      const SizedBox(width: 9),
-      Container(
-        padding:
-        const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        decoration: BoxDecoration(
+          child: Text('✦', style: TextStyle(color: t.tileText)),
+        ),
+        const SizedBox(width: 9),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          decoration: BoxDecoration(
             color: t.panel,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: t.cardBorder)),
-        child: Row(
+            border: Border.all(color: t.cardBorder),
+          ),
+          child: Row(
             children: List.generate(
-                3,
-                    (i) => _BounceDot(
-                    controller: _ctrl, delay: i * 0.18))),
-      ),
-    ]);
+              3,
+              (i) => _BounceDot(controller: _ctrl, delay: i * 0.18),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -2708,28 +3051,42 @@ class _BounceDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
-    final anim = TweenSequence([
-      TweenSequenceItem(
-          tween: Tween<double>(begin: 0, end: -6), weight: 30),
-      TweenSequenceItem(
-          tween: Tween<double>(begin: -6, end: 0), weight: 30),
-      TweenSequenceItem(tween: ConstantTween(0.0), weight: 40)
-    ]).animate(CurvedAnimation(
-        parent: controller,
-        curve: Interval(delay, (delay + 0.5).clamp(0, 1.0),
-            curve: Curves.easeInOut)));
+    final anim =
+        TweenSequence([
+          TweenSequenceItem(
+            tween: Tween<double>(begin: 0, end: -6),
+            weight: 30,
+          ),
+          TweenSequenceItem(
+            tween: Tween<double>(begin: -6, end: 0),
+            weight: 30,
+          ),
+          TweenSequenceItem(tween: ConstantTween(0.0), weight: 40),
+        ]).animate(
+          CurvedAnimation(
+            parent: controller,
+            curve: Interval(
+              delay,
+              (delay + 0.5).clamp(0, 1.0),
+              curve: Curves.easeInOut,
+            ),
+          ),
+        );
     return AnimatedBuilder(
-        animation: anim,
-        builder: (_, __) => Transform.translate(
-            offset: Offset(0, anim.value),
-            child: Container(
-                width: 7,
-                height: 7,
-                margin: const EdgeInsets.symmetric(horizontal: 2.5),
-                decoration: BoxDecoration(
-                    color:
-                    t.accent.primary.withValues(alpha: 0.55),
-                    shape: BoxShape.circle))));
+      animation: anim,
+      builder: (_, _) => Transform.translate(
+        offset: Offset(0, anim.value),
+        child: Container(
+          width: 7,
+          height: 7,
+          margin: const EdgeInsets.symmetric(horizontal: 2.5),
+          decoration: BoxDecoration(
+            color: t.accent.primary.withValues(alpha: 0.55),
+            shape: BoxShape.circle,
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -2738,28 +3095,36 @@ class _RichChatText extends StatelessWidget {
   final Color color;
   const _RichChatText({required this.text, required this.color});
   @override
-  Widget build(BuildContext context) => Text.rich(TextSpan(
+  Widget build(BuildContext context) => Text.rich(
+    TextSpan(
       style: TextStyle(fontSize: 13.5, height: 1.6, color: color),
-      children: _parse(text)));
+      children: _parse(text),
+    ),
+  );
   List<InlineSpan> _parse(String raw) {
     final spans = <InlineSpan>[];
     final regex = RegExp(r'(\*\*.*?\*\*|\*.*?\*)');
     var last = 0;
     for (final match in regex.allMatches(raw)) {
-      if (match.start > last)
+      if (match.start > last) {
         spans.add(TextSpan(text: raw.substring(last, match.start)));
+      }
       final token = match.group(0)!;
-      spans.add(TextSpan(
+      spans.add(
+        TextSpan(
           text: token.startsWith('**')
               ? token.substring(2, token.length - 2)
               : token.substring(1, token.length - 1),
           style: TextStyle(
-              fontWeight: token.startsWith('**')
-                  ? FontWeight.w700
-                  : FontWeight.w400,
-              fontStyle: token.startsWith('**')
-                  ? FontStyle.normal
-                  : FontStyle.italic)));
+            fontWeight: token.startsWith('**')
+                ? FontWeight.w700
+                : FontWeight.w400,
+            fontStyle: token.startsWith('**')
+                ? FontStyle.normal
+                : FontStyle.italic,
+          ),
+        ),
+      );
       last = match.end;
     }
     if (last < raw.length) spans.add(TextSpan(text: raw.substring(last)));
@@ -2780,8 +3145,9 @@ class _LiveDotState extends State<_LiveDot>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1200))
-      ..repeat(reverse: true);
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
   }
 
   @override
@@ -2801,7 +3167,8 @@ class _LiveDotState extends State<_LiveDot>
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           gradient: LinearGradient(
-              colors: [t.accent.primary, t.accent.secondary]),
+            colors: [t.accent.primary, t.accent.secondary],
+          ),
         ),
       ),
     );
@@ -2821,19 +3188,28 @@ class _ArTag extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: t.cardBorder),
       ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
             width: 6,
             height: 6,
             decoration: BoxDecoration(
-                color: t.accent.tertiary, shape: BoxShape.circle)),
-        const SizedBox(width: 5),
-        Text(label,
+              color: t.accent.tertiary,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
             style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: t.textPrimary)),
-      ]),
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: t.textPrimary,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2860,18 +3236,15 @@ class _ToastWidgetState extends State<_ToastWidget>
       duration: const Duration(milliseconds: 400),
     )..forward();
 
-    _slide = Tween<Offset>(
-      begin: const Offset(0, 1.5),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _ctrl,
-      curve: const Cubic(0.32, 0.72, 0, 1),
-    ));
+    _slide = Tween<Offset>(begin: const Offset(0, 1.5), end: Offset.zero)
+        .animate(
+          CurvedAnimation(parent: _ctrl, curve: const Cubic(0.32, 0.72, 0, 1)),
+        );
 
-    _fade = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(
-      parent: _ctrl,
-      curve: Curves.easeOut,
-    ));
+    _fade = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
   }
 
   @override
@@ -2897,8 +3270,7 @@ class _ToastWidgetState extends State<_ToastWidget>
           child: SlideTransition(
             position: _slide,
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 26, vertical: 13),
+              padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 13),
               decoration: BoxDecoration(
                 color: widget.green
                     ? accent3Color.withValues(alpha: 0.15)
@@ -2947,9 +3319,15 @@ class _ShareIconPainter extends CustomPainter {
     canvas.drawCircle(Offset(w * 0.25, h * 0.5), r, paint);
     canvas.drawCircle(Offset(w * 0.75, h * 0.792), r, paint);
     canvas.drawLine(
-        Offset(w * 0.358, h * 0.563), Offset(w * 0.643, h * 0.271), paint);
+      Offset(w * 0.358, h * 0.563),
+      Offset(w * 0.643, h * 0.271),
+      paint,
+    );
     canvas.drawLine(
-        Offset(w * 0.358, h * 0.437), Offset(w * 0.643, h * 0.729), paint);
+      Offset(w * 0.358, h * 0.437),
+      Offset(w * 0.643, h * 0.729),
+      paint,
+    );
   }
 
   @override
@@ -2961,10 +3339,11 @@ class _BgGradientPainter extends CustomPainter {
   final Color primary;
   final Color secondary;
   final Color tertiary;
-  const _BgGradientPainter(
-      {required this.primary,
-        required this.secondary,
-        required this.tertiary});
+  const _BgGradientPainter({
+    required this.primary,
+    required this.secondary,
+    required this.tertiary,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2997,7 +3376,8 @@ class _BgGradientPainter extends CustomPainter {
     ];
     for (final gradient in gradients) {
       paint.shader = gradient.createShader(
-          Rect.fromLTWH(0, 0, size.width, size.height));
+        Rect.fromLTWH(0, 0, size.width, size.height),
+      );
       canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
     }
   }
@@ -3005,6 +3385,6 @@ class _BgGradientPainter extends CustomPainter {
   @override
   bool shouldRepaint(_BgGradientPainter oldDelegate) =>
       oldDelegate.primary != primary ||
-          oldDelegate.secondary != secondary ||
-          oldDelegate.tertiary != tertiary;
+      oldDelegate.secondary != secondary ||
+      oldDelegate.tertiary != tertiary;
 }

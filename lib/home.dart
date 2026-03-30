@@ -1,24 +1,18 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data'; 
 
 import 'package:flutter/material.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:myapp/bills_page.dart' as bills_page;
 import 'package:myapp/boards.dart';
-import 'package:myapp/calendar.dart' as calendar_page;
-import 'package:myapp/life_goals.dart' as life_goals_page;
-import 'package:myapp/meal_planner.dart' as meal_planner_page;
-import 'package:myapp/medi_tracker.dart' as medi_tracker_page;
 import 'package:myapp/profile.dart' as profile;
-import 'package:myapp/skincare.dart' as skincare_page;
-import 'package:myapp/workout.dart' as workout_page;
 import 'package:myapp/wardrobe.dart';
+import 'package:myapp/widgets/ahvi_chat_prompt_bar.dart';
+import 'package:myapp/widgets/ahvi_home_text.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:provider/provider.dart';
-import 'package:myapp/services/appwrite_service.dart'; 
-import 'package:myapp/services/backend_service.dart'; 
+import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/chat.dart'; // 🚀 Added Chat Screen Integration
 
 // ─── Colors ──────────────────────────────────────────────
@@ -27,7 +21,7 @@ const _homeNavItems = <({IconData icon, String label})>[
   (icon: Icons.chat_bubble_outline_rounded, label: 'Chat'),
   (icon: Icons.dry_cleaning_outlined, label: 'Wardrobe'),
   (icon: Icons.search_rounded, label: 'Lens'),
-  (icon: Icons.grid_view_rounded, label: 'Boards'),
+  (icon: Icons.grid_view_rounded, label: 'Planner'),
   (icon: Icons.explore_outlined, label: 'Explore'),
 ];
 
@@ -45,18 +39,27 @@ const _aiSuggestions = [
   "I noticed you love minimal styles — new picks are in.",
 ];
 
-const _organizeBoardChips = <String>[
-  'Meals',
-  'Medicines',
-  'Bills',
-  'Workout',
-  'Calendar',
-  'Skincare',
-  'Life Goals',
+const _prepareChips = [
+  ('✈️ Carry-on', '✈️ Carry-on Packing'),
+  ('🎂 Birthday Party', '🎂 Birthday Party Planning'),
+  ('🏕️ Camping', '🏕️ Camping Trip'),
+  ('💍 Wedding', '💍 Wedding Planning'),
+  ('🏋️ Workout', '🏋️ Gym Workout Routine'),
+  ('🍳 Meal Prep', '🍳 Weekly Meal Prep'),
+  ('💻 Dev Project', '💻 New Coding Project Setup'),
+  ('🏠 Moving House', '🏠 House Moving Checklist'),
+  ('🎓 Study Plan', '🎓 Exam Study Plan'),
+  ('🌿 Gardening', '🌿 Garden Planting'),
 ];
 
+typedef _SuggestionState = ({int index, double opacity});
+typedef _ClockState = ({String greeting, String date});
+
 class Screen4 extends StatefulWidget {
-  const Screen4({super.key});
+  const Screen4({super.key, this.onShellNavTap});
+
+  final ValueChanged<int>? onShellNavTap;
+
   @override
   State<Screen4> createState() => _Screen4State();
 }
@@ -83,15 +86,15 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   Color get _onAccent => Theme.of(context).colorScheme.onPrimary;
   Color get _border => _t.cardBorder;
   LinearGradient get _accentGradient => LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [_accent, _accentTertiary],
-      );
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [_accent, _accentTertiary],
+  );
   LinearGradient get _accentGradient2 => LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [_accent, _accentSecondary],
-      );
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [_accent, _accentSecondary],
+  );
 
   late AnimationController _aurora1Ctrl;
   late AnimationController _aurora2Ctrl;
@@ -105,8 +108,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   late List<AnimationController> _heartPopCtrls;
   final List<bool> _likedState = [false, false, true, false];
 
-  int _suggestionIdx = 0;
-  double _suggestionOpacity = 1.0;
+  final ValueNotifier<_SuggestionState> _suggestionState =
+      ValueNotifier<_SuggestionState>((index: 0, opacity: 1.0));
   Timer? _suggestionTimer;
 
   bool _lensSheetOpen = false;
@@ -115,19 +118,36 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   bool _toastVisible = false;
   Timer? _toastTimer;
 
-  bool _pickSheetOpen = false;
-  String _pickSheetName = '';
-  String _pickSheetTag = '';
-  late AnimationController _pickSheetCtrl;
-
   bool _seeAllOpen = false;
   late AnimationController _seeAllCtrl;
 
   late List<AnimationController> _navRiseCtrls;
 
-  String _greetingWord = 'Morning';
-  String _dateString = '';
+  final ValueNotifier<_ClockState> _clockState = ValueNotifier<_ClockState>((
+    greeting: 'Morning',
+    date: '',
+  ));
   Timer? _clockTimer;
+  final TextEditingController _chatController = TextEditingController();
+  final FocusNode _chatFocusNode = FocusNode();
+
+  // ── Voice ──────────────────────────────────────────────────────────────────
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _isListening = false;
+  bool _speechAvailable = false;
+  final Map<String, List<List<bool>>> _prepareExactChecksByTitle = {};
+  final Map<String, List<List<String>>> _prepareExactItemsByTitle = {};
+  final Map<String, List<TextEditingController>>
+  _prepareExactAddControllersByTitle = {};
+  final Map<String, bool> _prepareExactSavedByTitle = {};
+  final Map<String, List<bool>> _prepareExactOutfitSavedByTitle = {};
+  final Map<String, String> _boardIdByLabel = const {
+    '🎉 Party Looks': 'party_looks',
+    '💍 Occasion': 'occasion',
+    '💼 Office Fit': 'office_fit',
+    '✈️ Vacation': 'vacation',
+    '✨ Everything Else': 'everything_else',
+  };
 
   _OverlayState _overlayState = _OverlayState.idle;
   String? _activeIntent;
@@ -139,10 +159,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   late AnimationController _tagsRevealCtrl;
   List<String> _overlaySuggestions = [];
   String _overlayBrandSub = '';
-  
+
   // 🚀 STATE FIX: We now use a list to stack messages + tracking variables
-  List<_ResponseData> _responses = [];
-  List<Map<String, String>> _chatHistory = [];
+  final List<_ResponseData> _responses = [];
+  final List<Map<String, String>> _chatHistory = [];
   String _runningMemory = "";
   final ScrollController _overlayScrollCtrl = ScrollController();
 
@@ -150,40 +170,69 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   bool _tagsRevealed = false;
 
   String _userName = '...';
+  String _userId = 'user_1';
   Uint8List? _avatarBytes;
-  Map<String, dynamic> _chatUserProfile = <String, dynamic>{};
-  List<Map<String, dynamic>> _chatWardrobe = <Map<String, dynamic>>[];
-  final bool _liteUiMode = true;
+
+  Future<void> _savePrepareExactToBoard({
+    required String boardId,
+    required String title,
+    required List<
+      ({String name, String emoji, Color color, List<String> items})
+    >
+    sections,
+    required List<List<String>> itemsState,
+    required List<List<bool>> checksState,
+    required List<bool> outfitSaved,
+  }) async {
+    final sectionPayload = <Map<String, dynamic>>[];
+    for (var i = 0; i < sections.length; i++) {
+      sectionPayload.add({
+        'name': sections[i].name,
+        'emoji': sections[i].emoji,
+        'color': sections[i].color.value,
+        'items': List<String>.from(itemsState[i]),
+        'checked': List<bool>.from(checksState[i]),
+      });
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+  }
 
   @override
   void initState() {
     super.initState();
+    _initSpeech();
 
-    _aurora1Ctrl =
-        AnimationController(vsync: this, duration: const Duration(seconds: 14))
-          ..forward();
-    _aurora2Ctrl =
-        AnimationController(vsync: this, duration: const Duration(seconds: 18))
-          ..forward();
-    _aurora3Ctrl =
-        AnimationController(vsync: this, duration: const Duration(seconds: 22))
-          ..forward();
-    _shimmerCtrl =
-        AnimationController(vsync: this, duration: const Duration(seconds: 3))
-          ..forward();
+    _aurora1Ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 14),
+    )..repeat(reverse: true);
+    _aurora2Ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 18),
+    )..repeat(reverse: true);
+    _aurora3Ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 22),
+    )..repeat(reverse: true);
+    _shimmerCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    )..repeat();
     _pulseCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 2800))
-      ..forward();
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    )..repeat(reverse: true);
 
     _floatBadgeCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4000),
-    )..forward();
+    )..repeat(reverse: true);
 
     _breatheCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4000),
-    )..forward();
+    )..repeat(reverse: true);
 
     _heartPopCtrls = List.generate(
       4,
@@ -191,11 +240,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         vsync: this,
         duration: const Duration(milliseconds: 380),
       ),
-    );
-
-    _pickSheetCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 420),
     );
 
     _seeAllCtrl = AnimationController(
@@ -217,32 +261,33 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       ),
     );
 
-    if (!_liteUiMode) {
-      _suggestionTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-        setState(() => _suggestionOpacity = 0.0);
-        Future.delayed(const Duration(milliseconds: 350), () {
-          if (!mounted) return;
-          setState(() {
-            _suggestionIdx = (_suggestionIdx + 1) % _aiSuggestions.length;
-            _suggestionOpacity = 1.0;
-          });
-        });
-      });
-    }
+    _suggestionTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _rotateSuggestion(),
+    );
 
     _homeCollapseCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 600));
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
     _overlayFadeCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 380));
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+    );
     _thinkingCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1200))
-      ..forward();
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
     _tagsRevealCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 380));
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+    );
 
     _updateClock();
-    _clockTimer =
-        Timer.periodic(const Duration(seconds: 15), (_) => _updateClock());
+    _clockTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _updateClock(),
+    );
 
     _fetchUserProfile();
   }
@@ -252,77 +297,17 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     final user = await appwrite.getCurrentUser();
 
     if (user != null && mounted) {
-      final firstName =
-          user.name.isNotEmpty ? user.name.split(' ').first : 'Stylist';
+      final firstName = user.name.isNotEmpty
+          ? user.name.split(' ').first
+          : 'Stylist';
       final avatar = await appwrite.getUserAvatar(user.name);
-      final profile = await _loadChatProfile(appwrite, user.$id, user.name);
-      final wardrobe = await appwrite.getWardrobeItems();
 
       setState(() {
         _userName = firstName;
+        _userId = user.$id;
         _avatarBytes = avatar;
-        _chatUserProfile = profile;
-        _chatWardrobe = wardrobe;
       });
     }
-  }
-
-  Future<Map<String, dynamic>> _loadChatProfile(
-    AppwriteService appwrite,
-    String userId,
-    String fullName,
-  ) async {
-    final base = <String, dynamic>{
-      'user_id': userId,
-      'name': fullName,
-      'first_name': fullName.trim().isEmpty ? 'User' : fullName.split(' ').first,
-    };
-    try {
-      final doc = await appwrite.getUserProfile();
-      final raw = Map<String, dynamic>.from(doc.data);
-      final merged = <String, dynamic>{...raw, ...base};
-      final gender = (merged['gender'] ??
-              merged['sex'] ??
-              merged['preferredGender'] ??
-              merged['profile_gender'])
-          ?.toString()
-          .trim();
-      if (gender != null && gender.isNotEmpty) merged['gender'] = gender;
-      final pronouns =
-          merged['pronouns'] ?? merged['preferred_pronouns'] ?? merged['pronoun'];
-      if (pronouns != null && pronouns.toString().trim().isNotEmpty) {
-        merged['pronouns'] = pronouns.toString().trim();
-      }
-      final shoppingPrefs =
-          merged['shopping_preferences'] ??
-          merged['shoppingPreferences'] ??
-          merged['style_preferences'] ??
-          merged['stylePreferences'] ??
-          merged['preferred_styles'];
-      if (shoppingPrefs != null) merged['shopping_preferences'] = shoppingPrefs;
-      final dob = (merged['dob_iso'] ?? merged['dob'] ?? merged['dateOfBirth'])
-          ?.toString()
-          .trim();
-      if (dob != null && dob.isNotEmpty) {
-        merged['dob_iso'] = dob;
-      }
-      return merged;
-    } catch (_) {
-      return base;
-    }
-  }
-
-  Future<void> _refreshChatContext() async {
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    final user = await appwrite.getCurrentUser();
-    if (user == null) return;
-    final profile = await _loadChatProfile(appwrite, user.$id, user.name);
-    final wardrobe = await appwrite.getWardrobeItems();
-    if (!mounted) return;
-    setState(() {
-      _chatUserProfile = profile;
-      _chatWardrobe = wardrobe;
-    });
   }
 
   void _updateClock() {
@@ -330,7 +315,18 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     final now = DateTime.now();
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     String greeting;
     if (now.hour >= 5 && now.hour < 12) {
@@ -342,14 +338,109 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     } else {
       greeting = 'Night';
     }
-    setState(() {
-      _greetingWord = greeting;
-      _dateString = '${days[now.weekday % 7]}, ${now.day} ${months[now.month - 1]}';
+    _clockState.value = (
+      greeting: greeting,
+      date: '${days[now.weekday % 7]}, ${now.day} ${months[now.month - 1]}',
+    );
+  }
+
+  void _rotateSuggestion() {
+    final current = _suggestionState.value;
+    _suggestionState.value = (index: current.index, opacity: 0.0);
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      _suggestionState.value = (
+        index: (current.index + 1) % _aiSuggestions.length,
+        opacity: 1.0,
+      );
     });
+  }
+
+  void _startThinkingAnimation() {
+    if (!_thinkingCtrl.isAnimating) {
+      _thinkingCtrl.repeat();
+    }
+  }
+
+  void _stopThinkingAnimation() {
+    if (_thinkingCtrl.isAnimating) {
+      _thinkingCtrl
+        ..stop()
+        ..value = 0.0;
+    }
+  }
+
+  // ── Voice methods ──────────────────────────────────────────────────────────
+  Future<void> _initSpeech() async {
+    try {
+      _speechAvailable = await _speech.initialize(
+        onStatus: (status) {
+          if (status == 'done' || status == 'notListening') {
+            if (mounted) setState(() => _isListening = false);
+          }
+        },
+        onError: (_) {
+          if (mounted) setState(() => _isListening = false);
+        },
+      );
+    } on PlatformException catch (e) {
+      if (e.code == 'multipleRequests') {
+        await Future.delayed(const Duration(milliseconds: 350));
+        try {
+          _speechAvailable = await _speech.initialize(
+            onStatus: (status) {
+              if (status == 'done' || status == 'notListening') {
+                if (mounted) setState(() => _isListening = false);
+              }
+            },
+            onError: (_) {
+              if (mounted) setState(() => _isListening = false);
+            },
+          );
+        } catch (_) {
+          _speechAvailable = false;
+        }
+      } else {
+        _speechAvailable = false;
+      }
+    } catch (_) {
+      _speechAvailable = false;
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _toggleListening() async {
+    if (!_speechAvailable) return;
+    if (_isListening) {
+      await _speech.stop();
+      setState(() => _isListening = false);
+    } else {
+      setState(() => _isListening = true);
+      await _speech.listen(
+        onResult: (result) {
+          setState(() {
+            _chatController.text = result.recognizedWords;
+            _chatController.selection = TextSelection.fromPosition(
+              TextPosition(offset: _chatController.text.length),
+            );
+          });
+          if (result.finalResult && result.recognizedWords.trim().isNotEmpty) {
+            _speech.stop();
+            setState(() => _isListening = false);
+          }
+        },
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 4),
+        localeId: 'en_IN',
+        cancelOnError: true,
+        partialResults: true,
+      );
+    }
   }
 
   @override
   void dispose() {
+    _speech.stop();
     _aurora1Ctrl.dispose();
     _aurora2Ctrl.dispose();
     _aurora3Ctrl.dispose();
@@ -360,7 +451,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     for (final c in _heartPopCtrls) {
       c.dispose();
     }
-    _pickSheetCtrl.dispose();
     _seeAllCtrl.dispose();
     _lensSheetCtrl.dispose();
     for (final c in _navRiseCtrls) {
@@ -373,7 +463,16 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _suggestionTimer?.cancel();
     _toastTimer?.cancel();
     _clockTimer?.cancel();
-    _overlayScrollCtrl.dispose(); 
+    _suggestionState.dispose();
+    _clockState.dispose();
+    _chatController.dispose();
+    _chatFocusNode.dispose();
+    for (final ctrls in _prepareExactAddControllersByTitle.values) {
+      for (final c in ctrls) {
+        c.dispose();
+      }
+    }
+    _overlayScrollCtrl.dispose();
     super.dispose();
   }
 
@@ -392,6 +491,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       return;
     }
     if (idx == 1) {
+      if (widget.onShellNavTap != null) {
+        widget.onShellNavTap!(1);
+        return;
+      }
       _openNavScreen(const WardrobeScreen());
       return;
     }
@@ -400,6 +503,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       return;
     }
     if (idx == 3) {
+      if (widget.onShellNavTap != null) {
+        widget.onShellNavTap!(3);
+        return;
+      }
       _openNavScreen(const BoardsScreen());
       return;
     }
@@ -409,19 +516,25 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     }
     if (idx == _activeNavIdx) return;
 
-    _navRiseCtrls[_activeNavIdx]
-        .animateTo(0.0, curve: const Cubic(0.4, 0.0, 0.2, 1.0));
-    _navRiseCtrls[idx]
-        .animateTo(1.0, curve: const Cubic(0.34, 1.56, 0.64, 1.0));
+    _navRiseCtrls[_activeNavIdx].animateTo(
+      0.0,
+      curve: const Cubic(0.4, 0.0, 0.2, 1.0),
+    );
+    _navRiseCtrls[idx].animateTo(
+      1.0,
+      curve: const Cubic(0.34, 1.56, 0.64, 1.0),
+    );
 
     setState(() => _activeNavIdx = idx);
   }
 
   void _openLensSheet() {
     setState(() => _lensSheetOpen = true);
-    _lensSheetCtrl.animateTo(1.0,
-        duration: const Duration(milliseconds: 420),
-        curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+    _lensSheetCtrl.animateTo(
+      1.0,
+      duration: const Duration(milliseconds: 420),
+      curve: const Cubic(0.16, 1.0, 0.3, 1.0),
+    );
   }
 
   void _closeLensSheet() {
@@ -457,42 +570,55 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  void _openPickSheet(String name, String tag) {
-    setState(() {
-      _pickSheetOpen = true;
-      _pickSheetName = name;
-      _pickSheetTag = tag;
-    });
-    _pickSheetCtrl.animateTo(1.0,
-        duration: const Duration(milliseconds: 480),
-        curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+  void _openModuleChat(String moduleKey) {
+    final normalized = moduleKey == 'prepare' ? 'plan' : moduleKey;
+    _openNavScreen(ChatScreen(moduleContext: normalized));
   }
 
-  void _closePickSheet() {
-    _pickSheetCtrl
-        .animateTo(0.0,
-            duration: const Duration(milliseconds: 320),
-            curve: const Cubic(0.4, 0.0, 1.0, 1.0))
-        .then((_) {
-      if (mounted) setState(() => _pickSheetOpen = false);
-    });
+  void _openChatWithPrompt(String prompt) {
+    final text = prompt.trim();
+    final module = (_activeIntent ?? 'style').trim();
+    if (text.isEmpty) {
+      _openNavScreen(ChatScreen(moduleContext: module));
+      return;
+    }
+    _openNavScreen(ChatScreen(moduleContext: module, initialPrompt: text));
+  }
+
+  void _openPickSheet(String name, String tag) {
+    showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: _bgPrimary.withValues(alpha: 0.30),
+      builder: (sheetContext) => _buildPickSheet(
+        name: name,
+        tag: tag,
+        onClose: () => Navigator.of(sheetContext).pop(),
+      ),
+    );
   }
 
   void _openSeeAll() {
     setState(() => _seeAllOpen = true);
-    _seeAllCtrl.animateTo(1.0,
-        duration: const Duration(milliseconds: 400),
-        curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+    _seeAllCtrl.animateTo(
+      1.0,
+      duration: const Duration(milliseconds: 400),
+      curve: const Cubic(0.16, 1.0, 0.3, 1.0),
+    );
   }
 
   void _closeSeeAll() {
     _seeAllCtrl
-        .animateTo(0.0,
-            duration: const Duration(milliseconds: 300),
-            curve: const Cubic(0.4, 0.0, 1.0, 1.0))
+        .animateTo(
+          0.0,
+          duration: const Duration(milliseconds: 300),
+          curve: const Cubic(0.4, 0.0, 1.0, 1.0),
+        )
         .then((_) {
-      if (mounted) setState(() => _seeAllOpen = false);
-    });
+          if (mounted) setState(() => _seeAllOpen = false);
+        });
   }
 
   void _toggleLike(int cardIdx) {
@@ -511,20 +637,25 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       _homeCollapsed = true;
       _overlayBrandSub = cfg.brandSub;
     });
-    _homeCollapseCtrl.animateTo(1.0,
-        duration: const Duration(milliseconds: 600),
-        curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+    _homeCollapseCtrl.animateTo(
+      1.0,
+      duration: const Duration(milliseconds: 600),
+      curve: const Cubic(0.16, 1.0, 0.3, 1.0),
+    );
     Future.delayed(const Duration(milliseconds: 420), () {
       if (!mounted) return;
       setState(() {
+        _stopThinkingAnimation();
         _overlayState = _OverlayState.suggestions;
         _overlaySuggestions = cfg.suggestions;
-        _responses.clear(); 
+        _responses.clear();
         _tagsRevealed = false;
       });
-      _overlayFadeCtrl.animateTo(1.0,
-          duration: const Duration(milliseconds: 380),
-          curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+      _overlayFadeCtrl.animateTo(
+        1.0,
+        duration: const Duration(milliseconds: 380),
+        curve: const Cubic(0.16, 1.0, 0.3, 1.0),
+      );
     });
   }
 
@@ -538,104 +669,104 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       _activeIntent = 'chat';
       final cfg = _intentConfig['chat']!;
       _setPlaceholder('chat');
-      
+
       setState(() {
         _homeCollapsed = true;
         _overlayBrandSub = cfg.brandSub;
       });
-      
-      _homeCollapseCtrl.animateTo(1.0,
-          duration: const Duration(milliseconds: 600),
-          curve: const Cubic(0.16, 1.0, 0.3, 1.0));
-          
+
+      _homeCollapseCtrl.animateTo(
+        1.0,
+        duration: const Duration(milliseconds: 600),
+        curve: const Cubic(0.16, 1.0, 0.3, 1.0),
+      );
+
       Future.delayed(const Duration(milliseconds: 420), () {
         if (!mounted) return;
-        
+
         if (query.isNotEmpty) {
-          _overlayFadeCtrl.animateTo(1.0,
-              duration: const Duration(milliseconds: 380),
-              curve: const Cubic(0.16, 1.0, 0.3, 1.0));
-          
+          _overlayFadeCtrl.animateTo(
+            1.0,
+            duration: const Duration(milliseconds: 380),
+            curve: const Cubic(0.16, 1.0, 0.3, 1.0),
+          );
+
           _handleQuery(query, 'chat');
         } else {
           setState(() {
+            _stopThinkingAnimation();
             _overlayState = _OverlayState.suggestions;
             _overlaySuggestions = cfg.suggestions;
             _responses.clear();
             _tagsRevealed = false;
           });
-          _overlayFadeCtrl.animateTo(1.0,
-              duration: const Duration(milliseconds: 380),
-              curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+          _overlayFadeCtrl.animateTo(
+            1.0,
+            duration: const Duration(milliseconds: 380),
+            curve: const Cubic(0.16, 1.0, 0.3, 1.0),
+          );
         }
       });
-    } else if (_overlayState == _OverlayState.suggestions || _overlayState == _OverlayState.response) {
+    } else if (_overlayState == _OverlayState.suggestions ||
+        _overlayState == _OverlayState.response) {
       _handleQuery(query, _activeIntent ?? 'chat');
     }
   }
 
   // 🚀 FIXED FUNCTION: REAL API CALL WITH HISTORY & MEMORY
-  // Handles intent queries, including local organize board status cards.
   Future<void> _handleQuery(String question, String intent) async {
     if (_overlayState == _OverlayState.thinking) return;
-    final backendIntent = _normalizeIntentForBackend(intent);
+
     final cfg = _intentConfig[intent] ?? _intentConfig['chat']!;
 
     setState(() {
+      _startThinkingAnimation();
       _overlayState = _OverlayState.thinking;
       _overlaySuggestions = [];
       _responseTags = cfg.responseTags;
       _tagsRevealed = false;
+      // We DO NOT clear _responses here so the old messages stay on screen!
     });
 
     _ResponseData? resp;
 
-    try {
-      await _refreshChatContext();
-
-      // Local board snapshot path for Organize chips.
-      final localBoardResp = await _maybeBuildLocalOrganizeResponse(
-        question,
-        backendIntent,
-      );
-      if (localBoardResp != null) {
-        _chatHistory.add({"role": "user", "content": question});
-        _chatHistory.add({"role": "assistant", "content": localBoardResp.intro});
-        _responseTags = _organizeBoardChips;
-        resp = localBoardResp;
-      } else {
+    final isPrepareQuickChip =
+        intent == 'prepare' && _prepareChips.any((chip) => chip.$2 == question);
+    if (isPrepareQuickChip) {
+      resp = _buildPrepareChipResponse(question);
+    } else {
+      try {
         final backend = Provider.of<BackendService>(context, listen: false);
+
+        // Grab the history payload we've been secretly storing
         final historyPayload = List<Map<String, String>>.from(_chatHistory);
 
         final apiResult = await backend.sendChatQuery(
           question,
-          'user_$_userName',
+          _userId,
           historyPayload,
           _runningMemory,
-          userProfile: _chatUserProfile,
-          wardrobeItems: _chatWardrobe,
-          moduleContext: backendIntent == 'chat' ? null : backendIntent,
         );
 
+        // Store user's question into history
         _chatHistory.add({"role": "user", "content": question});
+
         if (apiResult['updated_memory'] != null) {
           _runningMemory = apiResult['updated_memory'];
         }
 
         String aiText = "Could not parse response.";
+
         if (apiResult.containsKey('message') && apiResult['message'] != null) {
-          final msg = apiResult['message'];
-          if (msg is String && msg.trim().isNotEmpty) {
-            aiText = msg.trim();
-          } else if (msg is Map && msg['content'] != null) {
-            aiText = msg['content']?.toString() ?? "No content";
-          }
+          aiText = apiResult['message']['content']?.toString() ?? "No content";
         } else if (apiResult.containsKey('error')) {
           aiText = apiResult['error']?.toString() ?? "Unknown error occurred";
         }
 
+        // Store AHVI's response into history
         _chatHistory.add({"role": "assistant", "content": aiText});
 
+        // Cleanup tags perfectly
         aiText = aiText.replaceAll(
           RegExp(r'\[CHIPS:.*?\]', caseSensitive: false, dotAll: true),
           '',
@@ -658,34 +789,33 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         if (apiResult.containsKey('chips') &&
             apiResult['chips'] != null &&
             apiResult['chips'] is List) {
-          final rawChips = apiResult['chips'] as List<dynamic>;
+          final List<dynamic> rawChips = apiResult['chips'];
           if (rawChips.isNotEmpty) {
             _responseTags = rawChips.map((e) => e.toString()).toList();
           }
         }
 
+        resp = _ResponseData(type: 'text', question: question, intro: aiText);
+      } catch (e) {
+        String errorMsg = e.toString();
+        if (errorMsg.length > 150) {
+          errorMsg = '${errorMsg.substring(0, 150)}... [Error Truncated]';
+        }
+
         resp = _ResponseData(
           type: 'text',
           question: question,
-          intro: aiText,
+          intro: "Backend Connection Failed.\n\n$errorMsg",
         );
       }
-    } catch (e) {
-      var errorMsg = e.toString();
-      if (errorMsg.length > 150) {
-        errorMsg = '${errorMsg.substring(0, 150)}... [Error Truncated]';
-      }
-      resp = _ResponseData(
-        type: 'text',
-        question: question,
-        intro: "Backend Connection Failed.\n\n$errorMsg",
-      );
     }
 
     if (!mounted) return;
+
     setState(() {
+      _stopThinkingAnimation();
       _overlayState = _OverlayState.response;
-      _responses.add(resp!);
+      _responses.add(resp!); // 🚀 Add the new message to the list!
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -698,7 +828,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       }
     });
 
-    Future.delayed(const Duration(milliseconds: 150), () {
+    final tagDelay = 150;
+
+    Future.delayed(Duration(milliseconds: tagDelay), () {
       if (!mounted) return;
       setState(() => _tagsRevealed = true);
       _tagsRevealCtrl.animateTo(
@@ -709,338 +841,65 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     });
   }
 
-  String _normalizeIntentForBackend(String intent) {
-    final normalized = intent.toLowerCase().trim();
-    return normalized == 'prepare' ? 'plan' : normalized;
-  }
-
-  String? _resolveOrganizeBoardKey(String raw) {
-    final q = raw
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    if (q.isEmpty) return null;
-    if (q.contains('medic') || q.contains('pill')) return 'medicines';
-    if (q.contains('meal') || q.contains('food')) return 'meals';
-    if (q.contains('bill') || q.contains('payment') || q.contains('expense')) {
-      return 'bills';
-    }
-    if (q.contains('workout') || q.contains('gym') || q.contains('exercise')) {
-      return 'workout';
-    }
-    if (q.contains('calendar') || q.contains('event') || q.contains('schedule')) {
-      return 'calendar';
-    }
-    if (q.contains('skin') || q.contains('routine')) return 'skincare';
-    if (q.contains('goal') || q.contains('habit')) return 'life_goals';
-    return null;
-  }
-
-  Future<_ResponseData?> _maybeBuildLocalOrganizeResponse(
-    String question,
-    String backendIntent,
-  ) async {
-    if (backendIntent != 'organize') return null;
-    final key = _resolveOrganizeBoardKey(question);
-    if (key == null) return null;
-    final status = await _buildOrganizeBoardStatus(key);
-    return _ResponseData(
-      type: 'organize_board',
-      question: question,
-      intro: "Today's status for ${status.title}",
-      organizeBoard: status,
-    );
-  }
-
-  String _organizeBoardTitle(String boardKey) {
-    switch (boardKey) {
-      case 'meals':
-        return 'Meals Board';
-      case 'medicines':
-        return 'Medicines Board';
-      case 'bills':
-        return 'Bills Board';
-      case 'workout':
-        return 'Workout Board';
-      case 'calendar':
-        return 'Calendar Board';
-      case 'skincare':
-        return 'Skincare Board';
-      case 'life_goals':
-        return 'Life Goals Board';
-      default:
-        return 'Organize Board';
-    }
-  }
-
-  IconData _organizeBoardIcon(String boardKey) {
-    switch (boardKey) {
-      case 'meals':
-        return Icons.restaurant_menu_rounded;
-      case 'medicines':
-        return Icons.medical_services_rounded;
-      case 'bills':
-        return Icons.receipt_long_rounded;
-      case 'workout':
-        return Icons.fitness_center_rounded;
-      case 'calendar':
-        return Icons.calendar_month_rounded;
-      case 'skincare':
-        return Icons.spa_rounded;
-      case 'life_goals':
-        return Icons.track_changes_rounded;
-      default:
-        return Icons.grid_view_rounded;
-    }
-  }
-
-  DateTime? _toLocalDate(dynamic raw) {
-    if (raw == null) return null;
-    if (raw is DateTime) return raw.toLocal();
-    final parsed = DateTime.tryParse(raw.toString());
-    return parsed?.toLocal();
-  }
-
-  bool _isSameLocalDay(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
-
-  int _intValue(dynamic value, {int fallback = 0}) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    return int.tryParse(value?.toString() ?? '') ?? fallback;
-  }
-
-  int _listLength(dynamic value) {
-    if (value is List) return value.length;
-    return 0;
-  }
-
-  Future<_OrganizeBoardStatus> _buildOrganizeBoardStatus(String boardKey) async {
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    final title = _organizeBoardTitle(boardKey);
-    final icon = _organizeBoardIcon(boardKey);
-    final now = DateTime.now();
-
-    try {
-      switch (boardKey) {
-        case 'medicines':
-          final meds = await appwrite.getMeds();
-          var tracked = 0;
-          var takenToday = 0;
-          for (final med in meds) {
-            final reminder = med.data['reminder'];
-            if (reminder is bool && !reminder) continue;
-            tracked++;
-            final takenAt = _toLocalDate(med.data['lastTaken']);
-            if (takenAt != null && _isSameLocalDay(takenAt, now)) {
-              takenToday++;
-            }
-          }
-          final pending = math.max(0, tracked - takenToday);
-          final done = tracked > 0 && pending == 0;
-          final headline = tracked == 0
-              ? 'No medicines added yet.'
-              : done
-                  ? 'All medicines are done for today.'
-                  : '$pending medicine${pending == 1 ? '' : 's'} pending today.';
-          return _OrganizeBoardStatus(
-            boardKey: boardKey,
-            title: title,
-            icon: icon,
-            done: done,
-            headline: headline,
-            details: [
-              tracked == 0
-                  ? 'Add medicines to start day tracking.'
-                  : 'Taken today: $takenToday / $tracked',
-              if (tracked > 0) 'Pending: $pending',
-            ],
-          );
-
-        case 'meals':
-          final plans = await appwrite.getMealPlans();
-          return _OrganizeBoardStatus(
-            boardKey: boardKey,
-            title: title,
-            icon: icon,
-            done: false,
-            headline: plans.isEmpty
-                ? 'No meal plans saved yet.'
-                : '${plans.length} meal plan(s) available.',
-            details: [
-              plans.isEmpty
-                  ? 'Create a meal plan to organize your day.'
-                  : 'Open the board for meal-wise details.',
-            ],
-          );
-
-        case 'bills':
-          final bills = await appwrite.getBills();
-          final addedToday = bills.where((doc) {
-            final when = _toLocalDate(doc.data['date']);
-            return when != null && _isSameLocalDay(when, now);
-          }).length;
-          return _OrganizeBoardStatus(
-            boardKey: boardKey,
-            title: title,
-            icon: icon,
-            done: addedToday > 0,
-            headline: addedToday > 0
-                ? '$addedToday bill entr${addedToday == 1 ? 'y' : 'ies'} added today.'
-                : 'No bill entries added today.',
-            details: ['Total bills tracked: ${bills.length}'],
-          );
-
-        case 'workout':
-          final outfits = await appwrite.getWorkoutOutfits();
-          return _OrganizeBoardStatus(
-            boardKey: boardKey,
-            title: title,
-            icon: icon,
-            done: false,
-            headline: outfits.isEmpty
-                ? 'No workout outfits saved yet.'
-                : '${outfits.length} workout outfit(s) saved.',
-            details: ['Open the board to review your workout sets.'],
-          );
-
-        case 'calendar':
-          final plans = await appwrite.getUserPlans();
-          final remindersOn =
-              plans.where((p) => p.data['reminder'] == true).length;
-          return _OrganizeBoardStatus(
-            boardKey: boardKey,
-            title: title,
-            icon: icon,
-            done: false,
-            headline: plans.isEmpty
-                ? 'No plans on your calendar board yet.'
-                : '${plans.length} plan(s) available.',
-            details: [
-              if (plans.isNotEmpty) 'Reminders active: $remindersOn',
-              'Open board to view your schedule.',
-            ],
-          );
-
-        case 'skincare':
-          final profile = await appwrite.getSkincareProfile();
-          if (profile == null) {
-            return _OrganizeBoardStatus(
-              boardKey: boardKey,
-              title: title,
-              icon: icon,
-              done: false,
-              headline: 'Skincare profile not set yet.',
-              details: ['Add your AM/PM routine to start tracking.'],
-            );
-          }
-          final daySteps = _listLength(profile.data['daySteps']);
-          final nightSteps = _listLength(profile.data['nightSteps']);
-          return _OrganizeBoardStatus(
-            boardKey: boardKey,
-            title: title,
-            icon: icon,
-            done: false,
-            headline: 'Routine ready: $daySteps day, $nightSteps night steps.',
-            details: ['Open board to follow today''s routine.'],
-          );
-
-        case 'life_goals':
-          final goals = await appwrite.getLifeGoals();
-          var completed = 0;
-          for (final g in goals) {
-            final progress = _intValue(g.data['progress']);
-            final target = _intValue(g.data['target'], fallback: 100);
-            if (target > 0 && progress >= target) completed++;
-          }
-          return _OrganizeBoardStatus(
-            boardKey: boardKey,
-            title: title,
-            icon: icon,
-            done: goals.isNotEmpty && completed == goals.length,
-            headline: goals.isEmpty
-                ? 'No life goals added yet.'
-                : '$completed / ${goals.length} goals completed.',
-            details: ['Open board for full progress tracking.'],
-          );
-      }
-    } catch (_) {}
-
-    return _OrganizeBoardStatus(
-      boardKey: boardKey,
-      title: title,
-      icon: icon,
-      done: false,
-      headline: 'Could not load live status right now.',
-      details: ['Open the board for the latest details.'],
-    );
-  }
-
-  void _openOrganizeBoard(String boardKey) {
-    Widget? page;
-    switch (boardKey) {
-      case 'meals':
-        page = const meal_planner_page.Screen4();
-        break;
-      case 'medicines':
-        page = const medi_tracker_page.MediTrackScreen();
-        break;
-      case 'bills':
-        page = const bills_page.BillsScreen();
-        break;
-      case 'workout':
-        page = const workout_page.WorkoutScreen();
-        break;
-      case 'calendar':
-        page = const calendar_page.CalendarScreen();
-        break;
-      case 'skincare':
-        page = const skincare_page.SkincareScreen();
-        break;
-      case 'life_goals':
-        page = const life_goals_page.LifeGoalsScreen();
-        break;
-    }
-    if (page == null) return;
-    _openNavScreen(page);
-  }
   void _dismissOverlay() {
-    _overlayFadeCtrl.animateTo(0.0,
-        duration: const Duration(milliseconds: 300),
-        curve: const Cubic(0.4, 0.0, 1.0, 1.0));
-    _homeCollapseCtrl.animateTo(0.0,
-        duration: const Duration(milliseconds: 500),
-        curve: const Cubic(0.16, 1.0, 0.3, 1.0));
+    _overlayFadeCtrl.animateTo(
+      0.0,
+      duration: const Duration(milliseconds: 300),
+      curve: const Cubic(0.4, 0.0, 1.0, 1.0),
+    );
+    _homeCollapseCtrl.animateTo(
+      0.0,
+      duration: const Duration(milliseconds: 500),
+      curve: const Cubic(0.16, 1.0, 0.3, 1.0),
+    );
     setState(() {
+      _stopThinkingAnimation();
       _overlayState = _OverlayState.idle;
       _activeIntent = null;
       _homeCollapsed = false;
       _overlaySuggestions = [];
-      _responses.clear(); 
+      _responses.clear();
       _tagsRevealed = false;
       _chatPlaceholder = 'Ask AHVI anything…';
     });
   }
 
   void _setPlaceholder(String intent) {
-    setState(() =>
-        _chatPlaceholder = _intentPlaceholder[intent] ?? 'Ask AHVI anything…');
+    setState(
+      () =>
+          _chatPlaceholder = _intentPlaceholder[intent] ?? 'Ask AHVI anything…',
+    );
+  }
+
+  void _handlePrepareChipSend(String query) {
+    if (_activeIntent == 'prepare' &&
+        (_overlayState == _OverlayState.suggestions ||
+            _overlayState == _OverlayState.response)) {
+      _handleQuery(query, 'prepare');
+      return;
+    }
+    if (_overlayState == _OverlayState.idle) {
+      _triggerIntent('prepare');
+      Future.delayed(const Duration(milliseconds: 420), () {
+        if (!mounted) return;
+        if (_overlayState == _OverlayState.suggestions &&
+            (_activeIntent ?? 'prepare') == 'prepare') {
+          _handleQuery(query, 'prepare');
+        }
+      });
+    }
+  }
+
+  _ResponseData _buildPrepareChipResponse(String question) {
+    return _ResponseData(type: 'prepare_exact', question: question, intro: '');
   }
 
   bool get _hasTransientUi =>
-      _lensSheetOpen ||
-      _pickSheetOpen ||
-      _seeAllOpen ||
-      _overlayState != _OverlayState.idle;
+      _lensSheetOpen || _seeAllOpen || _overlayState != _OverlayState.idle;
 
   void _handleBackNavigation() {
     if (_lensSheetOpen) {
       _closeLensSheet();
-      return;
-    }
-    if (_pickSheetOpen) {
-      _closePickSheet();
       return;
     }
     if (_seeAllOpen) {
@@ -1063,10 +922,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           _handleBackNavigation();
         }
       },
-      child: Scaffold(
-        backgroundColor: _bgPrimary,
-        body: _buildPhoneScreen(),
-      ),
+      child: Scaffold(backgroundColor: _bgPrimary, body: _buildPhoneScreen()),
     );
   }
 
@@ -1092,8 +948,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                   scale: 1.0 - 0.02 * t,
                   child: Opacity(
                     opacity: (1.0 - t).clamp(0.0, 1.0),
-                    child:
-                        IgnorePointer(ignoring: _homeCollapsed, child: child),
+                    child: IgnorePointer(
+                      ignoring: _homeCollapsed,
+                      child: child,
+                    ),
                   ),
                 ),
               );
@@ -1104,28 +962,20 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               child: Column(
                 children: [
                   Expanded(
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(
-                        parent: AlwaysScrollableScrollPhysics(),
-                      ),
-                      padding: EdgeInsets.zero,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildTopBar(),
-                            _buildGreetingBlock(),
-                            _buildPromptChipsRow(),
-                            const SizedBox(height: 16),
-                            _buildHeroCard(),
-                            const SizedBox(height: 16),
-                            _buildSecondaryRow(),
-                            _buildSectionHead(),
-                            _buildPicksStrip(),
-                            const SizedBox(height: 200),
-                          ],
-                        ),
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 20, right: 20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildTopBar(),
+                          _buildGreetingBlock(),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 200),
+                            child: _buildHeroCard(),
+                          ),
+                          const SizedBox(height: 10),
+                          _buildSecondaryRow(),
+                        ],
                       ),
                     ),
                   ),
@@ -1136,21 +986,20 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
           if (_overlayState != _OverlayState.idle) _buildAiOverlay(),
 
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 96,
-            child: _buildChatWrap(),
-          ),
+          Positioned(left: 0, right: 0, bottom: 120, child: _buildChatWrap()),
 
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 16,
-            child: _buildBottomNav(),
-          ),
+          if (_activeIntent == 'prepare' &&
+              (_overlayState == _OverlayState.suggestions ||
+                  _overlayState == _OverlayState.response))
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 196,
+              child: _buildPrepareBottomQuickChips(),
+            ),
 
-          if (_pickSheetOpen) _buildPickSheet(),
+          Positioned(left: 16, right: 16, bottom: 16, child: _buildBottomNav()),
+
           if (_seeAllOpen) _buildSeeAllPanel(),
           if (_lensSheetOpen) _buildLensSheet(),
           _buildComingSoonToast(),
@@ -1164,8 +1013,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       child: RepaintBoundary(
         child: ClipRect(
           child: AnimatedBuilder(
-            animation:
-                Listenable.merge([_aurora1Ctrl, _aurora2Ctrl, _aurora3Ctrl]),
+            animation: Listenable.merge([
+              _aurora1Ctrl,
+              _aurora2Ctrl,
+              _aurora3Ctrl,
+            ]),
             builder: (context, _) {
               final t1 = _aurora1Ctrl.value;
               final t2 = _aurora2Ctrl.value;
@@ -1176,25 +1028,37 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     top: -100 + (t1 * 90),
                     left: -80 + (t1 * 60),
                     child: _auroraOrb(
-                        340, 340, _accent.withValues(alpha: 0.30)),
+                      340,
+                      340,
+                      _accent.withValues(alpha: 0.30),
+                    ),
                   ),
                   Positioned(
                     bottom: -60 + (t2 * 60),
                     right: -60 + (t2 * 30),
                     child: _auroraOrb(
-                        300, 300, _accentSecondary.withValues(alpha: 0.34)),
+                      300,
+                      300,
+                      _accentSecondary.withValues(alpha: 0.34),
+                    ),
                   ),
                   Positioned(
                     top: 300 + (t3 * -60),
                     left: -40 + (t3 * 100),
                     child: _auroraOrb(
-                        220, 220, _accentTertiary.withValues(alpha: 0.22)),
+                      220,
+                      220,
+                      _accentTertiary.withValues(alpha: 0.22),
+                    ),
                   ),
                   Positioned(
                     top: 140 + (t1 * 80),
                     right: -30,
                     child: _auroraOrb(
-                        180, 180, _accent.withValues(alpha: 0.18)),
+                      180,
+                      180,
+                      _accent.withValues(alpha: 0.18),
+                    ),
                   ),
                 ],
               );
@@ -1221,18 +1085,15 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
   Widget _buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.only(top: 16, bottom: 8),
+      padding: const EdgeInsets.only(top: 10, bottom: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            'AHVI',
-            style: GoogleFonts.bebasNeue(
-              color: _textHeading,
-              fontSize: 36,
-              fontWeight: FontWeight.w400,
-              letterSpacing: 3.2,
-            ),
+          AhviHomeText(
+            color: _textHeading,
+            fontSize: 36,
+            letterSpacing: 3.2,
+            fontWeight: FontWeight.w400,
           ),
           _buildProfileAvatar(),
         ],
@@ -1276,10 +1137,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: _panel,
-          border: Border.all(
-            color: _accent.withValues(alpha: 0.25),
-            width: 1,
-          ),
+          border: Border.all(color: _accent.withValues(alpha: 0.25), width: 1),
           boxShadow: [
             BoxShadow(
               color: _shadowMedium,
@@ -1291,110 +1149,134 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         clipBehavior: Clip.antiAlias,
         child: _avatarBytes == null
             ? Container(color: t.panel)
-            : Image.memory(
-                _avatarBytes!,
-                fit: BoxFit.cover,
-              ),
+            : Image.memory(_avatarBytes!, fit: BoxFit.cover),
       ),
     );
   }
 
   Widget _buildGreetingBlock() {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _dateString.isEmpty ? 'Fri, 6 Mar' : _dateString,
-            style: TextStyle(
-              color: _textMuted,
-              fontSize: 12,
-              fontWeight: FontWeight.w400,
-              letterSpacing: 0.1,
-            ),
-          ),
-          const SizedBox(height: 6),
-          RichText(
-            text: TextSpan(
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w400,
-                color: _textHeading,
-                letterSpacing: -0.56,
-                height: 1.1,
+      padding: const EdgeInsets.only(bottom: 6),
+      child: ValueListenableBuilder<_ClockState>(
+        valueListenable: _clockState,
+        builder: (context, clock, _) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                clock.date.isEmpty ? 'Fri, 6 Mar' : clock.date,
+                style: TextStyle(
+                  color: _textMuted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w400,
+                  letterSpacing: 0.1,
+                ),
               ),
-              children: [
-                TextSpan(text: '$_greetingWord, '),
-                WidgetSpan(
-                    child: _GradientText('$_userName.',
-                        fontSize: 28, fontWeight: FontWeight.w400)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          _AnimatedPressable(
-            liftY: -1.5,
-            scalePressed: 0.98,
-            onTap: () => _submitQuery(''),
-            child: Container(
-              decoration: BoxDecoration(
-                color: _surface.withValues(alpha: 0.80),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _border),
-                boxShadow: [
-                  BoxShadow(color: _shadowMedium, blurRadius: 10)
-                ],
+              const SizedBox(height: 3),
+              RichText(
+                text: TextSpan(
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w400,
+                    color: _textHeading,
+                    letterSpacing: -0.56,
+                    height: 1.1,
+                  ),
+                  children: [
+                    TextSpan(text: '${clock.greeting}, '),
+                    WidgetSpan(
+                      child: _GradientText(
+                        '$_userName.',
+                        fontSize: 28,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-              child: Row(
-                children: [
-                  Container(
-                    width: 26,
-                    height: 26,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        colors: [
-                          _accent.withValues(alpha: 0.15),
-                          _accentTertiary.withValues(alpha: 0.15)
+              const SizedBox(height: 6),
+              ValueListenableBuilder<_SuggestionState>(
+                valueListenable: _suggestionState,
+                builder: (context, suggestion, _) {
+                  return _AnimatedPressable(
+                    liftY: -1.5,
+                    scalePressed: 0.98,
+                    onTap: () =>
+                        _openChatWithPrompt(_aiSuggestions[suggestion.index]),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: _surface.withValues(alpha: 0.80),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: _border),
+                        boxShadow: [
+                          BoxShadow(color: _shadowMedium, blurRadius: 10),
                         ],
                       ),
-                      border: Border.all(
-                          color: _accent.withValues(alpha: 0.25), width: 1),
-                    ),
-                    child: Center(
-                      child: ShaderMask(
-                        shaderCallback: (b) => _accentGradient.createShader(b),
-                        child: Icon(Icons.auto_awesome,
-                            color: _textHeading, size: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 11,
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 26,
+                            height: 26,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: LinearGradient(
+                                colors: [
+                                  _accent.withValues(alpha: 0.15),
+                                  _accentTertiary.withValues(alpha: 0.15),
+                                ],
+                              ),
+                              border: Border.all(
+                                color: _accent.withValues(alpha: 0.25),
+                                width: 1,
+                              ),
+                            ),
+                            child: Center(
+                              child: ShaderMask(
+                                shaderCallback: (b) =>
+                                    _accentGradient.createShader(b),
+                                child: Icon(
+                                  Icons.auto_awesome,
+                                  color: _textHeading,
+                                  size: 12,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: AnimatedOpacity(
+                              opacity: suggestion.opacity,
+                              duration: const Duration(milliseconds: 350),
+                              child: Text(
+                                _aiSuggestions[suggestion.index],
+                                style: TextStyle(
+                                  color: _textSub,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w400,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: _accent.withValues(alpha: 0.65),
+                            size: 18,
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: AnimatedOpacity(
-                      opacity: _suggestionOpacity,
-                      duration: const Duration(milliseconds: 350),
-                      child: Text(
-                        _aiSuggestions[_suggestionIdx],
-                        style: TextStyle(
-                          color: _textSub,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w400,
-                          height: 1.4,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(Icons.chevron_right_rounded,
-                      color: _accent.withValues(alpha: 0.65), size: 18),
-                ],
+                  );
+                },
               ),
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -1418,7 +1300,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           return _AnimatedPressable(
             liftY: -2.0,
             scalePressed: 0.95,
-            onTap: () => _submitQuery(chips[i].$3),
+            onTap: () => _openChatWithPrompt(chips[i].$3),
             child: Container(
               decoration: BoxDecoration(
                 color: _panel,
@@ -1427,7 +1309,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                 boxShadow: [
                   BoxShadow(color: _shadowMedium, blurRadius: 8),
                   BoxShadow(
-                      color: _accent.withValues(alpha: 0.06), blurRadius: 8),
+                    color: _accent.withValues(alpha: 0.06),
+                    blurRadius: 8,
+                  ),
                 ],
               ),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
@@ -1460,35 +1344,67 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildPrepareBottomQuickChips() {
+    return SizedBox(
+      height: 40,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
+        itemCount: _prepareChips.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 7),
+        itemBuilder: (_, i) {
+          return _PrepareQuickChip(
+            label: _prepareChips[i].$1,
+            onSend: () => _handlePrepareChipSend(_prepareChips[i].$2),
+            accent: _accent,
+            accentSecondary: _accentSecondary,
+            panel: _panel,
+            border: _border,
+            activeText: _textHeading,
+            textMuted: _textMuted,
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildHeroCard() {
     return RepaintBoundary(
       child: AnimatedBuilder(
-        animation:
-            Listenable.merge([_shimmerCtrl, _breatheCtrl, _floatBadgeCtrl]),
+        animation: Listenable.merge([
+          _shimmerCtrl,
+          _breatheCtrl,
+          _floatBadgeCtrl,
+        ]),
         builder: (context, _) {
           final breatheOpacity = 0.14 + 0.12 * _breatheCtrl.value;
           final badgeOffset = -2.5 * math.sin(_floatBadgeCtrl.value * math.pi);
 
           return _CardPressable(
-            onTap: () => _triggerIntent('style'),
+            onTap: () => _openModuleChat('style'),
             builder: (_) => Container(
-              height: 224,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(26),
                 color: _surface,
                 border: Border.all(
-                    color: _accent.withValues(alpha: 0.20), width: 1),
+                  color: _accent.withValues(alpha: 0.20),
+                  width: 1,
+                ),
                 boxShadow: [
                   BoxShadow(
-                      color: _shadowStrong,
-                      blurRadius: 56,
-                      offset: Offset(0, 16)),
+                    color: _shadowStrong,
+                    blurRadius: 56,
+                    offset: Offset(0, 16),
+                  ),
                   BoxShadow(
-                      color: _shadowMedium,
-                      blurRadius: 16,
-                      offset: Offset(0, 4)),
+                    color: _shadowMedium,
+                    blurRadius: 16,
+                    offset: Offset(0, 4),
+                  ),
                   BoxShadow(
-                      color: _accent.withValues(alpha: 0.12), blurRadius: 30),
+                    color: _accent.withValues(alpha: 0.12),
+                    blurRadius: 30,
+                  ),
                 ],
               ),
               clipBehavior: Clip.antiAlias,
@@ -1502,7 +1418,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                           radius: 1.2,
                           colors: [
                             _accentSecondary.withValues(alpha: 0.20),
-                            _transparent
+                            _transparent,
                           ],
                         ),
                       ),
@@ -1532,12 +1448,14 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                           colors: [
                             _transparent,
                             _accent.withValues(
-                                alpha: 0.6 *
-                                    (0.5 +
-                                        0.5 *
-                                            math.sin(_shimmerCtrl.value *
-                                                math.pi *
-                                                2))),
+                              alpha:
+                                  0.6 *
+                                  (0.5 +
+                                      0.5 *
+                                          math.sin(
+                                            _shimmerCtrl.value * math.pi * 2,
+                                          )),
+                            ),
                             _accentTertiary.withValues(alpha: 0.55),
                             _transparent,
                           ],
@@ -1550,22 +1468,22 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     right: 0,
                     top: 0,
                     bottom: 0,
-                    width: 224,
+                    width: 188,
                     child: Stack(
                       children: [
-                        Image.network(
-                          'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=420&h=450&fit=crop&crop=top&auto=format',
-                          width: 224,
-                          height: 224,
-                          fit: BoxFit.cover,
-                          alignment: Alignment.topCenter,
-                          cacheWidth:
-                              (224 * MediaQuery.of(context).devicePixelRatio)
-                                  .round(),
-                          filterQuality: FilterQuality.low,
-                          errorBuilder: (_, _, ___) => Container(
-                            color: _accent.withValues(alpha: 0.1),
-                            child: Icon(Icons.image, color: _textMuted),
+                        Positioned.fill(
+                          child: Image.network(
+                            'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=420&h=450&fit=crop&crop=top&auto=format',
+                            fit: BoxFit.cover,
+                            alignment: Alignment.topCenter,
+                            cacheWidth:
+                                (224 * MediaQuery.of(context).devicePixelRatio)
+                                    .round(),
+                            filterQuality: FilterQuality.low,
+                            errorBuilder: (_, _, _) => Container(
+                              color: _accent.withValues(alpha: 0.1),
+                              child: Icon(Icons.image, color: _textMuted),
+                            ),
                           ),
                         ),
                         Positioned(
@@ -1592,17 +1510,21 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     right: 18,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 11, vertical: 4),
+                        horizontal: 11,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: _accentTertiary.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(100),
                         border: Border.all(
-                            color: _accentTertiary.withValues(alpha: 0.35),
-                            width: 1),
+                          color: _accentTertiary.withValues(alpha: 0.35),
+                          width: 1,
+                        ),
                         boxShadow: [
                           BoxShadow(
-                              color: _accentTertiary.withValues(alpha: 0.20),
-                              blurRadius: 8),
+                            color: _accentTertiary.withValues(alpha: 0.20),
+                            blurRadius: 8,
+                          ),
                         ],
                       ),
                       child: Text(
@@ -1669,25 +1591,30 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                           _AnimatedPressable(
                             liftY: -2.0,
                             scalePressed: 0.95,
-                            onTap: () => _triggerIntent('style'),
+                            onTap: () => _openModuleChat('style'),
                             child: Container(
                               decoration: BoxDecoration(
                                 gradient: _accentGradient,
                                 borderRadius: BorderRadius.circular(100),
                                 boxShadow: [
                                   BoxShadow(
-                                      color: _accent.withValues(alpha: 0.40),
-                                      blurRadius: 20,
-                                      offset: const Offset(0, 6)),
+                                    color: _accent.withValues(alpha: 0.40),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 6),
+                                  ),
                                   BoxShadow(
-                                      color: _accentTertiary.withValues(
-                                          alpha: 0.25),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2)),
+                                    color: _accentTertiary.withValues(
+                                      alpha: 0.25,
+                                    ),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
                                 ],
                               ),
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 17, vertical: 9),
+                                horizontal: 17,
+                                vertical: 9,
+                              ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -1701,8 +1628,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                     ),
                                   ),
                                   SizedBox(width: 7),
-                                  Icon(Icons.arrow_forward_rounded,
-                                      color: _onAccent, size: 12),
+                                  Icon(
+                                    Icons.arrow_forward_rounded,
+                                    color: _onAccent,
+                                    size: 12,
+                                  ),
                                 ],
                               ),
                             ),
@@ -1722,27 +1652,29 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
   Widget _buildSecondaryRow() {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 20),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-              child: _buildSecCard(
-            icon: Icons.grid_view_rounded,
-            title: 'Organize',
-            subtitle: 'Everything you already own',
-            accentColor: _accent,
-            intent: 'organize',
-          )),
+            child: _buildSecCard(
+              icon: Icons.grid_view_rounded,
+              title: 'Organize',
+              subtitle: 'Everything you already own',
+              accentColor: _accent,
+              intent: 'organize',
+            ),
+          ),
           const SizedBox(width: 12),
           Expanded(
-              child: _buildSecCard(
-            icon: Icons.calendar_month_outlined,
-            title: 'Plan',
-            subtitle: 'Trips, events, daily plans',
-            accentColor: _accentSecondary,
-            intent: 'prepare',
-          )),
+            child: _buildSecCard(
+              icon: Icons.calendar_month_outlined,
+              title: 'Plan',
+              subtitle: 'Trips, events, daily plans',
+              accentColor: _accentSecondary,
+              intent: 'plan',
+            ),
+          ),
         ],
       ),
     );
@@ -1756,17 +1688,17 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     required String intent,
   }) {
     return _CardPressable(
-      onTap: () => _triggerIntent(intent),
+      onTap: () => _openModuleChat(intent),
       builder: (isHovered) {
         return Container(
-          constraints: const BoxConstraints(minHeight: 140),
+          constraints: const BoxConstraints(minHeight: 70),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [_surface, _bgSecondary],
             ),
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(color: _border, width: 1),
             boxShadow: [
               BoxShadow(
@@ -1780,75 +1712,76 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               ),
             ],
           ),
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    width: 40,
-                    height: 40,
+                    width: 34,
+                    height: 34,
                     decoration: BoxDecoration(
                       color: accentColor.withValues(
-                          alpha: isHovered ? 0.16 : 0.08),
-                      borderRadius: BorderRadius.circular(12),
+                        alpha: isHovered ? 0.16 : 0.08,
+                      ),
+                      borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                          color: accentColor.withValues(alpha: 0.15), width: 1),
+                        color: accentColor.withValues(alpha: 0.15),
+                        width: 1,
+                      ),
                     ),
                     child: Icon(
                       icon,
                       color: isHovered ? _accent : _textMuted,
-                      size: 17,
+                      size: 15,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: _textHeading,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.15,
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _accent.withValues(alpha: isHovered ? 0.18 : 0.06),
+                      border: Border.all(
+                        color: _accent.withValues(alpha: isHovered ? 0.30 : 0.15),
+                        width: 1,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: _textMuted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w300,
-                      height: 1.45,
+                    child: Transform.translate(
+                      offset: Offset(isHovered ? 2.0 : 0.0, 0),
+                      child: Icon(
+                        Icons.chevron_right_rounded,
+                        color: isHovered ? _accent : _textMuted,
+                        size: 12,
+                      ),
                     ),
                   ),
                 ],
               ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 26,
-                  height: 26,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _accent.withValues(alpha: isHovered ? 0.18 : 0.06),
-                    border: Border.all(
-                      color: _accent.withValues(alpha: isHovered ? 0.30 : 0.15),
-                      width: 1,
-                    ),
-                  ),
-                  child: Transform.translate(
-                    offset: Offset(isHovered ? 2.0 : 0.0, 0),
-                    child: Icon(
-                      Icons.chevron_right_rounded,
-                      color: isHovered ? _accent : _textMuted,
-                      size: 14,
-                    ),
-                  ),
+              const SizedBox(height: 8),
+              Text(
+                title,
+                style: TextStyle(
+                  color: _textHeading,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.15,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  color: _textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w300,
+                  height: 1.4,
                 ),
               ),
             ],
@@ -1882,7 +1815,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                   color: _accent.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(100),
                   border: Border.all(
-                      color: _accent.withValues(alpha: 0.18), width: 1),
+                    color: _accent.withValues(alpha: 0.18),
+                    width: 1,
+                  ),
                 ),
                 child: Text(
                   'AI Curated',
@@ -1901,7 +1836,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             child: Text(
               'See all',
               style: TextStyle(
-                  color: _textMuted, fontSize: 12, letterSpacing: 0.1),
+                color: _textMuted,
+                fontSize: 12,
+                letterSpacing: 0.1,
+              ),
             ),
           ),
         ],
@@ -1914,22 +1852,22 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       (
         'Minimal Chic',
         'Casual · Today',
-        'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=220&h=260&fit=crop&crop=top&auto=format'
+        'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=220&h=260&fit=crop&crop=top&auto=format',
       ),
       (
         'Street Edit',
         'Urban · Weekend',
-        'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=220&h=260&fit=crop&crop=top&auto=format'
+        'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=220&h=260&fit=crop&crop=top&auto=format',
       ),
       (
         'Office Look',
         'Smart · Monday',
-        'https://images.unsplash.com/photo-1591369822096-ffd140ec948f?w=220&h=260&fit=crop&crop=top&auto=format'
+        'https://images.unsplash.com/photo-1591369822096-ffd140ec948f?w=220&h=260&fit=crop&crop=top&auto=format',
       ),
       (
         'Evening',
         'Party · Dinner',
-        'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=220&h=260&fit=crop&crop=top&auto=format'
+        'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=220&h=260&fit=crop&crop=top&auto=format',
       ),
     ];
     return SizedBox(
@@ -1976,9 +1914,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           border: Border.all(color: _border, width: 1),
           boxShadow: [
             BoxShadow(
-                color: _shadowMedium, blurRadius: 20, offset: Offset(0, 6)),
-            BoxShadow(
-                color: _shadowLight, blurRadius: 6, offset: Offset(0, 2)),
+              color: _shadowMedium,
+              blurRadius: 20,
+              offset: Offset(0, 6),
+            ),
+            BoxShadow(color: _shadowLight, blurRadius: 6, offset: Offset(0, 2)),
           ],
         ),
         clipBehavior: Clip.antiAlias,
@@ -1994,9 +1934,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                       fit: BoxFit.cover,
                       alignment: Alignment.topCenter,
                       cacheWidth:
-                          (112 * MediaQuery.of(context).devicePixelRatio).round(),
+                          (112 * MediaQuery.of(context).devicePixelRatio)
+                              .round(),
                       filterQuality: FilterQuality.low,
-                      errorBuilder: (_, _, ___) => Container(
+                      errorBuilder: (_, _, _) => Container(
                         color: _accent.withValues(alpha: 0.1),
                         child: Icon(Icons.image, color: _textMuted),
                       ),
@@ -2064,12 +2005,12 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               height: 22,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: liked
-                    ? _accent.withValues(alpha: 0.20)
-                    : _shadowStrong,
+                color: liked ? _accent.withValues(alpha: 0.20) : _shadowStrong,
                 border: liked
                     ? Border.all(
-                        color: _accent.withValues(alpha: 0.50), width: 1)
+                        color: _accent.withValues(alpha: 0.50),
+                        width: 1,
+                      )
                     : null,
               ),
               child: Icon(
@@ -2088,74 +2029,43 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
   // 🚀 FIXED: Reroutes perfectly to the dedicated Chat Screen
   Widget _buildChatWrap() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.lightImpact();
-          Navigator.of(context).push(
-            PageRouteBuilder<void>(
-              transitionDuration: const Duration(milliseconds: 350),
-              reverseTransitionDuration: const Duration(milliseconds: 350),
-              pageBuilder: (context, animation, secondary) => const ChatScreen(),
-              transitionsBuilder: (context, animation, secondary, child) {
-                final curved = CurvedAnimation(
-                  parent: animation,
-                  curve: const Cubic(0.22, 1.0, 0.36, 1.0),
-                );
-                return FadeTransition(
-                  opacity: curved,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0.04, 0),
-                      end: Offset.zero,
-                    ).animate(curved),
-                    child: child,
-                  ),
-                );
-              },
-            ),
-          );
-        },
-        child: Container(
-          decoration: BoxDecoration(
-            color: _surface.withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _border, width: 1),
-            boxShadow: [
-              BoxShadow(
-                  color: _accent.withValues(alpha: 0.10),
-                  blurRadius: 28,
-                  offset: const Offset(0, 6)),
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Icon(Icons.auto_awesome, color: _accent, size: 18),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  "Ask AHVI anything...",
-                  style: TextStyle(
-                    color: _textMuted,
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w400,
-                  ),
-                ),
-              ),
-              Icon(Icons.arrow_forward_ios_rounded, color: _textMuted, size: 14),
-            ],
-          ),
-        ),
-      ),
+    return AhviChatPromptBar(
+      controller: _chatController,
+      focusNode: _chatFocusNode,
+      hintText: _chatPlaceholder,
+      hasTextListenable: _chatController,
+      surface: _surface,
+      border: _border,
+      accent: _accent,
+      accentSecondary: _accentSecondary,
+      textHeading: _textHeading,
+      textMuted: _textMuted,
+      shadowMedium: _shadowMedium,
+      onAccent: _onAccent,
+      onVoiceTap: _toggleListening,
+      isListening: _isListening,
+      onSubmitted: (value) {
+        if (value.trim().isNotEmpty) {
+          _openChatWithPrompt(value.trim());
+          _chatController.clear();
+        }
+      },
+      onSend: () {
+        final text = _chatController.text.trim();
+        if (text.isNotEmpty) {
+          _openChatWithPrompt(text);
+          _chatController.clear();
+        }
+      },
+      onEmptySend: () => _submitQuery(''),
+      onAddTap: _openLensSheet,
     );
   }
 
   Widget _buildBottomNav() {
     final items = _homeNavItems;
     const pillH = 64.0;
-    const maxBulge = 18.0; 
+    const maxBulge = 18.0;
     const totalH = pillH + maxBulge + 6.0;
 
     return SizedBox(
@@ -2218,14 +2128,18 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                         gradient: _accentGradient2,
                                         boxShadow: [
                                           BoxShadow(
-                                              color: _accent.withValues(
-                                                  alpha: 0.45),
-                                              blurRadius: 16,
-                                              offset: const Offset(0, 4)),
+                                            color: _accent.withValues(
+                                              alpha: 0.45,
+                                            ),
+                                            blurRadius: 16,
+                                            offset: const Offset(0, 4),
+                                          ),
                                           BoxShadow(
-                                              color: _accent.withValues(
-                                                  alpha: 0.25),
-                                              blurRadius: 28),
+                                            color: _accent.withValues(
+                                              alpha: 0.25,
+                                            ),
+                                            blurRadius: 28,
+                                          ),
                                         ],
                                       )
                                     : null,
@@ -2311,21 +2225,25 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        Text(_overlayBrandSub,
-                            style: TextStyle(
-                                color: _textMuted,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w300)),
+                        Text(
+                          _overlayBrandSub,
+                          style: TextStyle(
+                            color: _textMuted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w300,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 16),
                     Expanded(
                       child: SingleChildScrollView(
-                        controller: _overlayScrollCtrl, 
+                        controller: _overlayScrollCtrl,
                         padding: const EdgeInsets.symmetric(horizontal: 20),
                         child: _EntryFadeSlide(
                           key: ValueKey(
-                              '${_overlayState}_${_activeIntent ?? ''}'),
+                            '${_overlayState}_${_activeIntent ?? ''}',
+                          ),
                           child: _buildOverlayContent(),
                         ),
                       ),
@@ -2343,7 +2261,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   Widget _buildOverlayContent() {
     switch (_overlayState) {
       case _OverlayState.suggestions:
-        final isOrganize = (_activeIntent ?? '').toLowerCase() == 'organize';
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2357,140 +2274,138 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               ),
             ),
             const SizedBox(height: 8),
-            if (isOrganize)
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _overlaySuggestions
-                    .map(
-                      (q) => _AnimatedPressable(
-                        scalePressed: 0.97,
-                        onTap: () => _handleQuery(q, _activeIntent ?? 'chat'),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: _surface.withValues(alpha: 0.92),
-                            borderRadius: BorderRadius.circular(22),
-                            border: Border.all(
-                                color: _accent.withValues(alpha: 0.30)),
-                          ),
-                          child: Text(
-                            q,
-                            style: TextStyle(
-                              color: _textSub,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                            ),
+            ..._overlaySuggestions.map(
+              (q) => _AnimatedPressable(
+                scalePressed: 0.97,
+                onTap: () => _handleQuery(q, _activeIntent ?? 'chat'),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 13,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _surface.withValues(alpha: 0.85),
+                    borderRadius: BorderRadius.circular(15),
+                    border: Border.all(color: _border),
+                    boxShadow: [BoxShadow(color: _shadowMedium, blurRadius: 8)],
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _accent.withValues(alpha: 0.55),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          q,
+                          style: TextStyle(
+                            color: _textSub,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w400,
                           ),
                         ),
                       ),
-                    )
-                    .toList(),
-              )
-            else
-              ..._overlaySuggestions.map((q) => _AnimatedPressable(
-                    scalePressed: 0.97,
-                    onTap: () => _handleQuery(q, _activeIntent ?? 'chat'),
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 13),
-                      decoration: BoxDecoration(
-                        color: _surface.withValues(alpha: 0.85),
-                        borderRadius: BorderRadius.circular(15),
-                        border: Border.all(color: _border),
-                        boxShadow: [
-                          BoxShadow(color: _shadowMedium, blurRadius: 8)
-                        ],
-                      ),
-                      child: Row(children: [
-                        Container(
-                            width: 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _accent.withValues(alpha: 0.55))),
-                        const SizedBox(width: 10),
-                        Expanded(
-                            child: Text(q,
-                                style: TextStyle(
-                                    color: _textSub,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w400))),
-                      ]),
-                    ),
-                  )),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ],
         );
 
       case _OverlayState.thinking:
         return Padding(
           padding: const EdgeInsets.only(top: 12),
-          child: Row(children: [
-            Container(
+          child: Row(
+            children: [
+              Container(
                 width: 28,
                 height: 28,
                 decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(colors: [
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [
                       _accent.withValues(alpha: 0.18),
-                      _accentSecondary.withValues(alpha: 0.28)
-                    ]),
-                    border: Border.all(color: _accent.withValues(alpha: 0.30))),
-                child: Center(
-                    child: ShaderMask(
-                        shaderCallback: (b) => _accentGradient.createShader(b),
-                        child: Icon(Icons.auto_awesome,
-                            color: _textHeading, size: 12)))),
-            const SizedBox(width: 10),
-            AnimatedBuilder(
-              animation: _thinkingCtrl,
-              builder: (_, _) {
-                Widget dot(int i) {
-                  const period = 1.0;
-                  const phaseShift = 0.125;
-                  final t = (_thinkingCtrl.value + i * phaseShift) % period;
-                  final sine = math.sin(t * math.pi * 2);
-                  final lift = sine > 0 ? sine : 0.0;
-                  final dy = -5.0 * lift;
-                  final opacity = 0.3 + 0.7 * lift;
-                  return Padding(
-                      padding: EdgeInsets.only(right: i < 2 ? 5.0 : 0),
-                      child: Transform.translate(
-                          offset: Offset(0, dy),
-                          child: Opacity(
-                              opacity: opacity.clamp(0.3, 1.0),
-                              child: Container(
-                                width: 5,
-                                height: 5,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: _accentGradient,
-                                ),
-                              ))));
-                }
-
-                return Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                  decoration: BoxDecoration(
-                    color: _surface.withValues(alpha: 0.90),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: _accent.withValues(alpha: 0.20)),
-                    boxShadow: [
-                      BoxShadow(
-                          color: _accent.withValues(alpha: 0.10),
-                          blurRadius: 18)
+                      _accentSecondary.withValues(alpha: 0.28),
                     ],
                   ),
-                  child: Row(
+                  border: Border.all(color: _accent.withValues(alpha: 0.30)),
+                ),
+                child: Center(
+                  child: ShaderMask(
+                    shaderCallback: (b) => _accentGradient.createShader(b),
+                    child: Icon(
+                      Icons.auto_awesome,
+                      color: _textHeading,
+                      size: 12,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              AnimatedBuilder(
+                animation: _thinkingCtrl,
+                builder: (_, _) {
+                  Widget dot(int i) {
+                    const period = 1.0;
+                    const phaseShift = 0.125;
+                    final t = (_thinkingCtrl.value + i * phaseShift) % period;
+                    final sine = math.sin(t * math.pi * 2);
+                    final lift = sine > 0 ? sine : 0.0;
+                    final dy = -5.0 * lift;
+                    final opacity = 0.3 + 0.7 * lift;
+                    return Padding(
+                      padding: EdgeInsets.only(right: i < 2 ? 5.0 : 0),
+                      child: Transform.translate(
+                        offset: Offset(0, dy),
+                        child: Opacity(
+                          opacity: opacity.clamp(0.3, 1.0),
+                          child: Container(
+                            width: 5,
+                            height: 5,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: _accentGradient,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 11,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _surface.withValues(alpha: 0.90),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: _accent.withValues(alpha: 0.20),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _accent.withValues(alpha: 0.10),
+                          blurRadius: 18,
+                        ),
+                      ],
+                    ),
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
-                      children: [dot(0), dot(1), dot(2)]),
-                );
-              },
-            ),
-          ]),
+                      children: [dot(0), dot(1), dot(2)],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
         );
 
       case _OverlayState.response:
@@ -2500,7 +2415,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             final isLast = resp == _responses.last;
             return Padding(
               padding: const EdgeInsets.only(bottom: 24),
-              child: _buildResponseContent(resp, showTags: isLast && _tagsRevealed),
+              child: _buildResponseContent(
+                resp,
+                showTags: isLast && _tagsRevealed,
+              ),
             );
           }).toList(),
         );
@@ -2511,108 +2429,149 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   Widget _buildResponseContent(_ResponseData resp, {bool showTags = false}) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Align(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Align(
           alignment: Alignment.centerRight,
           child: Container(
-              constraints: const BoxConstraints(maxWidth: 260),
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
-              decoration: BoxDecoration(
-                  color: _phoneShell,
-                  borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(18),
-                      topRight: Radius.circular(18),
-                      bottomLeft: Radius.circular(18),
-                      bottomRight: Radius.circular(4)),
-                  border: Border.all(color: _accent.withValues(alpha: 0.15))),
-              child: Text(resp.question,
-                  style: TextStyle(
-                      color: _textHeading,
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w400,
-                      height: 1.45)))),
-      Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-        Container(
-            width: 22,
-            height: 22,
-            margin: const EdgeInsets.only(right: 8),
+            constraints: const BoxConstraints(maxWidth: 260),
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
             decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(colors: [
-                  _accent.withValues(alpha: 0.18),
-                  _accentSecondary.withValues(alpha: 0.28)
-                ]),
-                border: Border.all(color: _accent.withValues(alpha: 0.30))),
-            child: Center(
-              child: ShaderMask(
-                shaderCallback: (b) => _accentGradient.createShader(b),
-                child: Icon(Icons.auto_awesome, color: _textHeading, size: 10),
+              color: _phoneShell,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(18),
+                topRight: Radius.circular(18),
+                bottomLeft: Radius.circular(18),
+                bottomRight: Radius.circular(4),
               ),
-            )),
-        Text('AHVI',
-            style: TextStyle(
+              border: Border.all(color: _accent.withValues(alpha: 0.15)),
+            ),
+            child: Text(
+              resp.question,
+              style: TextStyle(
                 color: _textHeading,
-                fontSize: 12,
-                fontWeight: FontWeight.w600)),
-      ]),
-      const SizedBox(height: 10),
-      
-      if (resp.intro.isNotEmpty) ...[
-        Container(
-          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 40),
-          child: Text(
-            resp.intro,
-            style: TextStyle(
-                color: _textSub,
-                fontSize: 13,
+                fontSize: 13.5,
                 fontWeight: FontWeight.w400,
-                height: 1.6),
-          ),
-        ),
-        const SizedBox(height: 14),
-      ],
-      _buildResponseBody(resp),
-      
-      if (showTags) ...[
-        const SizedBox(height: 14),
-        AnimatedBuilder(
-          animation: _tagsRevealCtrl,
-          builder: (_, _) => Opacity(
-            opacity: _tagsRevealCtrl.value,
-            child: Transform.translate(
-              offset: Offset(0, 7 * (1 - _tagsRevealCtrl.value)),
-              child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: _responseTags
-                      .map((tag) => _AnimatedPressable(
-                          scalePressed: 0.96,
-                          liftY: -1.5,
-                          onTap: () => _submitQuery(tag), 
-                          child: Container(
-                              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 60),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 13, vertical: 6),
-                              decoration: BoxDecoration(
-                                  color: _accent.withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(100),
-                                  border: Border.all(
-                                      color: _accent.withValues(alpha: 0.20))),
-                              child: Text(tag,
-                                  maxLines: 2, 
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      color: _accent,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500)))))
-                      .toList()),
+                height: 1.45,
+              ),
             ),
           ),
         ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 22,
+              height: 22,
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [
+                    _accent.withValues(alpha: 0.18),
+                    _accentSecondary.withValues(alpha: 0.28),
+                  ],
+                ),
+                border: Border.all(color: _accent.withValues(alpha: 0.30)),
+              ),
+              child: Center(
+                child: ShaderMask(
+                  shaderCallback: (b) => _accentGradient.createShader(b),
+                  child: Icon(
+                    Icons.auto_awesome,
+                    color: _textHeading,
+                    size: 10,
+                  ),
+                ),
+              ),
+            ),
+            Text(
+              'AHVI',
+              style: TextStyle(
+                color: _textHeading,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        if (resp.intro.isNotEmpty) ...[
+          Container(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width - 40,
+            ),
+            child: Text(
+              resp.intro,
+              style: TextStyle(
+                color: _textSub,
+                fontSize: 13,
+                fontWeight: FontWeight.w400,
+                height: 1.6,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
+        _buildResponseBody(resp),
+
+        if (showTags) ...[
+          const SizedBox(height: 14),
+          AnimatedBuilder(
+            animation: _tagsRevealCtrl,
+            builder: (_, _) => Opacity(
+              opacity: _tagsRevealCtrl.value,
+              child: Transform.translate(
+                offset: Offset(0, 7 * (1 - _tagsRevealCtrl.value)),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: _responseTags
+                      .map(
+                        (tag) => _AnimatedPressable(
+                          scalePressed: 0.96,
+                          liftY: -1.5,
+                          onTap: () => _submitQuery(tag),
+                          child: Container(
+                            constraints: BoxConstraints(
+                              maxWidth: MediaQuery.of(context).size.width - 60,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 13,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _accent.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(100),
+                              border: Border.all(
+                                color: _accent.withValues(alpha: 0.20),
+                              ),
+                            ),
+                            child: Text(
+                              tag,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: _accent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 20),
       ],
-      const SizedBox(height: 20),
-    ]);
+    );
   }
 
   Widget _buildResponseBody(_ResponseData resp) {
@@ -2620,220 +2579,309 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     switch (resp.type) {
       case 'outfits':
         return SizedBox(
-            height: 155,
-            child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: resp.outfits.length,
-                separatorBuilder: (_, i2) => const SizedBox(width: 8),
-                itemBuilder: (_, i) {
-                  final o = resp.outfits[i];
-                  return Container(
-                      width: 86,
-                      decoration: BoxDecoration(
-                          color: _card,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: _border)),
-                      clipBehavior: Clip.antiAlias,
+          height: 155,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: resp.outfits.length,
+            separatorBuilder: (_, i2) => const SizedBox(width: 8),
+            itemBuilder: (_, i) {
+              final o = resp.outfits[i];
+              return Container(
+                width: 86,
+                decoration: BoxDecoration(
+                  color: _card,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _border),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      height: 96,
+                      child: Image.network(
+                        o.imageUrl,
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        cacheWidth:
+                            (86 * MediaQuery.of(context).devicePixelRatio)
+                                .round(),
+                        cacheHeight:
+                            (96 * MediaQuery.of(context).devicePixelRatio)
+                                .round(),
+                        filterQuality: FilterQuality.low,
+                        errorBuilder: (_, _, _) =>
+                            Container(color: _accent.withValues(alpha: 0.1)),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
                       child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                                height: 96,
-                                child: Image.network(o.imageUrl,
-                                    fit: BoxFit.cover,
-                                    width: double.infinity,
-                                    errorBuilder: (_, _, ___) => Container(
-                                        color:
-                                            _accent.withValues(alpha: 0.1)))),
-                            Padding(
-                                padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
-                                child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(o.name,
-                                          style: TextStyle(
-                                              color: isDark
-                                                  ? _textHeading
-                                                  : _tileText,
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.w600),
-                                          overflow: TextOverflow.ellipsis),
-                                      const SizedBox(height: 2),
-                                      Wrap(
-                                          spacing: 3,
-                                          children: o.tags
-                                              .map((t) => Container(
-                                                  constraints: const BoxConstraints(maxWidth: 70),
-                                                  padding: const EdgeInsets
-                                                      .symmetric(
-                                                      horizontal: 5, vertical: 1),
-                                                  decoration: BoxDecoration(
-                                                      color: _accent.withValues(
-                                                          alpha: 0.10),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              100)),
-                                                  child: Text(t,
-                                                      maxLines: 1,
-                                                      overflow: TextOverflow.ellipsis,
-                                                      style: TextStyle(
-                                                          color: _textMuted,
-                                                          fontSize: 8.5,
-                                                          fontWeight: FontWeight
-                                                              .w500))))
-                                              .toList()),
-                                    ])),
-                          ]));
-                }));
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            o.name,
+                            style: TextStyle(
+                              color: isDark ? _textHeading : _tileText,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Wrap(
+                            spacing: 3,
+                            children: o.tags
+                                .map(
+                                  (t) => Container(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 70,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 5,
+                                      vertical: 1,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _accent.withValues(alpha: 0.10),
+                                      borderRadius: BorderRadius.circular(100),
+                                    ),
+                                    child: Text(
+                                      t,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: _textMuted,
+                                        fontSize: 8.5,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
 
       case 'tasks':
         return Column(
-            children: resp.tasks.map((t) {
-          final dotColor = t.priority == 'high'
-              ? _accent
-              : t.priority == 'mid'
-                  ? _accentSecondary
-                  : _accentTertiary.withValues(alpha: 0.5);
-          return Opacity(
+          children: resp.tasks.map((t) {
+            final dotColor = t.priority == 'high'
+                ? _accent
+                : t.priority == 'mid'
+                ? _accentSecondary
+                : _accentTertiary.withValues(alpha: 0.5);
+            return Opacity(
               opacity: t.done ? 0.45 : 1.0,
               child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                      border: Border(
-                          bottom: BorderSide(
-                              color: _border.withValues(alpha: 0.35)))),
-                  child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                            width: 16,
-                            height: 16,
-                            margin: const EdgeInsets.only(top: 1),
-                            decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: t.done
-                                        ? _accentTertiary.withValues(alpha: 0.5)
-                                        : _accent.withValues(alpha: 0.3)),
-                                color: t.done
-                                    ? _accentTertiary.withValues(alpha: 0.15)
-                                    : _transparent),
-                            child: t.done
-                                ? Icon(Icons.check,
-                                    color: _accentTertiary, size: 10)
-                                : null),
-                        const SizedBox(width: 10),
-                        Expanded(
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                              Text(t.label,
-                                  style: TextStyle(
-                                      color: t.done
-                                          ? _textMuted
-                                          : _textHeading,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w500,
-                                      decoration: t.done
-                                          ? TextDecoration.lineThrough
-                                          : null)),
-                              const SizedBox(height: 2),
-                              Text(t.due,
-                                  style: TextStyle(
-                                      color: t.priority == 'high'
-                                          ? _accentTertiary
-                                          : _textMuted,
-                                      fontSize: 11)),
-                            ])),
-                        Container(
-                            width: 5,
-                            height: 5,
-                            margin: const EdgeInsets.only(top: 5),
-                            decoration: BoxDecoration(
-                                shape: BoxShape.circle, color: dotColor)),
-                      ])));
-        }).toList());
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(color: _border.withValues(alpha: 0.35)),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 16,
+                      height: 16,
+                      margin: const EdgeInsets.only(top: 1),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: t.done
+                              ? _accentTertiary.withValues(alpha: 0.5)
+                              : _accent.withValues(alpha: 0.3),
+                        ),
+                        color: t.done
+                            ? _accentTertiary.withValues(alpha: 0.15)
+                            : _transparent,
+                      ),
+                      child: t.done
+                          ? Icon(Icons.check, color: _accentTertiary, size: 10)
+                          : null,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            t.label,
+                            style: TextStyle(
+                              color: t.done ? _textMuted : _textHeading,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              decoration: t.done
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            t.due,
+                            style: TextStyle(
+                              color: t.priority == 'high'
+                                  ? _accentTertiary
+                                  : _textMuted,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      width: 5,
+                      height: 5,
+                      margin: const EdgeInsets.only(top: 5),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: dotColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        );
 
       case 'week':
-        return GridView.count(
-            crossAxisCount: 7,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 4,
-            mainAxisSpacing: 4,
-            childAspectRatio: 0.52,
-            children: resp.weekDays
-                .map((d) => Container(
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final itemCount = resp.weekDays.length;
+            final rows = ((itemCount / 7).ceil()).clamp(1, 6);
+            const spacing = 4.0;
+            final cellWidth = (constraints.maxWidth - (6 * spacing)) / 7;
+            final cellHeight = cellWidth / 0.52;
+            final gridHeight = (rows * cellHeight) + ((rows - 1) * spacing);
+            return SizedBox(
+              height: gridHeight,
+              child: GridView.builder(
+                itemCount: itemCount,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 7,
+                  crossAxisSpacing: spacing,
+                  mainAxisSpacing: spacing,
+                  childAspectRatio: 0.52,
+                ),
+                itemBuilder: (_, index) {
+                  final d = resp.weekDays[index];
+                  return Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
+                      color: d.isToday
+                          ? _accent.withValues(alpha: 0.10)
+                          : _bgPrimary.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
                         color: d.isToday
-                            ? _accent.withValues(alpha: 0.10)
-                            : _bgPrimary.withValues(alpha: 0.04),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: d.isToday
-                                ? _accent.withValues(alpha: 0.25)
-                                : _border.withValues(alpha: 0.35))),
-                    child: Column(children: [
-                      Text(d.day,
+                            ? _accent.withValues(alpha: 0.25)
+                            : _border.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          d.day,
                           style: TextStyle(
-                              fontSize: 7.5,
-                              fontWeight: FontWeight.w700,
-                              color: d.isToday ? _accent : _textMuted),
-                          textAlign: TextAlign.center),
-                      Text(d.label.split(' ').last,
-                          style: TextStyle(
-                              fontSize: 6.5, color: _textMuted),
-                          textAlign: TextAlign.center),
-                      const SizedBox(height: 3),
-                      ...d.items.take(2).map((it) => Container(
-                          margin: const EdgeInsets.only(bottom: 2),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 2, vertical: 1),
-                          decoration: BoxDecoration(
-                              color: _accent.withValues(alpha: 0.07),
-                              borderRadius: BorderRadius.circular(3)),
-                          child: Text(it,
-                              style: TextStyle(
-                                  fontSize: 5.5, color: _textSub),
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center))),
-                    ])))
-                .toList());
+                            fontSize: 7.5,
+                            fontWeight: FontWeight.w700,
+                            color: d.isToday ? _accent : _textMuted,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        Text(
+                          d.label.split(' ').last,
+                          style: TextStyle(fontSize: 6.5, color: _textMuted),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 3),
+                        ...d.items
+                            .take(2)
+                            .map(
+                              (it) => Container(
+                                margin: const EdgeInsets.only(bottom: 2),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 2,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _accent.withValues(alpha: 0.07),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: Text(
+                                  it,
+                                  style: TextStyle(
+                                    fontSize: 5.5,
+                                    color: _textSub,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        );
 
       case 'plan':
         return Column(
-            children: resp.planSections.map((s) {
-          final c = s.color(context.themeTokens);
-          return Container(
+          children: resp.planSections.map((s) {
+            final c = s.color(context.themeTokens);
+            return Container(
               margin: const EdgeInsets.only(bottom: 14),
               padding: const EdgeInsets.only(left: 12),
               decoration: BoxDecoration(
-                  border: Border(left: BorderSide(color: c, width: 2))),
+                border: Border(left: BorderSide(color: c, width: 2)),
+              ),
               child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(s.title,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    s.title,
+                    style: TextStyle(
+                      color: c,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  ...s.items.map(
+                    (it) => Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        it,
                         style: TextStyle(
-                            color: c,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 6),
-                    ...s.items.map((it) => Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text(it,
-                            style: TextStyle(
-                                color: _textSub,
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w400,
-                                height: 1.5)))),
-                  ]));
-        }).toList());
+                          color: _textSub,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w400,
+                          height: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        );
 
-      case 'organize_board':
-        if (resp.organizeBoard == null) return const SizedBox();
-        return _buildOrganizeBoardCard(resp.organizeBoard!);
+      case 'prepare_exact':
+        return _buildPrepareExactChecklistCard(resp.question);
 
       case 'text':
       default:
@@ -2841,252 +2889,612 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     }
   }
 
-  Widget _buildOrganizeBoardCard(_OrganizeBoardStatus status) {
-    final accent = status.done ? _accentTertiary : _accent;
-    final iconBg = accent.withValues(alpha: 0.12);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-      decoration: BoxDecoration(
-        color: _surface.withValues(alpha: 0.86),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: iconBg,
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Icon(status.icon, color: accent, size: 18),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  status.title,
-                  style: TextStyle(
-                    color: _textHeading,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: iconBg,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  status.done ? 'Done' : 'Pending',
-                  style: TextStyle(
-                    color: accent,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            status.headline,
-            style: TextStyle(
-              color: _textSub,
-              fontSize: 12.5,
-              height: 1.45,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          if (status.details.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            ...status.details.map(
-              (line) => Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  '• $line',
-                  style: TextStyle(
-                    color: _textMuted,
-                    fontSize: 11.5,
-                    height: 1.35,
-                  ),
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 8),
-          _AnimatedPressable(
-            onTap: () => _openOrganizeBoard(status.boardKey),
-            scalePressed: 0.98,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 9),
-              decoration: BoxDecoration(
-                color: _accent.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _accent.withValues(alpha: 0.24)),
-              ),
-              child: Text(
-                'View more',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: _accent,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
+  Widget _buildPrepareExactChecklistCard(String title) {
+    const sections = [
+      (
+        name: 'Documents',
+        emoji: '📄',
+        color: Color(0xFF04D7C8),
+        items: [
+          'Passport / ID',
+          'Boarding pass',
+          'Travel insurance',
+          'Hotel confirmation',
+          'Visa (if required)',
         ],
       ),
-    );
-  }
+      (
+        name: 'Tech & Power',
+        emoji: '🔌',
+        color: Color(0xFF8D7DFF),
+        items: [
+          'Phone + charger',
+          'Power bank',
+          'Headphones',
+          'Laptop or tablet',
+          'Universal adapter',
+        ],
+      ),
+      (
+        name: 'Comfort',
+        emoji: '😴',
+        color: Color(0xFF6B91FF),
+        items: [
+          'Neck pillow',
+          'Eye mask',
+          'Earplugs',
+          'Light jacket',
+          'Compression socks',
+        ],
+      ),
+    ];
+    const sectionImages = [
+      [
+        'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=260&fit=crop&auto=format',
+        'https://images.unsplash.com/photo-1436491865332-7a61a109cc05?w=400&h=260&fit=crop&auto=format',
+        'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=400&h=260&fit=crop&auto=format',
+        'https://images.unsplash.com/photo-1522199755839-a2bacb67c546?w=400&h=260&fit=crop&auto=format',
+      ],
+      [
+        'https://images.unsplash.com/photo-1517336714739-489689fd1ca8?w=400&h=260&fit=crop&auto=format',
+        'https://images.unsplash.com/photo-1525547719571-a2d4ac8945e2?w=400&h=260&fit=crop&auto=format',
+        'https://images.unsplash.com/photo-1583394838336-acd977736f90?w=400&h=260&fit=crop&auto=format',
+        'https://images.unsplash.com/photo-1593344484962-796055d4a3a4?w=400&h=260&fit=crop&auto=format',
+      ],
+      [
+        'https://images.unsplash.com/photo-1520006403909-838d6b92c22e?w=400&h=260&fit=crop&auto=format',
+        'https://images.unsplash.com/photo-1506485338023-6ce5f36692df?w=400&h=260&fit=crop&auto=format',
+        'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=400&h=260&fit=crop&auto=format',
+        'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=400&h=260&fit=crop&auto=format',
+      ],
+    ];
 
-  Widget _buildPickSheet() {
-    return GestureDetector(
-      onTap: _closePickSheet,
-      child: AnimatedBuilder(
-        animation: _pickSheetCtrl,
-        builder: (context, _) {
-          final slideOffset = (1.0 - _pickSheetCtrl.value);
-          return Stack(
+    final itemsState = _prepareExactItemsByTitle.putIfAbsent(
+      title,
+      () => sections.map((s) => List<String>.from(s.items)).toList(),
+    );
+    final addCtrls = _prepareExactAddControllersByTitle.putIfAbsent(
+      title,
+      () => List.generate(sections.length, (_) => TextEditingController()),
+    );
+    final checksState = _prepareExactChecksByTitle.putIfAbsent(
+      title,
+      () => itemsState
+          .map(
+            (items) => List<bool>.filled(items.length, false, growable: true),
+          )
+          .toList(),
+    );
+    final outfitSaved = _prepareExactOutfitSavedByTitle.putIfAbsent(
+      title,
+      () => List<bool>.filled(3, false, growable: true),
+    );
+    final isListSaved = _prepareExactSavedByTitle[title] ?? false;
+
+    for (var i = 0; i < itemsState.length; i++) {
+      final targetLen = itemsState[i].length;
+      if (checksState[i].length < targetLen) {
+        checksState[i].addAll(
+          List<bool>.filled(
+            targetLen - checksState[i].length,
+            false,
+            growable: true,
+          ),
+        );
+      } else if (checksState[i].length > targetLen) {
+        checksState[i] = checksState[i].sublist(0, targetLen);
+      }
+    }
+
+    return StatefulBuilder(
+      builder: (context, checklistSetState) {
+        final totalItems = itemsState.fold<int>(
+          0,
+          (sum, items) => sum + items.length,
+        );
+        final totalChecked = checksState.fold<int>(
+          0,
+          (sum, items) => sum + items.where((v) => v).length,
+        );
+        final progress = totalItems == 0 ? 0.0 : totalChecked / totalItems;
+
+        return Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: _bgSecondary,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _border, width: 1),
+          ),
+          clipBehavior: Clip.hardEdge,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Positioned.fill(
-                child: Container(
-                  color: _bgPrimary.withValues(
-                      alpha: 0.3 * _pickSheetCtrl.value),
+              Container(
+                color: _phoneShell,
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                        color: _textHeading,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Generated for: $title',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: _textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      '$totalChecked of $totalItems items',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: _textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: _border.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(99),
+                        child: AnimatedFractionallySizedBox(
+                          duration: const Duration(milliseconds: 400),
+                          alignment: Alignment.centerLeft,
+                          widthFactor: progress,
+                          child: Container(color: const Color(0xFF04D7C8)),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: Transform.translate(
-                  offset: Offset(0, slideOffset * 300),
-                  child: GestureDetector(
-                    onTap: () {},
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [_surface, _bgSecondary],
-                        ),
-                        borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(24)),
-                        border: Border.all(
-                            color: _accent.withValues(alpha: 0.12), width: 1),
-                        boxShadow: [
-                          BoxShadow(
-                              color: _accent.withValues(alpha: 0.15),
-                              blurRadius: 40,
-                              offset: const Offset(0, -8)),
-                        ],
-                      ),
-                      padding: const EdgeInsets.fromLTRB(24, 12, 24, 40),
+              Container(
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: _border, width: 1)),
+                  color: _panel,
+                ),
+                child: Column(
+                  children: List.generate(sections.length, (sIdx) {
+                    final s = sections[sIdx];
+                    final doneCount = checksState[sIdx].where((v) => v).length;
+                    return Container(
+                      color: _phoneShell,
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+                      margin: const EdgeInsets.only(bottom: 1),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Center(
-                            child: Container(
-                              width: 36,
-                              height: 4,
-                              margin: const EdgeInsets.only(bottom: 16),
-                              decoration: BoxDecoration(
-                                color: _accent.withValues(alpha: 0.25),
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                          ),
-                          Text(
-                            _pickSheetName,
-                            style: TextStyle(
-                              color: _textHeading,
-                              fontSize: 28,
-                              fontWeight: FontWeight.w300,
-                              letterSpacing: -0.01,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _pickSheetTag,
-                            style: TextStyle(
-                              color: _textMuted,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w300,
-                            ),
-                          ),
-                          const SizedBox(height: 24),
                           Row(
                             children: [
+                              Text(
+                                s.emoji,
+                                style: const TextStyle(fontSize: 15, height: 1),
+                              ),
+                              const SizedBox(width: 7),
                               Expanded(
-                                child: _AnimatedPressable(
-                                  scalePressed: 0.97,
-                                  onTap: _closePickSheet,
+                                child: Text(
+                                  s.name,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                    color: _textHeading,
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 7,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0x1F04D7C8),
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                                child: Text(
+                                  '$doneCount/${itemsState[sIdx].length}',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF04D7C8),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            height: 64,
+                            child: ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: sectionImages[sIdx].length,
+                              itemExtent: 88,
+                              itemBuilder: (_, imgIdx) {
+                                final img = sectionImages[sIdx][imgIdx];
+                                return Padding(
+                                  padding: EdgeInsets.only(
+                                    right:
+                                        imgIdx == sectionImages[sIdx].length - 1
+                                        ? 0
+                                        : 8,
+                                  ),
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 14),
                                     decoration: BoxDecoration(
-                                      color: _accent.withValues(alpha: 0.08),
-                                      borderRadius: BorderRadius.circular(15),
-                                      border: Border.all(
-                                          color:
-                                              _accent.withValues(alpha: 0.20),
-                                          width: 1),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: _border),
                                     ),
-                                    child: Center(
-                                      child: Text(
-                                        'Save to Board',
-                                        style: TextStyle(
-                                          color: _accent,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
+                                    clipBehavior: Clip.hardEdge,
+                                    child: Image.network(
+                                      img,
+                                      fit: BoxFit.cover,
+                                      cacheWidth: 264,
+                                      cacheHeight: 192,
+                                      errorBuilder: (_, _, _) => Container(
+                                        color: _panel,
+                                        alignment: Alignment.center,
+                                        child: Icon(
+                                          Icons.image_outlined,
+                                          size: 16,
+                                          color: _textMuted,
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          ...List.generate(itemsState[sIdx].length, (i) {
+                            final done = checksState[sIdx][i];
+                            return GestureDetector(
+                              onTap: () => checklistSetState(
+                                () => checksState[sIdx][i] = !done,
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _AnimatedPressable(
-                                  scalePressed: 0.97,
-                                  onTap: () {},
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 14),
-                                    decoration: BoxDecoration(
-                                      gradient: _accentGradient2,
-                                      borderRadius: BorderRadius.circular(15),
-                                      boxShadow: [
-                                        BoxShadow(
-                                            color: _accent.withValues(
-                                                alpha: 0.35),
-                                            blurRadius: 18),
-                                      ],
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 7,
+                                ),
+                                decoration: BoxDecoration(
+                                  border: i < itemsState[sIdx].length - 1
+                                      ? Border(
+                                          bottom: BorderSide(
+                                            color: _border.withValues(
+                                              alpha: 0.85,
+                                            ),
+                                            width: 1,
+                                          ),
+                                        )
+                                      : null,
+                                ),
+                                child: Row(
+                                  children: [
+                                    AnimatedContainer(
+                                      duration: const Duration(
+                                        milliseconds: 150,
+                                      ),
+                                      width: 18,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(5),
+                                        border: Border.all(
+                                          color: done ? s.color : _border,
+                                          width: 1.5,
+                                        ),
+                                        color: done ? s.color : _panel,
+                                      ),
+                                      alignment: Alignment.center,
+                                      child: done
+                                          ? const Icon(
+                                              Icons.check,
+                                              size: 11,
+                                              color: Colors.white,
+                                            )
+                                          : null,
                                     ),
-                                    child: Center(
+                                    const SizedBox(width: 10),
+                                    Expanded(
                                       child: Text(
-                                        'Style This ↗',
+                                        itemsState[sIdx][i],
                                         style: TextStyle(
-                                          color: _onAccent,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: done
+                                              ? _textMuted
+                                              : _textHeading,
+                                          decoration: done
+                                              ? TextDecoration.lineThrough
+                                              : TextDecoration.none,
                                         ),
                                       ),
+                                    ),
+                                    GestureDetector(
+                                      onTap: () {
+                                        checklistSetState(() {
+                                          itemsState[sIdx].removeAt(i);
+                                          checksState[sIdx].removeAt(i);
+                                        });
+                                      },
+                                      child: SizedBox(
+                                        width: 28,
+                                        height: 28,
+                                        child: Center(
+                                          child: Text(
+                                            '×',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              color: _textMuted,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }),
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _bgSecondary,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: addCtrls[sIdx],
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: _textHeading,
+                                    ),
+                                    decoration: InputDecoration(
+                                      hintText: '+ Add item…',
+                                      hintStyle: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: _textMuted,
+                                      ),
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                      border: InputBorder.none,
+                                    ),
+                                    onSubmitted: (_) {
+                                      final val = addCtrls[sIdx].text.trim();
+                                      if (val.isEmpty) return;
+                                      checklistSetState(() {
+                                        itemsState[sIdx].add(val);
+                                        checksState[sIdx].add(false);
+                                        addCtrls[sIdx].clear();
+                                      });
+                                    },
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () {
+                                    final val = addCtrls[sIdx].text.trim();
+                                    if (val.isEmpty) return;
+                                    checklistSetState(() {
+                                      itemsState[sIdx].add(val);
+                                      checksState[sIdx].add(false);
+                                      addCtrls[sIdx].clear();
+                                    });
+                                  },
+                                  child: Container(
+                                    width: 26,
+                                    height: 26,
+                                    decoration: BoxDecoration(
+                                      color: s.color,
+                                      borderRadius: BorderRadius.circular(7),
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: const Text(
+                                      '+',
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF10131B),
+                                        height: 1,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ),
+              ),
+              Container(
+                color: _phoneShell,
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+                child: IgnorePointer(
+                  ignoring: isListSaved,
+                  child: GestureDetector(
+                    onTap: () {
+                      const boards = [
+                        '🎉 Party Looks',
+                        '💍 Occasion',
+                        '💼 Office Fit',
+                        '✈️ Vacation',
+                        '✨ Everything Else',
+                      ];
+                      showModalBottomSheet(
+                        context: context,
+                        backgroundColor: Colors.transparent,
+                        isScrollControlled: true,
+                        builder: (_) => Container(
+                          decoration: BoxDecoration(
+                            color: _bgSecondary,
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(24),
+                              topRight: Radius.circular(24),
+                            ),
+                          ),
+                          padding: const EdgeInsets.fromLTRB(16, 20, 16, 36),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 36,
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: _border,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Save to a Style Board',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                  color: _textHeading,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Choose where this checklist lives',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: _textMuted,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              ...boards.map(
+                                (label) => GestureDetector(
+                                  onTap: () async {
+                                    final boardId = _boardIdByLabel[label];
+                                    if (boardId == null) {
+                                      Navigator.pop(context);
+                                      return;
+                                    }
+                                    Navigator.pop(context);
+                                    await _savePrepareExactToBoard(
+                                      boardId: boardId,
+                                      title: title,
+                                      sections: sections,
+                                      itemsState: itemsState,
+                                      checksState: checksState,
+                                      outfitSaved: outfitSaved,
+                                    );
+                                    if (!mounted) return;
+                                    checklistSetState(
+                                      () => _prepareExactSavedByTitle[title] =
+                                          true,
+                                    );
+                                  },
+                                  child: Container(
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 12,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _panel,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                        color: _border,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            label,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w800,
+                                              color: _textHeading,
+                                            ),
+                                          ),
+                                        ),
+                                        if (label.contains('Vacation'))
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF8D7DFF),
+                                              borderRadius:
+                                                  BorderRadius.circular(99),
+                                            ),
+                                            child: const Text(
+                                              'SUGGESTED',
+                                              style: TextStyle(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w900,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
                                     ),
                                   ),
                                 ),
                               ),
                             ],
+                          ),
+                        ),
+                      );
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      decoration: BoxDecoration(
+                        gradient: isListSaved
+                            ? const LinearGradient(
+                                colors: [Color(0xFF04D7C8), Color(0xFF04D7C8)],
+                              )
+                            : const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [Color(0xFF04D7C8), Color(0xFF6B91FF)],
+                              ),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            isListSaved ? '✅' : '📌',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            isListSaved ? 'List Saved!' : 'Save to Style Board',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFFF5F7FF),
+                              letterSpacing: 0.14,
+                            ),
                           ),
                         ],
                       ),
@@ -3095,8 +3503,150 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                 ),
               ),
             ],
-          );
-        },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPickSheet({
+    required String name,
+    required String tag,
+    required VoidCallback onClose,
+  }) {
+    return GestureDetector(
+      onTap: onClose,
+      child: Container(
+        color: Colors.transparent,
+        child: GestureDetector(
+          onTap: () {},
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [_surface, _bgSecondary],
+              ),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
+              border: Border.all(
+                color: _accent.withValues(alpha: 0.12),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: _accent.withValues(alpha: 0.15),
+                  blurRadius: 40,
+                  offset: const Offset(0, -8),
+                ),
+              ],
+            ),
+            padding: EdgeInsets.fromLTRB(
+              24,
+              12,
+              24,
+              40 + MediaQuery.of(context).padding.bottom,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: _accent.withValues(alpha: 0.25),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Text(
+                  name,
+                  style: TextStyle(
+                    color: _textHeading,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w300,
+                    letterSpacing: -0.01,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  tag,
+                  style: TextStyle(
+                    color: _textMuted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w300,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _AnimatedPressable(
+                        scalePressed: 0.97,
+                        onTap: onClose,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            color: _accent.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(
+                              color: _accent.withValues(alpha: 0.20),
+                              width: 1,
+                            ),
+                          ),
+                          child: Center(
+                            child: Text(
+                              'Save to Board',
+                              style: TextStyle(
+                                color: _accent,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _AnimatedPressable(
+                        scalePressed: 0.97,
+                        onTap: () {},
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            gradient: _accentGradient2,
+                            borderRadius: BorderRadius.circular(15),
+                            boxShadow: [
+                              BoxShadow(
+                                color: _accent.withValues(alpha: 0.35),
+                                blurRadius: 18,
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: Text(
+                              'Style This ?',
+                              style: TextStyle(
+                                color: _onAccent,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -3106,32 +3656,32 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       (
         'Minimal Chic',
         'Casual · Today',
-        'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=300&h=280&fit=crop&crop=top&auto=format'
+        'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=300&h=280&fit=crop&crop=top&auto=format',
       ),
       (
         'Street Edit',
         'Urban · Weekend',
-        'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=300&h=280&fit=crop&crop=top&auto=format'
+        'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=300&h=280&fit=crop&crop=top&auto=format',
       ),
       (
         'Office Look',
         'Smart · Monday',
-        'https://images.unsplash.com/photo-1591369822096-ffd140ec948f?w=300&h=280&fit=crop&crop=top&auto=format'
+        'https://images.unsplash.com/photo-1591369822096-ffd140ec948f?w=300&h=280&fit=crop&crop=top&auto=format',
       ),
       (
         'Evening',
         'Party · Dinner',
-        'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=300&h=280&fit=crop&crop=top&auto=format'
+        'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=300&h=280&fit=crop&crop=top&auto=format',
       ),
       (
         'Athleisure',
         'Sport · Morning',
-        'https://images.unsplash.com/photo-1538805060514-97d9cc17730c?w=300&h=280&fit=crop&crop=top&auto=format'
+        'https://images.unsplash.com/photo-1538805060514-97d9cc17730c?w=300&h=280&fit=crop&crop=top&auto=format',
       ),
       (
         'Resort Wear',
         'Vacation · Breezy',
-        'https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=300&h=280&fit=crop&crop=top&auto=format'
+        'https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=300&h=280&fit=crop&crop=top&auto=format',
       ),
     ];
     return AnimatedBuilder(
@@ -3157,12 +3707,16 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                             decoration: BoxDecoration(
                               color: _panel,
                               border: Border.all(
-                                  color: _accent.withValues(alpha: 0.20),
-                                  width: 1),
+                                color: _accent.withValues(alpha: 0.20),
+                                width: 1,
+                              ),
                               shape: BoxShape.circle,
                             ),
-                            child: Icon(Icons.arrow_back_ios_new_rounded,
-                                color: _textMuted, size: 15),
+                            child: Icon(
+                              Icons.arrow_back_ios_new_rounded,
+                              color: _textMuted,
+                              size: 15,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -3183,73 +3737,94 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      childAspectRatio: 0.75,
-                    ),
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          childAspectRatio: 0.75,
+                        ),
                     itemCount: seeAllPicks.length,
                     itemBuilder: (context, i) {
-                      return _AnimatedPressable(
-                        scalePressed: 0.97,
-                        onTap: () {
-                          _closeSeeAll();
-                          Future.delayed(
-                              const Duration(milliseconds: 380), () {
-                            if (mounted) {
-                              _openPickSheet(
-                                  seeAllPicks[i].$1, seeAllPicks[i].$2);
-                            }
-                          });
-                        },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(18),
-                            color: _surface,
-                            border: Border.all(color: _border, width: 1),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Image.network(
-                                  seeAllPicks[i].$3,
-                                  fit: BoxFit.cover,
-                                  width: double.infinity,
-                                  errorBuilder: (_, _, ___) => Container(
-                                    color: _accent.withValues(alpha: 0.1),
-                                    child: Icon(Icons.image, color: _textMuted),
+                      return RepaintBoundary(
+                        child: _AnimatedPressable(
+                          scalePressed: 0.97,
+                          onTap: () {
+                            _closeSeeAll();
+                            Future.delayed(
+                              const Duration(milliseconds: 380),
+                              () {
+                                if (mounted) {
+                                  _openPickSheet(
+                                    seeAllPicks[i].$1,
+                                    seeAllPicks[i].$2,
+                                  );
+                                }
+                              },
+                            );
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(18),
+                              color: _surface,
+                              border: Border.all(color: _border, width: 1),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Image.network(
+                                    seeAllPicks[i].$3,
+                                    fit: BoxFit.cover,
+                                    width: double.infinity,
+                                    cacheWidth:
+                                        (240 *
+                                                MediaQuery.of(
+                                                  context,
+                                                ).devicePixelRatio)
+                                            .round(),
+                                    filterQuality: FilterQuality.low,
+                                    errorBuilder: (_, _, _) => Container(
+                                      color: _accent.withValues(alpha: 0.1),
+                                      child: Icon(
+                                        Icons.image,
+                                        color: _textMuted,
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      seeAllPicks[i].$1,
-                                      style: TextStyle(
-                                        color: _textHeading,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    8,
+                                    12,
+                                    12,
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        seeAllPicks[i].$1,
+                                        style: TextStyle(
+                                          color: _textHeading,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      seeAllPicks[i].$2,
-                                      style: TextStyle(
-                                        color: _textMuted,
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w300,
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        seeAllPicks[i].$2,
+                                        style: TextStyle(
+                                          color: _textMuted,
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w300,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       );
@@ -3292,15 +3867,19 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                           end: Alignment.bottomCenter,
                           colors: [_surface, _bgSecondary],
                         ),
-                        borderRadius:
-                            const BorderRadius.vertical(top: Radius.circular(24)),
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(24),
+                        ),
                         border: Border.all(
-                            color: _accent.withValues(alpha: 0.15), width: 1),
+                          color: _accent.withValues(alpha: 0.15),
+                          width: 1,
+                        ),
                         boxShadow: [
                           BoxShadow(
-                              color: _accent.withValues(alpha: 0.15),
-                              blurRadius: 48,
-                              offset: const Offset(0, -12)),
+                            color: _accent.withValues(alpha: 0.15),
+                            blurRadius: 48,
+                            offset: const Offset(0, -12),
+                          ),
                         ],
                       ),
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
@@ -3318,7 +3897,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                           ),
                           Padding(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 2, vertical: 8),
+                              horizontal: 2,
+                              vertical: 8,
+                            ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
@@ -3331,11 +3912,17 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                         color: _accent.withValues(alpha: 0.12),
                                         borderRadius: BorderRadius.circular(9),
                                         border: Border.all(
-                                            color: _accent.withValues(alpha: 0.25),
-                                            width: 1),
+                                          color: _accent.withValues(
+                                            alpha: 0.25,
+                                          ),
+                                          width: 1,
+                                        ),
                                       ),
-                                      child: Icon(Icons.search,
-                                          color: _accent, size: 17),
+                                      child: Icon(
+                                        Icons.search,
+                                        color: _accent,
+                                        size: 17,
+                                      ),
                                     ),
                                     const SizedBox(width: 8),
                                     Text(
@@ -3357,11 +3944,15 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                       shape: BoxShape.circle,
                                       color: _accent.withValues(alpha: 0.08),
                                       border: Border.all(
-                                          color: _accent.withValues(alpha: 0.20),
-                                          width: 1),
+                                        color: _accent.withValues(alpha: 0.20),
+                                        width: 1,
+                                      ),
                                     ),
-                                    child: Icon(Icons.close,
-                                        color: _textMuted, size: 14),
+                                    child: Icon(
+                                      Icons.close,
+                                      color: _textMuted,
+                                      size: 14,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -3373,7 +3964,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                             decoration: BoxDecoration(
                               color: _panel,
                               border: Border.all(
-                                  color: _accent.withValues(alpha: 0.15), width: 1),
+                                color: _accent.withValues(alpha: 0.15),
+                                width: 1,
+                              ),
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: Row(
@@ -3389,12 +3982,20 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                         decoration: BoxDecoration(
                                           shape: BoxShape.circle,
                                           border: Border.all(
-                                              color: _accent.withValues(alpha: 0.5),
-                                              width: 2),
-                                          color: _accent.withValues(alpha: 0.08),
+                                            color: _accent.withValues(
+                                              alpha: 0.5,
+                                            ),
+                                            width: 2,
+                                          ),
+                                          color: _accent.withValues(
+                                            alpha: 0.08,
+                                          ),
                                         ),
-                                        child: Icon(Icons.circle,
-                                            color: _accent, size: 12),
+                                        child: Icon(
+                                          Icons.circle,
+                                          color: _accent,
+                                          size: 12,
+                                        ),
                                       ),
                                     );
                                   },
@@ -3402,22 +4003,25 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         'Visual AI Search',
                                         style: TextStyle(
-                                            color: _textHeading,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600),
+                                          color: _textHeading,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                       SizedBox(height: 2),
                                       Text(
                                         'Point at any item to find, save, or get styling advice.',
                                         style: TextStyle(
-                                            color: _textMuted,
-                                            fontSize: 11.5,
-                                            height: 1.5),
+                                          color: _textMuted,
+                                          fontSize: 11.5,
+                                          height: 1.5,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -3429,26 +4033,25 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                             (
                               Icons.search,
                               'Find Similar',
-                              'Discover items like this one',
+                              'Discover similar items with shopping links',
                               _accent,
-                              'find'
+                              'find',
                             ),
                             (
                               Icons.add_photo_alternate_outlined,
                               'Add to Wardrobe',
                               'Save to your collection',
                               _accentSecondary,
-                              'add'
+                              'add',
                             ),
-                            (
-                              Icons.chat_bubble_outline_rounded,
-                              'Ask AHVI',
-                              'Get personalised styling tips',
-                              _accentTertiary,
-                              'chat'
+                          ].map(
+                            (opt) => _buildLensOption(
+                              opt.$1,
+                              opt.$2,
+                              opt.$3,
+                              opt.$4,
                             ),
-                          ].map((opt) => _buildLensOption(
-                              opt.$1, opt.$2, opt.$3, opt.$4)),
+                          ),
                         ],
                       ),
                     ),
@@ -3463,7 +4066,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   Widget _buildLensOption(
-      IconData icon, String name, String desc, Color color) {
+    IconData icon,
+    String name,
+    String desc,
+    Color color,
+  ) {
     return _AnimatedPressable(
       scalePressed: 0.98,
       onTap: () {},
@@ -3491,7 +4098,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                   color: color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                      color: color.withValues(alpha: 0.25), width: 1),
+                    color: color.withValues(alpha: 0.25),
+                    width: 1,
+                  ),
                 ),
                 child: Icon(icon, color: color, size: 18),
               ),
@@ -3503,9 +4112,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     Text(
                       name,
                       style: TextStyle(
-                          color: _textHeading,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600),
+                        color: _textHeading,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     Text(
                       desc,
@@ -3516,10 +4126,16 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               ),
               AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                transform:
-                    Matrix4.translationValues(isHovered ? 3.0 : 0.0, 0, 0),
-                child: Icon(Icons.chevron_right_rounded,
-                    color: isHovered ? color : _textMuted, size: 20),
+                transform: Matrix4.translationValues(
+                  isHovered ? 3.0 : 0.0,
+                  0,
+                  0,
+                ),
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  color: isHovered ? color : _textMuted,
+                  size: 20,
+                ),
               ),
             ],
           ),
@@ -3543,14 +4159,14 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             curve: Curves.easeOutBack,
             child: IgnorePointer(
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 9,
+                ),
                 decoration: BoxDecoration(
                   color: _bgSecondary.withValues(alpha: 0.92),
                   borderRadius: BorderRadius.circular(999),
-                  boxShadow: [
-                    BoxShadow(color: _shadowMedium, blurRadius: 28),
-                  ],
+                  boxShadow: [BoxShadow(color: _shadowMedium, blurRadius: 28)],
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -3560,9 +4176,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     Text(
                       'Coming Soon',
                       style: TextStyle(
-                          color: _textHeading,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500),
+                        color: _textHeading,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ],
                 ),
@@ -3617,7 +4234,7 @@ class _NavPillPainter extends CustomPainter {
     );
     final pillPath = Path()..addRRect(pillRect);
 
-    final hw = itemW * 0.38; 
+    final hw = itemW * 0.38;
     final tang = hw * 0.55;
     final lx = cx - hw;
     final rx = cx + hw;
@@ -3626,7 +4243,7 @@ class _NavPillPainter extends CustomPainter {
     bp.moveTo(lx, pillTop);
     bp.cubicTo(lx + tang, pillTop, cx - tang, peakY, cx, peakY);
     bp.cubicTo(cx + tang, peakY, rx - tang, pillTop, rx, pillTop);
-    bp.close(); 
+    bp.close();
 
     final combined = Path.combine(PathOperation.union, pillPath, bp);
 
@@ -3671,10 +4288,11 @@ class _IntentConfig {
   final List<String> suggestions;
   final String brandSub;
   final List<String> responseTags;
-  const _IntentConfig(
-      {required this.suggestions,
-      required this.brandSub,
-      required this.responseTags});
+  const _IntentConfig({
+    required this.suggestions,
+    required this.brandSub,
+    required this.responseTags,
+  });
 }
 
 class _ResponseData {
@@ -3683,7 +4301,6 @@ class _ResponseData {
   final List<_Task> tasks;
   final List<_WeekDay> weekDays;
   final List<_PlanSection> planSections;
-  final _OrganizeBoardStatus? organizeBoard;
   const _ResponseData({
     required this.type,
     required this.question,
@@ -3692,7 +4309,6 @@ class _ResponseData {
     this.tasks = const [],
     this.weekDays = const [],
     this.planSections = const [],
-    this.organizeBoard,
   });
 }
 
@@ -3712,8 +4328,13 @@ class _WeekDay {
   final String day, label;
   final List<String> items;
   final bool done, isToday;
-  const _WeekDay(this.day, this.label, this.items,
-      {this.done = false, this.isToday = false});
+  const _WeekDay(
+    this.day,
+    this.label,
+    this.items, {
+    this.done = false,
+    this.isToday = false,
+  });
 }
 
 class _PlanSection {
@@ -3723,43 +4344,35 @@ class _PlanSection {
   const _PlanSection(this.title, this.color, this.items);
 }
 
-class _OrganizeBoardStatus {
-  final String boardKey;
-  final String title;
-  final IconData icon;
-  final bool done;
-  final String headline;
-  final List<String> details;
-  const _OrganizeBoardStatus({
-    required this.boardKey,
-    required this.title,
-    required this.icon,
-    required this.done,
-    required this.headline,
-    this.details = const [],
-  });
-}
-
 const _intentConfig = {
   'style': _IntentConfig(
     suggestions: [
       'What should I wear today?',
       'Build a rooftop party outfit',
-      'Show trending casual looks'
+      'Show trending casual looks',
     ],
     brandSub: 'Your AI Stylist',
     responseTags: ['Outfit Builder', 'Style Tips', 'Trending Now'],
   ),
   'organize': _IntentConfig(
-    suggestions: _organizeBoardChips,
+    suggestions: [
+      "Today's meals",
+      'My medicines',
+      'Pending bills',
+      "Today's workout",
+      'Upcoming events',
+      "Today's events",
+      'Morning skincare',
+      'My life goals',
+    ],
     brandSub: 'Your AI Organiser',
-    responseTags: _organizeBoardChips,
+    responseTags: [],
   ),
   'prepare': _IntentConfig(
     suggestions: [
       'Plan a 3-day Goa trip',
       'Pack for business travel',
-      'Create a wedding checklist'
+      'Create a wedding checklist',
     ],
     brandSub: 'Your AI Planner',
     responseTags: ['Trip Plans', 'Checklists', 'Pack Lists'],
@@ -3768,7 +4381,7 @@ const _intentConfig = {
     suggestions: [
       'Help me plan my day',
       'Suggest something for tonight',
-      'What should I focus on?'
+      'What should I focus on?',
     ],
     brandSub: 'Always here for you',
     responseTags: ['Daily Plan', 'Tonight', 'Focus Mode'],
@@ -3787,8 +4400,11 @@ class _GradientText extends StatelessWidget {
   final double fontSize;
   final FontWeight fontWeight;
 
-  const _GradientText(this.text,
-      {required this.fontSize, required this.fontWeight});
+  const _GradientText(
+    this.text, {
+    required this.fontSize,
+    required this.fontWeight,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -3823,9 +4439,9 @@ class _EntryFadeSlide extends StatefulWidget {
   const _EntryFadeSlide({
     super.key,
     required this.child,
-    this.duration = const Duration(milliseconds: 280),
+    this.duration = const Duration(milliseconds: 500),
     this.curve = Curves.easeOutCubic,
-    this.dy = 20.0,
+    this.dy = 24.0,
     this.delay = Duration.zero,
   });
 
@@ -3852,7 +4468,7 @@ class _EntryFadeSlideState extends State<_EntryFadeSlide> {
         if (h == 0 || h == double.infinity) {
           h = MediaQuery.of(context).size.height;
         }
-        
+
         final frac = widget.dy / h;
         return AnimatedOpacity(
           opacity: _show ? 1.0 : 0.0,
@@ -3883,7 +4499,7 @@ class _CardPressable extends StatefulWidget {
     required this.builder,
     this.onTap,
     this.pressedScale = 0.97,
-    this.pressedOffset = const Offset(0, -0.04),
+    this.pressedOffset = Offset.zero,
   });
 
   @override
@@ -3916,6 +4532,97 @@ class _CardPressableState extends State<_CardPressable> {
             duration: _cardTapDuration,
             curve: _cardTapCurve,
             child: widget.builder(_hovered),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PrepareQuickChip extends StatefulWidget {
+  final String label;
+  final VoidCallback onSend;
+  final Color accent;
+  final Color accentSecondary;
+  final Color panel;
+  final Color border;
+  final Color activeText;
+  final Color textMuted;
+
+  const _PrepareQuickChip({
+    required this.label,
+    required this.onSend,
+    required this.accent,
+    required this.accentSecondary,
+    required this.panel,
+    required this.border,
+    required this.activeText,
+    required this.textMuted,
+  });
+
+  @override
+  State<_PrepareQuickChip> createState() => _PrepareQuickChipState();
+}
+
+class _PrepareQuickChipState extends State<_PrepareQuickChip> {
+  bool _active = false;
+  bool _hovered = false;
+
+  void _activateAndSend() {
+    setState(() => _active = true);
+    widget.onSend();
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted) {
+        setState(() => _active = false);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hovered = _hovered && !_active;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: _activateAndSend,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            gradient: _active
+                ? LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [widget.accent, widget.accentSecondary],
+                  )
+                : null,
+            color: _active
+                ? null
+                : hovered
+                ? widget.accent.withValues(alpha: 0.15)
+                : widget.panel,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: _active
+                  ? Colors.transparent
+                  : hovered
+                  ? widget.accent.withValues(alpha: 0.5)
+                  : widget.border,
+              width: 1.5,
+            ),
+          ),
+          child: Text(
+            widget.label,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              color: _active
+                  ? widget.activeText
+                  : hovered
+                  ? widget.accent
+                  : widget.textMuted,
+            ),
           ),
         ),
       ),

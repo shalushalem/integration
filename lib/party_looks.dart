@@ -12,7 +12,7 @@ class Screen4 extends StatefulWidget {
 
 class _Screen4State extends State<Screen4> {
   bool _isLoading = true;
-  List<ProxyDocument> _boards = [];
+  List<Map<String, dynamic>> _boards = [];
 
   @override
   void initState() {
@@ -45,30 +45,66 @@ class _Screen4State extends State<Screen4> {
 
     return Scaffold(
       backgroundColor: t.backgroundPrimary,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new_rounded, color: t.textPrimary),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Text(
-          'Party Looks',
-          style: TextStyle(
-            color: t.textPrimary,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.5,
+      body: Column(
+        children: [
+          // ── Header ──
+          Container(
+            padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 12, 20, 14),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: () => Navigator.of(context).pop(),
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: t.panel,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: t.cardBorder),
+                    ),
+                    child: Icon(Icons.chevron_left_rounded, color: t.textPrimary, size: 22),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                RichText(
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'Party ',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: t.textPrimary,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      TextSpan(
+                        text: 'Looks',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 17,
+                          fontWeight: FontWeight.w300,
+                          color: t.accent.primary,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        centerTitle: true,
+          // ── Body ──
+          Expanded(
+            child: _isLoading
+                ? Center(child: CircularProgressIndicator(color: t.accent.primary))
+                : _boards.isEmpty
+                    ? _buildEmptyState(t)
+                    : _buildBoardsGrid(t),
+          ),
+        ],
       ),
-      body: _isLoading
-          ? Center(
-              child: CircularProgressIndicator(color: t.accent.primary),
-            )
-          : _boards.isEmpty
-              ? _buildEmptyState(t)
-              : _buildBoardsGrid(t),
     );
   }
 
@@ -122,7 +158,7 @@ class _Screen4State extends State<Screen4> {
       itemCount: _boards.length,
       itemBuilder: (context, index) {
         final board = _boards[index];
-        final imageUrl = board.data['imageUrl'] ?? '';
+        final imageUrl = (board['imageUrl'] ?? board['image_url'] ?? '').toString();
         
         return GestureDetector(
           onTap: () {

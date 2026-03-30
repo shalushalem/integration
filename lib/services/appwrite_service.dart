@@ -38,6 +38,13 @@ class ProxyDocument {
       raw: mapped,
     );
   }
+
+  dynamic operator [](String key) {
+    if (key == r'$id') return $id;
+    if (key == 'id') return $id;
+    if (data.containsKey(key)) return data[key];
+    return raw[key];
+  }
 }
 
 class AppwriteService extends ChangeNotifier {

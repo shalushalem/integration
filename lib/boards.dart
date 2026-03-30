@@ -4,7 +4,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:myapp/life_goals.dart' as life_goals;
 import 'package:myapp/calendar.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/daily_wear.dart' as daily_wear;
@@ -16,7 +15,8 @@ import 'package:myapp/everything_else.dart' as everything_else;
 import 'package:myapp/home_and_utilities.dart' as home_utils;
 import 'package:myapp/bills_page.dart' as bills;
 import 'package:myapp/skincare.dart';
-import 'package:myapp/workout.dart' as workout; // <-- Added Workout import back!
+import 'package:myapp/widgets/ahvi_home_text.dart';
+import 'package:myapp/diet_fitness.dart' as diet_fitness;
 
 class ShellBackNavigationNotification extends Notification {
   const ShellBackNavigationNotification();
@@ -35,6 +35,7 @@ class CalendarCard extends StatefulWidget {
   final Color accent;
   final Color accentSoft;
   final Color shellColor;
+  final Color iconColor;
 
   const CalendarCard({
     super.key,
@@ -47,31 +48,24 @@ class CalendarCard extends StatefulWidget {
     required this.accent,
     required this.accentSoft,
     required this.shellColor,
+    required this.iconColor,
   });
 
   @override
   State<CalendarCard> createState() => _CalendarCardState();
 }
 
-class _CalendarCardState extends State<CalendarCard>
-    with SingleTickerProviderStateMixin {
-  bool _calendarOpen = false;
+class _CalendarCardState extends State<CalendarCard> {
   int _totalPlans = 0;
   int _todayPlans = 0;
 
-  void _toggleCalendar() {
-    setState(() => _calendarOpen = !_calendarOpen);
-  }
-
-  void _updateCounts(int total, int today) {
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      setState(() {
-        _totalPlans = total;
-        _todayPlans = today;
-      });
-    });
+  void _openCalendar() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const CalendarShell(),
+      ),
+    );
   }
 
   @override
@@ -81,87 +75,113 @@ class _CalendarCardState extends State<CalendarCard>
         borderColor: widget.borderColor,
         glow: widget.accent.withValues(alpha: 0.28),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(_S.base, _S.base, _S.base, _S.base),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _toggleCalendar,
-                child: Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: widget.panelColor,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: widget.panelBorder),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.25),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
+          padding: const EdgeInsets.fromLTRB(
+            _S.base,
+            _S.base,
+            _S.base,
+            _S.base,
+          ),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _openCalendar,
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: widget.accent,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: widget.borderColor, width: 1.2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: widget.accent.withValues(alpha: 0.5),
+                        blurRadius: 14,
+                        offset: const Offset(0, 4),
                       ),
-                      child: const Icon(
-                        Icons.chevron_left_rounded,
-                        size: 18,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Schedule / Calendar',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: widget.textColor,
-                              height: 1.1,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '• $_totalPlans outfit plans • $_todayPlans today',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: const Color(0xFFE6EBFF),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
+                  child: Icon(
+                    Icons.calendar_month_rounded,
+                    size: 18,
+                    color: widget.iconColor,
+                  ),
                 ),
-              ),
-              AnimatedSize(
-                duration: _A.normal,
-                curve: _A.ease,
-                alignment: Alignment.topCenter,
-                child: _calendarOpen
-                    ? Padding(
-                        padding: const EdgeInsets.only(top: _S.base),
-                        child: ExpandableCalendarPanel(
-                          onCountsChanged: _updateCounts,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Schedule / Calendar',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: widget.textColor,
+                          height: 1.1,
                         ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '• $_totalPlans outfit plans • $_todayPlans today',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: widget.textColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: widget.mutedColor,
+                  size: 20,
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 }
+
+class _NavyCard extends StatelessWidget {
+  final Widget child;
+  final Color borderColor;
+
+  const _NavyCard({
+    required this.child,
+    required this.borderColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        decoration: BoxDecoration(
+          color: context.themeTokens.card,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: context.themeTokens.cardBorder, width: 1.2),
+          boxShadow: [
+            BoxShadow(
+              color: context.themeTokens.backgroundSecondary.withValues(alpha: 0.6),
+              blurRadius: 32,
+              spreadRadius: 1,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: child,
+      ),
+    );
+  }
+}
+
 
 class _GlassCard extends StatelessWidget {
   final Widget child;
@@ -185,16 +205,17 @@ class _GlassCard extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                Colors.white.withValues(alpha: 0.22),
-                Colors.white.withValues(alpha: 0.10),
+                context.themeTokens.accent.secondary.withValues(alpha: 0.85),
+                context.themeTokens.accent.tertiary,
               ],
             ),
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: borderColor.withValues(alpha: 0.6)),
+            border: Border.all(color: borderColor, width: 1.2),
             boxShadow: [
               BoxShadow(
-                color: glow,
-                blurRadius: 28,
+                color: context.themeTokens.accent.primary.withValues(alpha: 0.4),
+                blurRadius: 32,
+                spreadRadius: 1,
                 offset: const Offset(0, 10),
               ),
             ],
@@ -210,28 +231,28 @@ class _GlassCard extends StatelessWidget {
 //  SPACING CONSTANTS  (4-pt grid)
 // ─────────────────────────────────────────────────────────────────────────────
 abstract final class _S {
-  static const double xs   = 4;
-  static const double sm   = 8;
-  static const double md   = 12;
+  static const double xs = 4;
+  static const double sm = 8;
+  static const double md = 12;
   static const double base = 16;
-  static const double lg   = 24;
-  static const double xl   = 32;
+  static const double lg = 24;
+  static const double xl = 32;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ANIMATION CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
 abstract final class _A {
-  static const Duration fast    = Duration(milliseconds: 150);
-  static const Duration medium  = Duration(milliseconds: 250);
-  static const Duration normal  = Duration(milliseconds: 300);
-  static const Duration slow    = Duration(milliseconds: 350);
-  static const Duration entry   = Duration(milliseconds: 500);
-  static const Duration page    = Duration(milliseconds: 600);
+  static const Duration fast = Duration(milliseconds: 150);
+  static const Duration medium = Duration(milliseconds: 250);
+  static const Duration normal = Duration(milliseconds: 300);
+  static const Duration slow = Duration(milliseconds: 350);
+  static const Duration entry = Duration(milliseconds: 500);
+  static const Duration page = Duration(milliseconds: 600);
 
-  static const Curve spring     = Cubic(0.34, 1.56, 0.64, 1.0);
-  static const Curve pageEntry  = Cubic(0.22, 1.0,  0.36, 1.0);
-  static const Curve ease       = Curves.easeOutCubic;
+  static const Curve spring = Cubic(0.34, 1.56, 0.64, 1.0);
+  static const Curve pageEntry = Cubic(0.22, 1.0, 0.36, 1.0);
+  static const Curve ease = Curves.easeOutCubic;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -246,33 +267,39 @@ class BoardsScreen extends StatefulWidget {
 
 class _BoardsScreenState extends State<BoardsScreen>
     with TickerProviderStateMixin {
-
   AppThemeTokens get _theme => context.themeTokens;
-  Color get _bg2         => _theme.backgroundSecondary;
-  Color get _panel       => _theme.panel;
+  Color get _bg2 => _theme.backgroundSecondary;
+  Color get _panel => _theme.panel;
   Color get _panelBorder => _theme.panelBorder;
-  Color get _card        => _theme.card;
-  Color get _cardBorder  => _theme.cardBorder;
-  Color get _text        => _theme.textPrimary;
-  Color get _muted       => _theme.mutedText;
-  Color get _accent      => _theme.accent.primary;
-  Color get _accent2     => _theme.accent.secondary;
-  Color get _shell       => _theme.phoneShell;
+  Color get _card => _theme.card;
+  Color get _cardBorder => _theme.cardBorder;
+  Color get _text => _theme.textPrimary;
+  Color get _muted => _theme.mutedText;
+  Color get _accent => _theme.accent.primary;
+  Color get _accent2 => _theme.accent.secondary;
+  Color get _shell => _theme.phoneShell;
+  Color get _cardIconColor => Theme.of(context).brightness == Brightness.light
+      ? Colors.black
+      : Colors.white;
 
   bool _isLifeTab = true;
-  bool _hasStartedAnimations = false; // <-- FIX: Tracks if entry animations fired
+  bool _hasStartedAnimations =
+      false; // <-- FIX: Tracks if entry animations fired
+  final List<String> _customBoardNames = [];
+  final TextEditingController _createBoardController = TextEditingController();
+  final FocusNode _createBoardFocusNode = FocusNode();
 
   late final AnimationController _headerCtrl;
-  late final Animation<double>   _headerOpacity;
-  late final Animation<Offset>   _headerSlide;
+  late final Animation<double> _headerOpacity;
+  late final Animation<Offset> _headerSlide;
 
   late final AnimationController _toggleCtrl;
-  late final Animation<double>   _toggleOpacity;
-  late final Animation<Offset>   _toggleSlide;
+  late final Animation<double> _toggleOpacity;
+  late final Animation<Offset> _toggleSlide;
 
   late final AnimationController _sectionCtrl;
-  late final Animation<double>   _sectionOpacity;
-  late final Animation<Offset>   _sectionSlide;
+  late final Animation<double> _sectionOpacity;
+  late final Animation<Offset> _sectionSlide;
 
   @override
   void initState() {
@@ -280,31 +307,35 @@ class _BoardsScreenState extends State<BoardsScreen>
 
     _headerCtrl = AnimationController(vsync: this, duration: _A.page);
     _headerOpacity = CurvedAnimation(parent: _headerCtrl, curve: _A.pageEntry);
-    _headerSlide = Tween<Offset>(begin: const Offset(0, -0.35), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _headerCtrl, curve: _A.pageEntry));
+    _headerSlide = Tween<Offset>(
+      begin: const Offset(0, -0.35),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _headerCtrl, curve: _A.pageEntry));
 
     _toggleCtrl = AnimationController(vsync: this, duration: _A.page);
     _toggleOpacity = CurvedAnimation(parent: _toggleCtrl, curve: _A.pageEntry);
-    _toggleSlide = Tween<Offset>(begin: const Offset(0, -0.35), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _toggleCtrl, curve: _A.pageEntry));
+    _toggleSlide = Tween<Offset>(
+      begin: const Offset(0, -0.35),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _toggleCtrl, curve: _A.pageEntry));
 
     _sectionCtrl = AnimationController(vsync: this, duration: _A.slow);
     _sectionOpacity = CurvedAnimation(parent: _sectionCtrl, curve: Curves.ease);
-    _sectionSlide = Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _sectionCtrl, curve: Curves.ease));
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (TickerMode.of(context) && !_hasStartedAnimations) {
+    _sectionSlide = Tween<Offset>(
+      begin: const Offset(0, 0.04),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _sectionCtrl, curve: Curves.ease));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _hasStartedAnimations) return;
       _hasStartedAnimations = true;
       _headerCtrl.forward();
-      Future.delayed(const Duration(milliseconds: 100),
-              () { if (mounted) _toggleCtrl.forward(); });
-      Future.delayed(const Duration(milliseconds: 200),
-              () { if (mounted) _sectionCtrl.forward(); });
-    }
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) _toggleCtrl.forward();
+      });
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (mounted) _sectionCtrl.forward();
+      });
+    });
   }
 
   @override
@@ -312,12 +343,14 @@ class _BoardsScreenState extends State<BoardsScreen>
     _headerCtrl.dispose();
     _toggleCtrl.dispose();
     _sectionCtrl.dispose();
+    _createBoardController.dispose();
+    _createBoardFocusNode.dispose();
     super.dispose();
   }
 
   void _switchTab(bool isLife) {
     if (_isLifeTab == isLife) return;
-    HapticFeedback.selectionClick(); 
+    HapticFeedback.selectionClick();
     setState(() => _isLifeTab = isLife);
     _sectionCtrl
       ..reset()
@@ -333,13 +366,15 @@ class _BoardsScreenState extends State<BoardsScreen>
         pageBuilder: (context, animation, secondary) => page,
         transitionsBuilder: (context, animation, secondary, child) {
           final curved = CurvedAnimation(
-            parent: animation, curve: _A.pageEntry,
+            parent: animation,
+            curve: _A.pageEntry,
           );
           return FadeTransition(
             opacity: curved,
             child: SlideTransition(
               position: Tween<Offset>(
-                begin: const Offset(0.04, 0), end: Offset.zero,
+                begin: const Offset(0.04, 0),
+                end: Offset.zero,
               ).animate(curved),
               child: child,
             ),
@@ -347,6 +382,305 @@ class _BoardsScreenState extends State<BoardsScreen>
         },
       ),
     );
+  }
+
+  void _openCreateBoardDialog() {
+    _createBoardController.clear();
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.75),
+      builder: (ctx) => _CreateBoardDialog(
+        controller: _createBoardController,
+        focusNode: _createBoardFocusNode,
+        accent: _accent,
+        card: _card,
+        cardBorder: _cardBorder,
+        text: _text,
+        muted: _muted,
+        onSubmit: _submitCreateBoard,
+      ),
+    );
+  }
+
+  void _closeCreateBoardDialog() {
+    _createBoardFocusNode.unfocus();
+    Navigator.of(context, rootNavigator: true).maybePop();
+  }
+
+  void _submitCreateBoard() {
+    final trimmed = _createBoardController.text.trim();
+    if (trimmed.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a board name.')),
+      );
+      return;
+    }
+
+    final alreadyExists = _customBoardNames.any(
+      (name) => name.toLowerCase() == trimmed.toLowerCase(),
+    );
+    if (alreadyExists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('That board already exists.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _customBoardNames.add(trimmed);
+    });
+    _createBoardFocusNode.unfocus();
+    _createBoardController.clear();
+    Navigator.of(context, rootNavigator: true).maybePop();
+  }
+
+  void _deleteCustomBoard(String boardName) {
+    setState(() {
+      _customBoardNames.remove(boardName);
+    });
+  }
+
+  List<_BoardCardConfig> _predefinedBoardCards() {
+    return [
+      _BoardCardConfig(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFFFB08F), Color(0xFFFF8F72)],
+        ),
+        shadowColor: const Color(0xFFFF8F72).withValues(alpha: 0.30),
+        iconBg: _panel,
+        icon: Icons.celebration_rounded,
+        title: 'Party Looks',
+        subtitle: 'Evening & cocktail',
+        onTap: () => _push(
+          const OccasionBoard(
+            occasion: 'Party',
+            title: 'Party Looks',
+            subtitle: 'Evening & cocktail',
+            emptyEmoji: '🎊',
+          ),
+        ),
+      ),
+      _BoardCardConfig(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFFFE07E), Color(0xFFFFC956)],
+        ),
+        shadowColor: const Color(0xFFFFC956).withValues(alpha: 0.30),
+        iconBg: _panel,
+        icon: Icons.business_center_rounded,
+        title: 'Office Fits',
+        subtitle: 'Work-ready looks',
+        onTap: () => _push(
+          const OccasionBoard(
+            occasion: 'Office',
+            title: 'Office Fits',
+            subtitle: 'Work-ready looks',
+            emptyEmoji: '💼',
+          ),
+        ),
+      ),
+      _BoardCardConfig(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF9AF0D3), Color(0xFF58DCB0)],
+        ),
+        shadowColor: const Color(0xFF58DCB0).withValues(alpha: 0.25),
+        iconBg: _panel,
+        icon: Icons.beach_access_rounded,
+        title: 'Vacation',
+        subtitle: 'Travel outfits',
+        onTap: () => _push(
+          const OccasionBoard(
+            occasion: 'Vacation',
+            title: 'Vacation',
+            subtitle: 'Travel outfits',
+            emptyEmoji: '✈️',
+          ),
+        ),
+      ),
+      _BoardCardConfig(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF9DCBFF), Color(0xFF77A8FF)],
+        ),
+        shadowColor: const Color(0xFF77A8FF).withValues(alpha: 0.28),
+        iconBg: _card,
+        icon: Icons.auto_awesome_rounded,
+        title: 'Occasion',
+        subtitle: 'Special events',
+        onTap: () => _push(
+          const OccasionBoard(
+            occasion: 'Occasion',
+            title: 'Occasion',
+            subtitle: 'Special events',
+            emptyEmoji: '✨',
+          ),
+        ),
+      ),
+    ];
+  }
+
+  List<_BoardCardConfig> _customBoardCards() {
+    const palette = [
+      [Color(0xFF8EC5FC), Color(0xFF5F8BFF)],
+      [Color(0xFFFFC58B), Color(0xFFFF9F68)],
+      [Color(0xFF9EE6C9), Color(0xFF58D7A8)],
+      [Color(0xFFD2B7FF), Color(0xFFA586FF)],
+      [Color(0xFFFFB7D4), Color(0xFFFF8FC4)],
+      [Color(0xFFF7E08B), Color(0xFFEBC85B)],
+    ];
+
+    return _customBoardNames.asMap().entries.map((entry) {
+      final index = entry.key;
+      final boardName = entry.value;
+      final colors = palette[index % palette.length];
+      return _BoardCardConfig(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: colors,
+        ),
+        shadowColor: colors[1].withValues(alpha: 0.28),
+        iconBg: _panel,
+        icon: Icons.dashboard_customize_rounded,
+        title: boardName,
+        subtitle: 'Custom board',
+        onTap: () => _push(
+          OccasionBoard(
+            occasion: 'Custom:$boardName',
+            title: boardName,
+            subtitle: 'Custom board',
+            emptyEmoji: '🧩',
+          ),
+        ),
+        onDelete: () => _deleteCustomBoard(boardName),
+      );
+    }).toList();
+  }
+
+  Widget _buildBoardCard(
+    _BoardCardConfig config, {
+    required bool fullWidth,
+    required int delayMs,
+  }) {
+    return _StaggeredCard(
+      delay: Duration(milliseconds: delayMs),
+      child: Stack(
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: _VCard(
+              fullWidth: fullWidth,
+              gradient: config.gradient,
+              shadowColor: config.shadowColor,
+              badge: null,
+              badgeTextColor: Colors.transparent,
+              badgeBg: Colors.transparent,
+              badgeBorderColor: Colors.transparent,
+              iconBg: config.iconBg,
+              iconWidget: Icon(config.icon, size: 26, color: _cardIconColor),
+              title: config.title,
+              titleColor: Colors.white,
+              titleSize: 15,
+              subtitle: config.subtitle,
+              subtitleColor: Colors.white,
+              arrowBg: config.iconBg,
+              arrowColor: _cardIconColor,
+              shellColor: _shell,
+              onTap: config.onTap,
+            ),
+          ),
+          if (config.onDelete != null)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: config.onDelete,
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.26),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.35),
+                        width: 1,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.delete_outline_rounded,
+                      size: 16,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTwoColumnBoardGrid(
+    List<_BoardCardConfig> cards, {
+    int startDelayMs = 80,
+  }) {
+    if (cards.isEmpty) return const SizedBox.shrink();
+
+    final rows = <Widget>[];
+    var cardIndex = 0;
+
+    while (cardIndex < cards.length) {
+      final remaining = cards.length - cardIndex;
+
+      if (remaining == 1) {
+        rows.add(
+          _buildBoardCard(
+            cards[cardIndex],
+            fullWidth: true,
+            delayMs: startDelayMs + (cardIndex * 80),
+          ),
+        );
+        cardIndex += 1;
+      } else {
+        rows.add(
+          Row(
+            children: [
+              Expanded(
+                child: _buildBoardCard(
+                  cards[cardIndex],
+                  fullWidth: false,
+                  delayMs: startDelayMs + (cardIndex * 80),
+                ),
+              ),
+              const SizedBox(width: _S.md),
+              Expanded(
+                child: _buildBoardCard(
+                  cards[cardIndex + 1],
+                  fullWidth: false,
+                  delayMs: startDelayMs + ((cardIndex + 1) * 80),
+                ),
+              ),
+            ],
+          ),
+        );
+        cardIndex += 2;
+      }
+
+      if (cardIndex < cards.length) {
+        rows.add(const SizedBox(height: _S.md));
+      }
+    }
+
+    return Column(children: rows);
   }
 
   @override
@@ -364,7 +698,11 @@ class _BoardsScreenState extends State<BoardsScreen>
               slivers: [
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(
-                      _S.base, _S.xl, _S.base, 132),
+                    _S.base,
+                    _S.xl,
+                    _S.base,
+                    132,
+                  ),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
                       FadeTransition(
@@ -382,7 +720,7 @@ class _BoardsScreenState extends State<BoardsScreen>
                           child: _buildToggle(),
                         ),
                       ),
-                      const SizedBox(height: _S.base + _S.xs), 
+                      const SizedBox(height: _S.base + _S.xs),
                       FadeTransition(
                         opacity: _sectionOpacity,
                         child: SlideTransition(
@@ -392,7 +730,10 @@ class _BoardsScreenState extends State<BoardsScreen>
                             switchInCurve: _A.ease,
                             switchOutCurve: _A.ease,
                             transitionBuilder: (child, animation) =>
-                                FadeTransition(opacity: animation, child: child),
+                                FadeTransition(
+                                  opacity: animation,
+                                  child: child,
+                                ),
                             child: KeyedSubtree(
                               key: ValueKey(_isLifeTab),
                               child: _isLifeTab
@@ -412,6 +753,8 @@ class _BoardsScreenState extends State<BoardsScreen>
       ),
     );
   }
+
+  // _buildCreateBoardOverlay removed — now uses showDialog via _openCreateBoardDialog
 
   Widget _buildAmbientBg() {
     return Stack(
@@ -448,45 +791,18 @@ class _BoardsScreenState extends State<BoardsScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        AhviHomeText(color: _text),
+        const SizedBox(height: _S.sm),
         Row(
           children: [
-            _HoverPressButton(
-              onTap: () {
-                final navigator = Navigator.of(context);
-                if (navigator.canPop()) {
-                  navigator.pop();
-                  return;
-                }
-                const ShellBackNavigationNotification().dispatch(context);
-              },
-              hoverScale: 0.95,
-              pressScale: 0.90,
-              child: Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: _panel,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: _panelBorder, width: 1),
-                ),
-                child: Center(
-                  child: Icon(
-                    Icons.chevron_left_rounded,
-                    color: _accent,
-                    size: 20,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: _S.md),
             Text(
-              'Boards',
+              'Planner',
               style: TextStyle(
                 fontFamily: 'Inter',
                 fontSize: 38,
                 fontWeight: FontWeight.w700,
                 height: 1.0,
-                letterSpacing: -1.0, 
+                letterSpacing: -1.0,
                 color: _text,
               ),
             ),
@@ -522,8 +838,8 @@ class _BoardsScreenState extends State<BoardsScreen>
               label: 'Life',
               icon: Icons.auto_awesome_rounded,
               isActive: _isLifeTab,
-              activeShellColor: _shell,
-              activeTextColor: _text,
+              activeShellColor: _text,
+              activeTextColor: _theme.backgroundPrimary,
               inactiveTextColor: _muted,
               accentColor: _accent,
               onTap: () => _switchTab(true),
@@ -534,8 +850,8 @@ class _BoardsScreenState extends State<BoardsScreen>
               label: 'Boards',
               icon: Icons.grid_view_rounded,
               isActive: !_isLifeTab,
-              activeShellColor: _shell,
-              activeTextColor: _text,
+              activeShellColor: _text,
+              activeTextColor: _theme.backgroundPrimary,
               inactiveTextColor: _muted,
               accentColor: _accent,
               onTap: () => _switchTab(false),
@@ -547,7 +863,7 @@ class _BoardsScreenState extends State<BoardsScreen>
   }
 
   Widget _buildLifeSection() {
-    final lifeContentColor = _text;
+    const lifeContentColor = Colors.white;
 
     return Column(
       children: [
@@ -560,9 +876,10 @@ class _BoardsScreenState extends State<BoardsScreen>
             panelBorder: _panelBorder,
             textColor: lifeContentColor,
             mutedColor: _muted,
-            accent: const Color(0xFF77A8FF),
-            accentSoft: const Color(0xFF9DCBFF),
+            accent: const Color(0xFFB48EFF),
+            accentSoft: const Color(0xFFD4B8FF),
             shellColor: _shell,
+            iconColor: _cardIconColor,
           ),
         ),
         const SizedBox(height: _S.md),
@@ -575,7 +892,8 @@ class _BoardsScreenState extends State<BoardsScreen>
                 child: _VCard(
                   fullWidth: false,
                   gradient: const LinearGradient(
-                    begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
                     colors: [Color(0xFFFFB08F), Color(0xFFFF8F72)],
                   ),
                   shadowColor: const Color(0xFFFF8F72).withValues(alpha: 0.30),
@@ -584,15 +902,21 @@ class _BoardsScreenState extends State<BoardsScreen>
                   badgeBg: _card,
                   badgeBorderColor: _accent.withValues(alpha: 0.25),
                   iconBg: _card,
-                  iconWidget: Icon(Icons.checkroom_rounded, size: 32, color: lifeContentColor),
+                  iconWidget: Icon(
+                    Icons.checkroom_rounded,
+                    size: 32,
+                    color: _cardIconColor,
+                  ),
                   title: 'Daily Wear',
                   titleColor: lifeContentColor,
                   subtitle: "Today's outfits",
                   subtitleColor: lifeContentColor,
                   arrowBg: _card,
-                  arrowColor: lifeContentColor,
+                  arrowColor: _cardIconColor,
                   shellColor: _shell,
-                  onTap: () => _push(const daily_wear.DailyWearScreen()), // Or whatever your main class is named in daily_wear.dart
+                  onTap: () => _push(
+                   const daily_wear.DailyWearScreen()
+                  ), // Or whatever your main class is named in daily_wear.dart
                 ),
               ),
             ),
@@ -603,7 +927,8 @@ class _BoardsScreenState extends State<BoardsScreen>
                 child: _VCard(
                   fullWidth: false,
                   gradient: const LinearGradient(
-                    begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
                     colors: [Color(0xFFFFE07E), Color(0xFFFFC956)],
                   ),
                   shadowColor: const Color(0xFFFFC956).withValues(alpha: 0.30),
@@ -612,13 +937,17 @@ class _BoardsScreenState extends State<BoardsScreen>
                   badgeBg: _card,
                   badgeBorderColor: _accent2.withValues(alpha: 0.25),
                   iconBg: _card,
-                  iconWidget: Icon(Icons.home_rounded, size: 32, color: lifeContentColor),
+                  iconWidget: Icon(
+                    Icons.home_rounded,
+                    size: 32,
+                    color: _cardIconColor,
+                  ),
                   title: 'Home / Utilities',
                   titleColor: lifeContentColor,
                   subtitle: 'Bills & stuff',
                   subtitleColor: lifeContentColor,
                   arrowBg: _card,
-                  arrowColor: lifeContentColor,
+                  arrowColor: _cardIconColor,
                   shellColor: _shell,
                   // <-- FIX: Now properly points to BillsScreen!
                   onTap: () => _push(const home_utils.HomeUtilitiesScreen()),
@@ -628,7 +957,6 @@ class _BoardsScreenState extends State<BoardsScreen>
           ],
         ),
         const SizedBox(height: _S.md),
-
         Row(
           children: [
             Expanded(
@@ -637,25 +965,29 @@ class _BoardsScreenState extends State<BoardsScreen>
                 child: _VCard(
                   fullWidth: false,
                   gradient: const LinearGradient(
-                    begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                    colors: [Color(0xFF9AF0D3), Color(0xFF58DCB0)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFFFFBFDC), Color(0xFFFF96C7)],
                   ),
-                  shadowColor: const Color(0xFF58DCB0).withValues(alpha: 0.30),
-                  badge: '3×/wk',
+                  shadowColor: const Color(0xFFFF96C7).withValues(alpha: 0.30),
+                  badge: 'AM · PM',
                   badgeTextColor: _accent,
                   badgeBg: _panelBorder,
                   badgeBorderColor: _cardBorder,
                   iconBg: _panel,
-                  iconWidget: Icon(Icons.fitness_center_rounded, size: 32, color: lifeContentColor),
-                  title: 'Work Out',
+                  iconWidget: Icon(
+                    Icons.water_drop_rounded,
+                    size: 32,
+                    color: _cardIconColor,
+                  ),
+                  title: 'Skincare',
                   titleColor: lifeContentColor,
-                  subtitle: 'Gym & yoga',
+                  subtitle: 'Morning & night routine',
                   subtitleColor: lifeContentColor,
                   arrowBg: _panel,
-                  arrowColor: lifeContentColor,
+                  arrowColor: _cardIconColor,
                   shellColor: _shell,
-                  // <-- FIX: Now points correctly to WorkoutScreen!
-                  onTap: () => _push(const workout.WorkoutScreen()),
+                  onTap: () => _push(const SkincareScreen()),
                 ),
               ),
             ),
@@ -666,217 +998,91 @@ class _BoardsScreenState extends State<BoardsScreen>
                 child: _VCard(
                   fullWidth: false,
                   gradient: const LinearGradient(
-                    begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                    colors: [Color(0xFF9DCBFF), Color(0xFF77A8FF)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFF6EE7B7), Color(0xFF34D399)],
                   ),
-                  shadowColor: const Color(0xFF77A8FF).withValues(alpha: 0.30),
-                  badge: '8',
+                  shadowColor: const Color(0xFF34D399).withValues(alpha: 0.30),
+                  badge: 'Track',
                   badgeTextColor: _accent,
                   badgeBg: _panelBorder,
                   badgeBorderColor: _cardBorder,
                   iconBg: _panel,
-                  iconWidget: Icon(Icons.track_changes_rounded, size: 32, color: lifeContentColor),
-                  title: 'Life Goals',
+                  iconWidget: Icon(
+                    Icons.monitor_heart_rounded,
+                    size: 32,
+                    color: _cardIconColor,
+                  ),
+                  title: 'Diet & Fitness',
                   titleColor: lifeContentColor,
-                  subtitle: 'Habits & goals',
+                  subtitle: 'Meals, workout & goals',
                   subtitleColor: lifeContentColor,
                   arrowBg: _panel,
-                  arrowColor: lifeContentColor,
+                  arrowColor: _cardIconColor,
                   shellColor: _shell,
-                  // <-- FIX: Reverted to placeholder until we build Life Goals
-                  onTap: () => _push(const life_goals.LifeGoalsScreen()),
+                  onTap: () => _push(const diet_fitness.DietAndFitnessScreen()),
                 ),
               ),
             ),
           ],
-        ),
-        const SizedBox(height: _S.md),
-
-        _StaggeredCard(
-          delay: const Duration(milliseconds: 380),
-          child: _VCard(
-            fullWidth: true,
-            gradient: const LinearGradient(
-              begin: Alignment.topCenter, end: Alignment.bottomCenter,
-              colors: [Color(0xFFFFBFDC), Color(0xFFFF96C7)],
-            ),
-            shadowColor: const Color(0xFFFF96C7).withValues(alpha: 0.30),
-            badge: 'AM · PM',
-            badgeTextColor: _accent,
-            badgeBg: _panelBorder,
-            badgeBorderColor: _cardBorder,
-            iconBg: _panel,
-            iconWidget: Icon(Icons.water_drop_rounded, size: 32, color: lifeContentColor),
-            title: 'Skincare',
-            titleColor: lifeContentColor,
-            subtitle: 'Morning & night routine',
-            subtitleColor: lifeContentColor,
-            arrowBg: _panel,
-            arrowColor: lifeContentColor,
-            shellColor: _shell,
-            onTap: () => _push(const SkincareScreen()),
-          ),
         ),
       ],
     );
   }
 
   Widget _buildBoardsSection() {
+    final predefinedBoards = _predefinedBoardCards();
+    final customBoards = _customBoardCards();
+
     return Column(
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: _StaggeredCard(
-                delay: const Duration(milliseconds: 80),
-                child: _VCard(
-                  fullWidth: false,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft, end: Alignment.bottomRight,
-                    colors: [Color(0xFFFFB08F), Color(0xFFFF8F72)],
-                  ),
-                  shadowColor: const Color(0xFFFF8F72).withValues(alpha: 0.30),
-                  badge: null,
-                  badgeTextColor: Colors.transparent,
-                  badgeBg: Colors.transparent,
-                  badgeBorderColor: Colors.transparent,
-                  iconBg: _panel,
-                  iconWidget: const Icon(Icons.celebration_rounded, size: 26, color: Color(0xFFFF8F72)),
-                  title: 'Party Looks',
-                  titleColor: _text,
-                  titleSize: 15,
-                  subtitle: 'Evening & cocktail',
-                  subtitleColor: const Color(0xFFFF8F72),
-                  arrowBg: _panel,
-                  arrowColor: const Color(0xFFFF8F72),
-                  shellColor: _shell,
-                  onTap: () => _push(const OccasionBoard(
-                    occasion: 'Party',
-                    title: 'Party Looks',
-                    subtitle: 'Evening & cocktail',
-                    emptyEmoji: '🎊',
-                  )),
-                ),
-              ),
-            ),
-            const SizedBox(width: _S.md),
-            Expanded(
-              child: _StaggeredCard(
-                delay: const Duration(milliseconds: 160),
-                child: _VCard(
-                  fullWidth: false,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft, end: Alignment.bottomRight,
-                    colors: [Color(0xFFFFE07E), Color(0xFFFFC956)],
-                  ),
-                  shadowColor: const Color(0xFFFFC956).withValues(alpha: 0.30),
-                  badge: null,
-                  badgeTextColor: Colors.transparent,
-                  badgeBg: Colors.transparent,
-                  badgeBorderColor: Colors.transparent,
-                  iconBg: _panel,
-                  iconWidget: const Icon(Icons.business_center_rounded, size: 26, color: Color(0xFFFFC956)),
-                  title: 'Office Fits',
-                  titleColor: _text,
-                  titleSize: 15,
-                  subtitle: 'Work-ready looks',
-                  subtitleColor: const Color(0xFFFFC956),
-                  arrowBg: _panel,
-                  arrowColor: const Color(0xFFFFC956),
-                  shellColor: _shell,
-                  onTap: () => _push(const OccasionBoard(
-                    occasion: 'Office',
-                    title: 'Office Fits',
-                    subtitle: 'Work-ready looks',
-                    emptyEmoji: '💼',
-                  )),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: _S.md),
-
-        Row(
-          children: [
-            Expanded(
-              child: _StaggeredCard(
-                delay: const Duration(milliseconds: 160),
-                child: _VCard(
-                  fullWidth: false,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft, end: Alignment.bottomRight,
-                    colors: [Color(0xFF9AF0D3), Color(0xFF58DCB0)],
-                  ),
-                  shadowColor: const Color(0xFF58DCB0).withValues(alpha: 0.25),
-                  badge: null,
-                  badgeTextColor: Colors.transparent,
-                  badgeBg: Colors.transparent,
-                  badgeBorderColor: Colors.transparent,
-                  iconBg: _panel,
-                  iconWidget: const Icon(Icons.beach_access_rounded, size: 26, color: Color(0xFF58DCB0)),
-                  title: 'Vacation',
-                  titleColor: _text,
-                  titleSize: 15,
-                  subtitle: 'Travel outfits',
-                  subtitleColor: const Color(0xFF58DCB0),
-                  arrowBg: _panel,
-                  arrowColor: const Color(0xFF58DCB0),
-                  shellColor: _shell,
-                  onTap: () => _push(const OccasionBoard(
-                    occasion: 'Vacation',
-                    title: 'Vacation',
-                    subtitle: 'Travel outfits',
-                    emptyEmoji: '✈️',
-                  )),
-                ),
-              ),
-            ),
-            const SizedBox(width: _S.md),
-            Expanded(
-              child: _StaggeredCard(
-                delay: const Duration(milliseconds: 240),
-                child: _VCard(
-                  fullWidth: false,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft, end: Alignment.bottomRight,
-                    colors: [Color(0xFF9DCBFF), Color(0xFF77A8FF)],
-                  ),
-                  shadowColor: const Color(0xFF77A8FF).withValues(alpha: 0.28),
-                  badge: null,
-                  badgeTextColor: Colors.transparent,
-                  badgeBg: Colors.transparent,
-                  badgeBorderColor: Colors.transparent,
-                  iconBg: _card,
-                  iconWidget: const Icon(Icons.auto_awesome_rounded, size: 26, color: Color(0xFF77A8FF)),
-                  title: 'Occasion',
-                  titleColor: _text,
-                  titleSize: 15,
-                  subtitle: 'Special events',
-                  subtitleColor: const Color(0xFF77A8FF),
-                  arrowBg: _card,
-                  arrowColor: const Color(0xFF77A8FF),
-                  shellColor: _shell,
-                  onTap: () => _push(const OccasionBoard(
-                    occasion: 'Occasion',
-                    title: 'Occasion',
-                    subtitle: 'Special events',
-                    emptyEmoji: '✨',
-                  )),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: _S.md),
-
         _StaggeredCard(
-          delay: const Duration(milliseconds: 240),
+          delay: const Duration(milliseconds: 180),
+          child: _VCard(
+            fullWidth: true,
+            minHeight: 92,
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFFC7B6FF), Color(0xFF9A84FF)],
+            ),
+            shadowColor: const Color(0xFF9A84FF).withValues(alpha: 0.28),
+            badge: null,
+            badgeTextColor: Colors.transparent,
+            badgeBg: Colors.transparent,
+            badgeBorderColor: Colors.transparent,
+            iconBg: _panel,
+            iconWidget: Icon(
+              Icons.add_circle_outline_rounded,
+              size: 28,
+              color: _cardIconColor,
+            ),
+            title: 'Create Your Own Board',
+            titleColor: Colors.white,
+            titleSize: 15,
+            subtitle: 'Name it and start building',
+            subtitleColor: Colors.white,
+            arrowBg: _panel,
+            arrowColor: _cardIconColor,
+            shellColor: _shell,
+            onTap: _openCreateBoardDialog,
+          ),
+        ),
+        const SizedBox(height: _S.md),
+        _buildTwoColumnBoardGrid(predefinedBoards, startDelayMs: 80),
+        const SizedBox(height: _S.md),
+        if (customBoards.isNotEmpty) ...[
+          _buildTwoColumnBoardGrid(customBoards, startDelayMs: 260),
+          const SizedBox(height: _S.md),
+        ],
+        _StaggeredCard(
+          delay: const Duration(milliseconds: 320),
           child: _EverythingElseCard(
             gradientStart: const Color(0xFFFFBFDC),
             gradientEnd: const Color(0xFFFF96C7),
             cardColor: _card,
-            textColor: _text,
+            textColor: Colors.white,
+            iconColor: _cardIconColor,
             panelColor: _panel,
             shellColor: _shell,
             onTap: () => _push(const everything_else.Screen4()),
@@ -885,6 +1091,28 @@ class _BoardsScreenState extends State<BoardsScreen>
       ],
     );
   }
+}
+
+class _BoardCardConfig {
+  final Gradient gradient;
+  final Color shadowColor;
+  final Color iconBg;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final VoidCallback? onDelete;
+
+  const _BoardCardConfig({
+    required this.gradient,
+    required this.shadowColor,
+    required this.iconBg,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.onDelete,
+  });
 }
 
 class _ToggleButton extends StatefulWidget {
@@ -925,9 +1153,10 @@ class _ToggleButtonState extends State<_ToggleButton>
       duration: _A.slow,
       value: widget.isActive ? 1.0 : 0.0,
     );
-    _scaleAnim = Tween<double>(begin: 1.0, end: 1.02).animate(
-      CurvedAnimation(parent: _scaleCtrl, curve: _A.spring),
-    );
+    _scaleAnim = Tween<double>(
+      begin: 1.0,
+      end: 1.02,
+    ).animate(CurvedAnimation(parent: _scaleCtrl, curve: _A.spring));
   }
 
   @override
@@ -957,18 +1186,16 @@ class _ToggleButtonState extends State<_ToggleButton>
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: widget.isActive
-              ? widget.activeShellColor
-              : Colors.transparent,
+          color: widget.isActive ? widget.activeShellColor : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           boxShadow: widget.isActive
               ? [
-            BoxShadow(
-              color: widget.accentColor.withValues(alpha: 0.28),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ]
+                  BoxShadow(
+                    color: widget.accentColor.withValues(alpha: 0.28),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
               : null,
         ),
         child: ScaleTransition(
@@ -1012,6 +1239,7 @@ Matrix4 _scaleTranslate(double scale, double dy) {
 
 class _VCard extends StatefulWidget {
   final bool fullWidth;
+  final double minHeight;
   final Gradient gradient;
   final Color shadowColor;
   final String? badge;
@@ -1032,6 +1260,7 @@ class _VCard extends StatefulWidget {
 
   const _VCard({
     required this.fullWidth,
+    this.minHeight = 130,
     required this.gradient,
     required this.shadowColor,
     required this.badge,
@@ -1066,16 +1295,15 @@ class _VCardState extends State<_VCard> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _iconCtrl = AnimationController(
-      vsync: this,
-      duration: _A.normal,
-    );
-    _iconRotate = Tween<double>(begin: 0.0, end: -6 * math.pi / 180).animate(
-      CurvedAnimation(parent: _iconCtrl, curve: _A.spring),
-    );
-    _iconScale = Tween<double>(begin: 1.0, end: 1.18).animate(
-      CurvedAnimation(parent: _iconCtrl, curve: _A.spring),
-    );
+    _iconCtrl = AnimationController(vsync: this, duration: _A.normal);
+    _iconRotate = Tween<double>(
+      begin: 0.0,
+      end: -6 * math.pi / 180,
+    ).animate(CurvedAnimation(parent: _iconCtrl, curve: _A.spring));
+    _iconScale = Tween<double>(
+      begin: 1.0,
+      end: 1.18,
+    ).animate(CurvedAnimation(parent: _iconCtrl, curve: _A.spring));
   }
 
   @override
@@ -1119,7 +1347,7 @@ class _VCardState extends State<_VCard> with SingleTickerProviderStateMixin {
           duration: _A.normal,
           curve: _A.spring,
           width: widget.fullWidth ? double.infinity : null,
-          constraints: const BoxConstraints(minHeight: 130),
+          constraints: BoxConstraints(minHeight: widget.minHeight),
           transform: _scaleTranslate(_scale, _yOffset),
           transformAlignment: Alignment.center,
           decoration: BoxDecoration(
@@ -1136,7 +1364,11 @@ class _VCardState extends State<_VCard> with SingleTickerProviderStateMixin {
             ],
           ),
           padding: const EdgeInsets.fromLTRB(
-              _S.base, _S.base + _S.xs, _S.base, _S.base),
+            _S.base,
+            _S.base + _S.xs,
+            _S.base,
+            _S.base,
+          ),
           child: Stack(
             children: [
               Column(
@@ -1197,7 +1429,9 @@ class _VCardState extends State<_VCard> with SingleTickerProviderStateMixin {
                   right: 0,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 2),
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: widget.badgeBg,
                       borderRadius: BorderRadius.circular(8),
@@ -1223,7 +1457,10 @@ class _VCardState extends State<_VCard> with SingleTickerProviderStateMixin {
                   width: 22,
                   height: 22,
                   transform: Matrix4.translationValues(
-                      _isHovered ? 2.0 : 0.0, 0.0, 0.0),
+                    _isHovered ? 2.0 : 0.0,
+                    0.0,
+                    0.0,
+                  ),
                   decoration: BoxDecoration(
                     color: _isHovered ? widget.shellColor : widget.arrowBg,
                     borderRadius: BorderRadius.circular(8),
@@ -1256,6 +1493,7 @@ class _EverythingElseCard extends StatefulWidget {
   final Color gradientEnd;
   final Color cardColor;
   final Color textColor;
+  final Color iconColor;
   final Color panelColor;
   final Color shellColor;
   final VoidCallback? onTap;
@@ -1265,6 +1503,7 @@ class _EverythingElseCard extends StatefulWidget {
     required this.gradientEnd,
     required this.cardColor,
     required this.textColor,
+    required this.iconColor,
     required this.panelColor,
     required this.shellColor,
     this.onTap,
@@ -1307,7 +1546,8 @@ class _EverythingElseCardState extends State<_EverythingElseCard> {
           constraints: const BoxConstraints(minHeight: 110),
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              begin: Alignment.topLeft, end: Alignment.bottomRight,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
               colors: [widget.gradientStart, widget.gradientEnd],
             ),
             borderRadius: BorderRadius.circular(22),
@@ -1320,7 +1560,11 @@ class _EverythingElseCardState extends State<_EverythingElseCard> {
             ],
           ),
           padding: const EdgeInsets.fromLTRB(
-              _S.base, _S.base + _S.xs, _S.base, _S.base),
+            _S.base,
+            _S.base + _S.xs,
+            _S.base,
+            _S.base,
+          ),
           child: Row(
             children: [
               Container(
@@ -1331,8 +1575,11 @@ class _EverythingElseCardState extends State<_EverythingElseCard> {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Center(
-                  child: Icon(Icons.explore_rounded,
-                      size: 26, color: widget.gradientEnd),
+                  child: Icon(
+                    Icons.explore_rounded,
+                    size: 26,
+                    color: widget.iconColor,
+                  ),
                 ),
               ),
               const SizedBox(width: _S.base),
@@ -1356,7 +1603,7 @@ class _EverythingElseCardState extends State<_EverythingElseCard> {
                       style: TextStyle(
                         fontFamily: 'Inter',
                         fontSize: 11.5,
-                        color: widget.gradientEnd,
+                        color: Colors.white,
                         height: 1.4,
                       ),
                     ),
@@ -1369,7 +1616,10 @@ class _EverythingElseCardState extends State<_EverythingElseCard> {
                 width: 22,
                 height: 22,
                 transform: Matrix4.translationValues(
-                    _isHovered ? 2.0 : 0.0, 0.0, 0.0),
+                  _isHovered ? 2.0 : 0.0,
+                  0.0,
+                  0.0,
+                ),
                 decoration: BoxDecoration(
                   color: _isHovered ? widget.shellColor : widget.cardColor,
                   borderRadius: BorderRadius.circular(8),
@@ -1380,7 +1630,7 @@ class _EverythingElseCardState extends State<_EverythingElseCard> {
                     size: 14,
                     color: _isHovered
                         ? context.themeTokens.textPrimary
-                        : widget.gradientEnd,
+                        : widget.iconColor,
                   ),
                 ),
               ),
@@ -1392,7 +1642,7 @@ class _EverythingElseCardState extends State<_EverythingElseCard> {
   }
 }
 
-// <-- THE FIX: TickerMode dependency injection ensures these don't run while hidden
+// Staggered entrance animation used for board cards.
 class _StaggeredCard extends StatefulWidget {
   final Widget child;
   final Duration delay;
@@ -1408,7 +1658,7 @@ class _StaggeredCardState extends State<_StaggeredCard>
   late final AnimationController _ctrl;
   late final Animation<double> _opacity;
   late final Animation<Offset> _slide;
-  bool _hasStarted = false; // Tracks if animation fired
+  bool _hasStarted = false;
 
   @override
   void initState() {
@@ -1419,18 +1669,13 @@ class _StaggeredCardState extends State<_StaggeredCard>
       begin: const Offset(0, 0.14),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _ctrl, curve: _A.pageEntry));
-  }
-
-  // Trigger animation ONLY when TickerMode enables this widget
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (TickerMode.of(context) && !_hasStarted) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _hasStarted) return;
       _hasStarted = true;
       Future.delayed(widget.delay, () {
         if (mounted) _ctrl.forward();
       });
-    }
+    });
   }
 
   @override
@@ -1457,8 +1702,8 @@ class _HoverPressButton extends StatefulWidget {
   const _HoverPressButton({
     required this.child,
     required this.onTap,
-    this.hoverScale = 0.95,
-    this.pressScale = 0.90,
+    this.hoverScale = 1.05,
+    this.pressScale = 0.95,
   });
 
   @override
@@ -1495,6 +1740,133 @@ class _HoverPressButtonState extends State<_HoverPressButton> {
           transform: Matrix4.diagonal3Values(_scale, _scale, 1.0),
           transformAlignment: Alignment.center,
           child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+// ── Create Board Dialog ────────────────────────────────────────────────────────
+class _CreateBoardDialog extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final Color accent;
+  final Color card;
+  final Color cardBorder;
+  final Color text;
+  final Color muted;
+  final VoidCallback onSubmit;
+
+  const _CreateBoardDialog({
+    required this.controller,
+    required this.focusNode,
+    required this.accent,
+    required this.card,
+    required this.cardBorder,
+    required this.text,
+    required this.muted,
+    required this.onSubmit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Use explicit opaque colors so dialog never bleeds background cards through
+    final dialogBg = isDark ? const Color(0xFF1E1E2E) : Colors.white;
+    final inputFill = isDark ? const Color(0xFF2A2A3E) : const Color(0xFFF3F3F7);
+
+    return Dialog(
+      backgroundColor: dialogBg,
+      surfaceTintColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Create Your Own Board',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: text,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Name it and start building',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 13,
+                  color: muted,
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: controller,
+                focusNode: focusNode,
+                autofocus: true,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => onSubmit(),
+                style: TextStyle(fontFamily: 'Inter', fontSize: 14, color: text),
+                decoration: InputDecoration(
+                  labelText: 'Name It',
+                  labelStyle: TextStyle(fontFamily: 'Inter', color: muted, fontSize: 13),
+                  hintText: 'Enter board name',
+                  hintStyle: TextStyle(fontFamily: 'Inter', color: muted),
+                  filled: true,
+                  fillColor: inputFill,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: cardBorder),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: cardBorder),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: accent, width: 1.4),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        color: muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: Colors.white,
+                      shape: const StadiumBorder(),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ),
+                    onPressed: onSubmit,
+                    child: const Text(
+                      'Create',
+                      style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

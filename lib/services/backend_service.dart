@@ -1,5 +1,5 @@
-import 'dart:convert';
-import 'dart:typed_data'; // 🚀 Added this so it understands Uint8List!
+﻿import 'dart:convert';
+import 'dart:typed_data'; // ðŸš€ Added this so it understands Uint8List!
 import 'package:http/http.dart' as http;
 import 'package:myapp/config/env.dart';
 
@@ -112,9 +112,9 @@ class BackendService {
       return {'error': 'Could not connect to AHVI brain. Error: $e'};
     }
   }
-  // ─────────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //  WARDROBE: VISION & BACKGROUND REMOVAL
-  // ─────────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Future<String?> removeBackground(String base64Image) async {
     try {
@@ -132,32 +132,33 @@ class BackendService {
     }
   }
 
-  // 🚀 FIXED: Now converts Uint8List to Base64 and sends to the NEW JSON endpoint!
+  // ðŸš€ FIXED: Now converts Uint8List to Base64 and sends to the NEW JSON endpoint!
   Future<Map<String, dynamic>?> analyzeImage(Uint8List imageBytes) async {
     try {
-      // 1. Convert the image bytes to a Base64 string
-      String base64String = base64Encode(imageBytes);
+      final base64String = base64Encode(imageBytes);
+      const candidates = <String>[
+        '/api/analyze-image',
+        '/api/vision/analyze-image',
+        '/api/vision/analyze',
+        '/api/analyze',
+      ];
 
-      // 2. Point to the NEW endpoint from your vision.py router
-      final uri = Uri.parse('$baseUrl/api/analyze-image');
-
-      // 3. Send a standard JSON POST request
-      final response = await http.post(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'image_base64': base64String}),
-      );
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      } else {
-        print(
-          "❌ Analyze API Failed: ${response.statusCode} - ${response.body}",
+      for (final path in candidates) {
+        final response = await http.post(
+          Uri.parse('$baseUrl$path'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'image_base64': base64String}),
         );
-        return null;
+
+        if (response.statusCode == 200) {
+          return jsonDecode(response.body) as Map<String, dynamic>;
+        }
       }
+
+      print('Analyze API Failed on all known routes.');
+      return null;
     } catch (e) {
-      print('❌ Garment Analysis Error: $e');
+      print('Garment Analysis Error: $e');
       return null;
     }
   }

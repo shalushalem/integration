@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:appwrite/models.dart' hide Row;
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart';
@@ -57,7 +55,7 @@ class _OccasionBoardState extends State<OccasionBoard> {
   Color get _phoneShell => _t.phoneShell;
   Color get _text => _t.textPrimary;
 
-  bool _isLoading = false;
+  bool _isLoading = true;
   String? _toastMessage;
   List<LookItem> _looks = [];
 
@@ -68,7 +66,6 @@ class _OccasionBoardState extends State<OccasionBoard> {
   }
 
   Future<void> _fetchLooks() async {
-    if (mounted) setState(() => _isLoading = true);
     try {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
       // 🔥 Fetch dynamically based on the parameter passed from boards.dart!
@@ -76,19 +73,20 @@ class _OccasionBoardState extends State<OccasionBoard> {
 
       final List<LookItem> loadedLooks = [];
 
-      for (var doc in docs) {
+      for (final doc in docs) {
         // Pick a dynamic badge based on string length to give it that varied Pinterest feel
-        final badgeIndex = doc.$id.length % LookBadgeStyle.values.length;
+        final docId = (doc['\$id'] ?? doc['id'] ?? '').toString();
+        final badgeIndex = docId.length % LookBadgeStyle.values.length;
         final dynamicBadge = LookBadgeStyle.values[badgeIndex];
         final dynamicBg = LookBgStyle.values[badgeIndex];
 
         loadedLooks.add(LookItem(
-          id: doc.$id,
-          title: doc.data['occasion'] ?? widget.occasion, 
-          description: doc.data['outfitDescription'] ?? 'Custom ${widget.occasion} inspiration',
-          emoji: doc.data['emoji'] ?? widget.emptyEmoji, 
+          id: docId,
+          title: (doc['occasion'] ?? widget.occasion).toString(),
+          description: (doc['outfitDescription'] ?? 'Custom ${widget.occasion} inspiration').toString(),
+          emoji: (doc['emoji'] ?? widget.emptyEmoji).toString(),
           category: widget.occasion,
-          imageUrl: doc.data['imageUrl'],
+          imageUrl: (doc['imageUrl'] ?? doc['image_url'])?.toString(),
           badge: dynamicBadge,
           bg: dynamicBg,
         ));
@@ -157,23 +155,17 @@ class _OccasionBoardState extends State<OccasionBoard> {
               Expanded(
                 child: Container(
                   color: _bg,
-                  child: _looks.isEmpty
-                      ? (_isLoading
-                          ? const _LooksLoadingState()
-                          : _EmptyState(title: widget.title, emoji: widget.emptyEmoji))
-                      : _LooksGrid(
-                          looks: _looks,
-                          onDelete: _deleteLook,
-                          onShare: (look) => _showToast('Copied!'),
-                        ),
+                  child: _isLoading 
+                      ? Center(child: CircularProgressIndicator(color: _t.accent.primary))
+                      : _looks.isEmpty
+                          ? _EmptyState(title: widget.title, emoji: widget.emptyEmoji)
+                          : _LooksGrid(
+                              looks: _looks,
+                              onDelete: _deleteLook,
+                              onShare: (look) => _showToast('Copied!'),
+                            ),
                 ),
               ),
-              if (_isLoading)
-                LinearProgressIndicator(
-                  minHeight: 2,
-                  color: _t.accent.primary,
-                  backgroundColor: Colors.transparent,
-                ),
             ],
           ),
           // ── TOAST ──
@@ -271,16 +263,28 @@ class _Header extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  _BackButton(),
-                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: t.panel,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: t.cardBorder),
+                      ),
+                      child: Icon(Icons.chevron_left_rounded, color: t.textPrimary, size: 22),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
                   Text(
                     title,
                     style: TextStyle(
                       fontFamily: 'Inter',
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
                       color: t.textPrimary,
-                      letterSpacing: -0.4,
+                      letterSpacing: -0.3,
                     ),
                   ),
                 ],
@@ -313,32 +317,6 @@ class _Header extends StatelessWidget {
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _BackButton extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final t = context.themeTokens;
-    return GestureDetector(
-      onTap: () => Navigator.maybePop(context),
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: t.panel,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: t.cardBorder, width: 1),
-        ),
-        child: Center(
-          child: Icon(
-            Icons.chevron_left_rounded,
-            size: 20,
-            color: t.textPrimary,
-          ),
-        ),
       ),
     );
   }
@@ -535,18 +513,10 @@ class _LookCardState extends State<_LookCard> {
                   look.imageUrl != null && look.imageUrl!.isNotEmpty
                       ? AspectRatio(
                           aspectRatio: aspectRatio,
-                          child: CachedNetworkImage(
-                            imageUrl: look.imageUrl!,
+                          child: Image.network(
+                            look.imageUrl!,
                             fit: BoxFit.cover,
                             width: double.infinity,
-                            fadeInDuration: Duration.zero,
-                            placeholder: (_, __) => Container(color: _t.panel),
-                            errorWidget: (_, __, ___) => Container(
-                              decoration: BoxDecoration(gradient: _bgGradient(look.bg)),
-                              child: Center(
-                                child: Text(look.emoji, style: const TextStyle(fontSize: 32)),
-                              ),
-                            ),
                           ),
                         )
                       : AspectRatio(
@@ -687,33 +657,6 @@ class _LookCardState extends State<_LookCard> {
 }
 
 // ── Empty / No-results states ────────────────────────────────────────────────
-class _LooksLoadingState extends StatelessWidget {
-  const _LooksLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.themeTokens;
-    return GridView.builder(
-      padding: const EdgeInsets.all(12),
-      physics: const BouncingScrollPhysics(),
-      itemCount: 6,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 0.72,
-      ),
-      itemBuilder: (_, __) => Container(
-        decoration: BoxDecoration(
-          color: t.panel,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: t.cardBorder),
-        ),
-      ),
-    );
-  }
-}
-
 class _EmptyState extends StatelessWidget {
   final String title;
   final String emoji;

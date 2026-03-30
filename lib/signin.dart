@@ -1,5 +1,5 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:myapp/app_routes.dart';
 import 'package:provider/provider.dart'; // <-- Added Provider
 import 'package:myapp/services/appwrite_service.dart'; // <-- Added AppwriteService
@@ -239,7 +239,7 @@ class _GlassCard extends StatelessWidget {
 
 class _IntroPage extends StatelessWidget {
   final VoidCallback onCta;
-  const _IntroPage({super.key, required this.onCta});
+  const _IntroPage({required this.onCta});
 
   @override
   Widget build(BuildContext context) {
@@ -291,7 +291,6 @@ class _SignUpPage extends StatelessWidget {
   final VoidCallback onGoogleTap;
   final VoidCallback onAppleTap;
   const _SignUpPage({
-    super.key,
     required this.onEmailTap,
     required this.onGoogleTap,
     required this.onAppleTap,
@@ -303,7 +302,21 @@ class _SignUpPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const _SectionTitle(line1: 'Your stylist', line2: 'awaits.'),
+          Align(
+            alignment: Alignment.center,
+            child: Text(
+              'AHVI',
+              style: GoogleFonts.anton(
+                fontSize: 52,
+                fontWeight: FontWeight.w400,
+                color: const Color(0xFFF5F7FF),
+                letterSpacing: 3.2,
+                height: 1,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const _SectionTitle(line1: 'Your stylist awaits.', italic: true),
           const SizedBox(height: 6),
           const _SectionSub(text: 'Sign in or create your account'),
           const SizedBox(height: 28),
@@ -340,7 +353,6 @@ class _SignInPage extends StatelessWidget {
   final TextEditingController emailController;
   final TextEditingController passwordController;
   const _SignInPage({
-    super.key,
     required this.onCreateAccount,
     required this.onSignIn,
     required this.emailController,
@@ -691,18 +703,22 @@ class _SocialButtonState extends State<_SocialButton> {
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               SizedBox(
                   width: 20,
                   height: 20,
                   child: Center(child: widget.icon)),
               const SizedBox(width: 10),
-              Text(
-                widget.label,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: Color(0xFFF5F7FF),
+              Flexible(
+                child: Text(
+                  widget.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFFF5F7FF),
+                  ),
                 ),
               ),
             ],
@@ -824,29 +840,43 @@ class _LinkText extends StatelessWidget {
 
 class _SectionTitle extends StatelessWidget {
   final String line1;
-  final String line2;
-  const _SectionTitle({required this.line1, required this.line2});
+  final String? line2;
+  final bool italic;
+  const _SectionTitle({required this.line1, this.line2, this.italic = false});
 
   @override
   Widget build(BuildContext context) {
+    final titleStyle =
+        italic
+            ? GoogleFonts.cormorantGaramond(
+              fontSize: 30,
+              fontWeight: FontWeight.w500,
+              fontStyle: FontStyle.italic,
+              color: const Color(0xFFF5F7FF),
+              letterSpacing: -0.02 * 30,
+              height: 1.25,
+            )
+            : const TextStyle(
+              fontFamily: 'Georgia',
+              fontSize: 30,
+              fontWeight: FontWeight.w400,
+              color: Color(0xFFF5F7FF),
+              letterSpacing: -0.02 * 30,
+              height: 1.25,
+            );
+
     return Center(
       child: RichText(
         textAlign: TextAlign.center,
         text: TextSpan(
-          style: const TextStyle(
-            fontFamily: 'Georgia',
-            fontSize: 30,
-            fontWeight: FontWeight.w400,
-            color: Color(0xFFF5F7FF),
-            letterSpacing: -0.02 * 30,
-            height: 1.25,
-          ),
+          style: titleStyle,
           children: [
-            TextSpan(text: '$line1\n'),
-            TextSpan(
-              text: line2,
-              style: const TextStyle(fontStyle: FontStyle.italic),
-            ),
+            TextSpan(text: line1),
+            if (line2 != null && line2!.isNotEmpty)
+              TextSpan(
+                text: '\n$line2',
+                style: const TextStyle(fontStyle: FontStyle.italic),
+              ),
           ],
         ),
       ),

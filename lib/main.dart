@@ -130,7 +130,7 @@ class MyApp extends StatelessWidget {
               AppRoutes.skincare: (_) => const SkincareScreen(),
               AppRoutes.bills: (_) => const BillsScreen(),
               AppRoutes.wardrobe: (_) => const WardrobeScreen(),
-              AppRoutes.calendar: (_) => CalendarScreen(),
+              AppRoutes.calendar: (_) => const CalendarShell(),
               AppRoutes.boards: (_) => const BoardsScreen(),
             },
           );

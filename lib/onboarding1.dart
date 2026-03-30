@@ -40,6 +40,12 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
   String? _selectedMonth;
   String? _selectedYear;
 
+  // ── Shop Preferences, Skin Tone & Body Shape state ──
+  final Set<String> _shopPrefs = {};
+  int _selectedSkinTone = 3;
+  String _bodyGender = 'women';
+  String _selectedBodyShape = 'Hourglass';
+
   // ── [ADDED B01] Staggered entrance AnimationController ──
   late AnimationController _entranceController;
   // 7 staggered animations: brandTag / title / subtitle / tabBar /
@@ -211,6 +217,9 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
       phone: _phoneCtrl.text.trim(),
       gender: gender,
       dob: dob,
+      skinTone: _selectedSkinTone,
+      bodyShape: _selectedBodyShape,
+      shopPrefs: _shopPrefs,
     );
     Navigator.of(context).pushNamed(AppRoutes.onboarding2);
   }
@@ -376,7 +385,7 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
   }
 
   Widget _buildTabBar() {
-    final tabs = ['Basics', 'Style', 'All Boards'];
+    final tabs = ['Basics', 'Style', 'Try-On'];
     // ── [ADDED B01] stagger index 3 — tab bar ──
     return _staggered(
       3,
@@ -505,6 +514,16 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
             _buildGenderField(),
             _buildDivider(),
             _buildDOBField(),
+            _buildDivider(),
+            _buildSkinToneField(),
+            _buildDivider(),
+            _buildShopPrefsField(),
+            // Body shape section — slides in when Women or Men is selected
+            _BodyShapeReveal(
+              visible: _shopPrefs.contains('Women') || _shopPrefs.contains('Men'),
+              divider: _buildDivider(),
+              child: _buildBodyShapeField(),
+            ),
           ],
         ),
       ),
@@ -871,7 +890,7 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
-        padding: const EdgeInsets.fromLTRB(13, 12, 28, 12),
+        padding: const EdgeInsets.fromLTRB(13, 12, 13, 12),
         decoration: BoxDecoration(
           // [ADDED B07] background switches when a value is selected
           color: selectedValue != null ? panel2 : panel,
@@ -892,23 +911,23 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
           ]
               : [],
         ),
-        child: Stack(
-          alignment: Alignment.centerRight,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              selectedValue ?? hint,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
-                // [ADDED B08] show white text once a value is chosen
-                color: selectedValue != null ? textColor : muted,
-                fontFamily: 'DM Sans',
+            Expanded(
+              child: Text(
+                selectedValue ?? hint,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  // [ADDED B08] show white text once a value is chosen
+                  color: selectedValue != null ? textColor : muted,
+                  fontFamily: 'DM Sans',
+                ),
               ),
             ),
-            const Text('▾',
-                style: TextStyle(
-                    fontSize: 10,
-                    color: muted)),
+
           ],
         ),
       ),
@@ -986,6 +1005,237 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ── Skin Tone Field ──
+  Widget _buildSkinToneField() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'SKIN TONE',
+            style: TextStyle(
+              fontSize: 11, fontWeight: FontWeight.w600,
+              color: muted, letterSpacing: 0.07 * 11, fontFamily: 'DM Sans',
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: List.generate(kSkinTones.length, (i) {
+              final active = _selectedSkinTone == i + 1;
+              return GestureDetector(
+                onTap: () => setState(() => _selectedSkinTone = i + 1),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  margin: const EdgeInsets.only(right: 10),
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    color: kSkinTones[i],
+                    shape: BoxShape.circle,
+                    border: active
+                        ? Border.all(color: accent, width: 3)
+                        : Border.all(color: Colors.transparent, width: 3),
+                  ),
+                  transform: active
+                      ? (Matrix4.identity()..scale(1.15))
+                      : Matrix4.identity(),
+                ),
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Shop Preferences Field ──
+  Widget _buildShopPrefsField() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'SHOP PREFERENCES',
+            style: TextStyle(
+              fontSize: 11, fontWeight: FontWeight.w600,
+              color: muted, letterSpacing: 0.07 * 11, fontFamily: 'DM Sans',
+            ),
+          ),
+          const SizedBox(height: 12),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 10, mainAxisSpacing: 10,
+            childAspectRatio: 1.0,
+            children: kShopPrefs.map((pref) {
+              final label = pref['label']!;
+              final isActive = _shopPrefs.contains(label);
+              return GestureDetector(
+                onTap: () => setState(() {
+                  if (isActive) {
+                    _shopPrefs.remove(label);
+                  } else {
+                    _shopPrefs.add(label);
+                  }
+                  // Auto-switch body gender
+                  if (label == 'Women' && !isActive) {
+                    _bodyGender = 'women';
+                    _selectedBodyShape = kBodyShapes['women']!.first['name']!;
+                  } else if (label == 'Men' && !isActive) {
+                    _bodyGender = 'men';
+                    _selectedBodyShape = kBodyShapes['men']!.first['name']!;
+                  }
+                }),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isActive ? accent : cardBorder,
+                      width: isActive ? 1.5 : 1,
+                    ),
+                    color: isActive
+                        ? const Color(0x226B91FF)
+                        : panel,
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(11),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.asset(
+                          pref['img']!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const SizedBox(),
+                        ),
+                        Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withOpacity(0.6),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.bottomLeft,
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Row(
+                              children: [
+                                if (isActive)
+                                  const Padding(
+                                    padding: EdgeInsets.only(right: 4),
+                                    child: Icon(Icons.check_circle,
+                                        color: accent, size: 13),
+                                  ),
+                                Text(
+                                  label,
+                                  style: const TextStyle(
+                                    color: textColor, fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    fontFamily: 'DM Sans',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Body Shape Field ──
+  Widget _buildBodyShapeField() {
+    final shapes = kBodyShapes[_bodyGender] ?? kBodyShapes['women']!;
+    return Padding(
+      padding: const EdgeInsets.only(top: 20, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'BODY SHAPE',
+            style: TextStyle(
+              fontSize: 11, fontWeight: FontWeight.w600,
+              color: muted, letterSpacing: 0.07 * 11, fontFamily: 'DM Sans',
+            ),
+          ),
+          const SizedBox(height: 12),
+          GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 10, mainAxisSpacing: 10,
+            childAspectRatio: 0.65,
+            children: shapes.map((shape) {
+              final isActive = _selectedBodyShape == shape['name'];
+              return GestureDetector(
+                onTap: () => setState(() => _selectedBodyShape = shape['name']!),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: isActive ? accent : cardBorder,
+                      width: isActive ? 2 : 1,
+                    ),
+                    color: isActive
+                        ? const Color(0x226B91FF)
+                        : panel,
+                  ),
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(13)),
+                          child: Image.asset(
+                            shape['img']!,
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            errorBuilder: (_, _, _) =>
+                                const Icon(Icons.person, color: muted, size: 36),
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Text(
+                          shape['name']!,
+                          style: TextStyle(
+                            color: isActive ? accent : muted,
+                            fontSize: 11,
+                            fontWeight: isActive
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            fontFamily: 'DM Sans',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
   }
@@ -1139,6 +1389,108 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
           borderRadius: BorderRadius.circular(100),
         ),
       ),
+    );
+  }
+}
+
+// ── Animated reveal widget for Body Shape section ──
+class _BodyShapeReveal extends StatefulWidget {
+  final bool visible;
+  final Widget divider;
+  final Widget child;
+
+  const _BodyShapeReveal({
+    required this.visible,
+    required this.divider,
+    required this.child,
+  });
+
+  @override
+  State<_BodyShapeReveal> createState() => _BodyShapeRevealState();
+}
+
+class _BodyShapeRevealState extends State<_BodyShapeReveal>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _fade;
+  late Animation<double> _scale;
+  late Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 520),
+    );
+
+    _fade = CurvedAnimation(
+      parent: _ctrl,
+      curve: const Interval(0.0, 0.7, curve: Curves.easeOut),
+    );
+
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.12),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _ctrl,
+      curve: const Interval(0.0, 0.85, curve: Curves.easeOutCubic),
+    ));
+
+    _scale = Tween<double>(begin: 0.95, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _ctrl,
+        curve: const Interval(0.0, 0.85, curve: Curves.easeOutCubic),
+      ),
+    );
+
+    if (widget.visible) _ctrl.value = 1.0;
+  }
+
+  @override
+  void didUpdateWidget(_BodyShapeReveal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.visible && !oldWidget.visible) {
+      _ctrl.forward(from: 0.0);
+    } else if (!widget.visible && oldWidget.visible) {
+      _ctrl.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, child) {
+        return AnimatedSize(
+          duration: const Duration(milliseconds: 480),
+          curve: Curves.easeInOutCubic,
+          child: _ctrl.isDismissed
+              ? const SizedBox.shrink()
+              : FadeTransition(
+                  opacity: _fade,
+                  child: SlideTransition(
+                    position: _slide,
+                    child: ScaleTransition(
+                      scale: _scale,
+                      alignment: Alignment.topCenter,
+                      child: Column(
+                        children: [
+                          widget.divider,
+                          widget.child,
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+        );
+      },
     );
   }
 }

@@ -1,9 +1,117 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+// ignore: depend_on_referenced_packages
+import 'package:http/http.dart' as http;
+import 'package:google_fonts/google_fonts.dart';
 import 'package:myapp/theme/theme_tokens.dart';
-import 'package:myapp/services/appwrite_service.dart';
-import 'package:myapp/services/backend_service.dart';
+import 'package:myapp/widgets/ahvi_stylist_chat.dart';
+import 'package:myapp/widgets/ahvi_lens_sheet.dart';
+
+Map<String, dynamic> _parseSkincareJsonMap(String payload) =>
+    Map<String, dynamic>.from(jsonDecode(payload) as Map);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  BEHAVIORAL DIFF ANALYSIS REPORT
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// PHASE 1 — STRUCTURAL SCAN SUMMARY
+//
+// CSS Transitions / Animations found:
+//   • .back-btn:hover              → scale(1.06) translateX(-1px), 0.2s
+//   • .step                        → @keyframes slideUp (opacity 0→1, translateY 16px→0), 0.35s, staggered delay i*0.06s
+//   • .step:hover                  → translateY(-3px), 0.28s
+//   • .progress-fill               → width transition, 0.5s cubic-bezier(.25,.8,.25,1)
+//   • .chat-btn:hover              → translateY(-2px), 0.25s cubic-bezier(0.34,1.56,0.64,1)
+//   • .chat-btn-pulse              → @keyframes pulse (scale 1→1.04, opacity 0.6→0), 2.5s infinite
+//   • .chat-overlay                → opacity 0→1, 0.3s  +  .chat-modal translateY(100%)→0, 0.42s
+//   • .qpill:active                → gradient fill flash
+//   • .send-btn:active             → scale(0.9), 0.2s
+//   • .send-btn:disabled           → opacity 0.28
+//   • .mic-btn.listening           → gradient bg + @keyframes micPulse scale 1→1.08, 1.2s infinite
+//   • .typing-dot                  → @keyframes typBounce translateY(0→-5px→0) + color change, 1.2s staggered
+//   • .msg-row                     → @keyframes slideUp on each new message
+//   • .chat-input-wrap:focus-within → border-color accent blue
+//
+// JS Behaviors found:
+//   • openChat()        → on chat-btn click, adds .open to overlay (opacity + slide modal up), auto-sends welcome AI msg
+//   • closeChat()       → removes .open (fade + slide down)
+//   • sendMsg()         → real Anthropic API call with conversation history + skin context, disables send-btn while busy
+//   • sendQ(btn)        → quick-pill click fills input and calls sendMsg(), hides quick-pills after first send
+//   • chatKey(e)        → Enter key (no shift) submits message
+//   • autoResize(el)    → textarea auto-resizes up to 120px height
+//   • toggleVoice()     → SpeechRecognition toggle; mic-btn gets .listening class (gradient + micPulse animation)
+//   • renderSteps()     → re-renders step cards with slideUp animation and staggered delay on routine change
+//   • markStep(el)      → one-way toggle done state, increments counter
+//   • getCtx()          → builds system prompt context from current skin/concern/routine state
+//
+// PHASE 2 — INTERACTION EXTRACTION
+//
+// F01 | .back-btn        | hover      | CSS  | scale(1.06) + translateX(-1px) | transform | 0.2s
+// F02 | .step (each)     | render     | CSS  | slideUp (opacity+translateY)   | keyframe  | 0.35s + stagger i*0.06s
+// F03 | .step            | hover      | CSS  | translateY(-3px)              | transform | 0.28s
+// F04 | .progress-fill   | state change| CSS | width 0→pct%                  | layout    | 0.5s cubic
+// F05 | .chat-btn        | hover      | CSS  | translateY(-2px) + shadow     | transform | 0.25s spring
+// F06 | .chat-btn-pulse  | always     | CSS  | scale + opacity loop          | keyframe  | 2.5s infinite
+// F07 | .chat-overlay    | openChat() | JS   | opacity 0→1 + modal slide up  | combined  | 0.3s / 0.42s
+// F08 | .send-btn        | tap        | CSS  | scale(0.9)                    | transform | 0.2s
+// F09 | .send-btn        | busy       | CSS  | opacity 0.28                  | opacity   | instant
+// F10 | .mic-btn         | listening  | CSS  | gradient + scale pulse 1.08   | keyframe  | 1.2s infinite
+// F11 | .typing-dot      | visible    | CSS  | bounce Y-5px + color accent   | keyframe  | 1.2s staggered
+// F12 | .msg-row         | added      | CSS  | slideUp per message           | keyframe  | 0.32s
+// F13 | sendMsg()        | tap send   | JS   | real Anthropic API, history   | network   | async
+// F14 | sendQ()          | pill tap   | JS   | fill input + sendMsg()        | state     | instant
+// F15 | chatKey()        | keyboard   | JS   | Enter submits                 | event     | instant
+// F16 | toggleVoice()    | mic tap    | JS   | SpeechRecognition + listening | state     | instant
+// F17 | quick-pills hide | first send | JS   | pills disappear               | state     | instant
+// F18 | welcome AI msg   | openChat() | JS   | AI sends greeting 400ms delay | async     | 400ms delay
+// F19 | chat-input focus | tap input  | CSS  | border-color accent 0.45      | border    | instant
+// F20 | renderSteps      | toggle     | JS   | re-render + slideUp stagger   | combined  | on switch
+//
+// PHASE 3 — FLUTTER COMPARISON
+//
+// F01 back-btn hover          → MISSING   (MouseRegion not used; no scale/translate effect)
+// F02 step slideUp on render  → MISSING   (AnimationController per step with stagger not present)
+// F03 step hover lift         → MISSING   (No MouseRegion/hover on step cards)
+// F04 progress width anim     → PARTIAL   (FractionallySizedBox used but no explicit curve/duration)
+// F05 chat-btn hover lift     → MISSING   (No MouseRegion on chat button)
+// F06 chat-btn pulse ring     → MISSING   (Pulse animation widget absent)
+// F07 chat overlay slide+fade → PARTIAL   (SlideTransition present; backdrop opacity fade MISSING)
+// F08 send-btn tap scale      → MISSING   (GestureDetector present but no scale feedback)
+// F09 send-btn disabled opacity→ MISSING  (No opacity change when _isBusy)
+// F10 mic listening pulse     → MISSING   (No animation when listening; no state change in Flutter)
+// F11 typing dot color change → PARTIAL   (Bounce present; color transition at peak MISSING)
+// F12 msg-row slideUp         → MISSING   (New messages appear without slideUp animation)
+// F13 real Anthropic API call → MISSING   (Fallback tips only; no real HTTP call, no history, no context)
+// F14 quick-pill sends text   → IMPLEMENTED
+// F15 Enter key submit        → IMPLEMENTED (onSubmitted)
+// F16 voice / mic toggle      → MISSING   (mic button is static; no speech recognition)
+// F17 quick-pills hide        → IMPLEMENTED
+// F18 welcome AI greeting     → MISSING   (static welcome widget; no AI-generated greeting on open)
+// F19 input focus border      → MISSING   (no FocusNode border change)
+// F20 step re-render stagger  → MISSING   (steps re-render but no slideUp stagger on routine switch)
+//
+// PHASE 4 — FLUTTER IMPLEMENTATION PLAN
+//
+// F01 → MouseRegion + AnimatedContainer (scale + translateX)
+// F02 → Per-step AnimationController list rebuilt on routine change, staggered forward()
+// F03 → MouseRegion(_hovering) + AnimatedContainer translateY on each step card
+// F04 → AnimatedFractionallySizedBox or TweenAnimationBuilder with cubic curve 0.5s
+// F05 → MouseRegion + AnimatedContainer translateY on chat button
+// F06 → AnimationController.repeat() + ScaleTransition + FadeTransition pulse ring
+// F07 → AnimatedOpacity for backdrop + existing SlideTransition (already present)
+// F08 → GestureDetector onTapDown/onTapUp + AnimatedScale
+// F09 → AnimatedOpacity wrapping send button, opacity driven by _isBusy
+// F10 → AnimationController.repeat() in _ChatOverlayState, driven by _isListening
+// F11 → Tween color at peak via ColorTween in _TypingDotState
+// F12 → Wrap each new message row in a _SlideUpMessage widget with its own controller
+// F13 → http.post to Anthropic API, maintain List<Map> _chatHistory, use getCtx() system prompt
+// F16 → speech_to_text package stub (graceful no-op if unavailable; visual state only)
+// F18 → openChat triggers Future.delayed(400ms) → sendMessage with empty trigger → AI greeting
+// F19 → FocusNode + AnimatedContainer border color
+// F20 → _rebuildStepAnimations() called in _setRoutine()
+//
+// ─────────────────────────────────────────────────────────────────────────────
 
 void main() {
   runApp(const MyApp());
@@ -43,14 +151,33 @@ Color get _accent4 => Color.lerp(_accent, _accent2, 0.55)!;
 Color get _accent5 => Color.lerp(_accent2, _accent3, 0.55)!;
 Color get _phoneShell => _t.phoneShell;
 Color get _phoneShell2 => _t.phoneShellInner;
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Data
 // ─────────────────────────────────────────────────────────────────────────────
-const _dayRoutine = ['Cleanser', 'Toner', 'Vitamin C Serum', 'Moisturizer', 'Sunscreen'];
-const _nightRoutine = ['Cleanser', 'Toner', 'Retinol Serum', 'Night Cream', 'Lip Care'];
+const _dayRoutine = [
+  'Cleanser',
+  'Toner',
+  'Vitamin C Serum',
+  'Moisturizer',
+  'Sunscreen',
+];
+const _nightRoutine = [
+  'Cleanser',
+  'Toner',
+  'Retinol Serum',
+  'Night Cream',
+  'Lip Care',
+];
 
-List<Color> get _stepColors => [_accent, _accent4, _accent2, _accent3, _accent5];
+List<Color> get _stepColors => [
+  _accent,
+  _accent4,
+  _accent2,
+  _accent3,
+  _accent5,
+];
 List<Color> get _stepBgColors => [
   _accent.withValues(alpha: 0.15),
   _accent4.withValues(alpha: 0.15),
@@ -75,26 +202,25 @@ class SkincareScreen extends StatefulWidget {
   State<SkincareScreen> createState() => _SkincareScreenState();
 }
 
-class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStateMixin {
-
+class _SkincareScreenState extends State<SkincareScreen>
+    with TickerProviderStateMixin {
   bool _isNight = false;
   String _skinType = '';
   List<String> _concerns = [];
+  Set<int> _completedSteps = {};
   bool _chatOpen = false;
 
-  // DB Sync State
-  String? _documentId;
-  bool _isLoading = true;
-  
-  Set<int> _completedDaySteps = {};
-  Set<int> _completedNightSteps = {};
-  Set<int> _completedSteps = {}; // Pointer to current active routine
+  // ── F01: back-btn hover state ──────────────────────────────────────────────
 
-  bool _backBtnHovered = false;
+  // ── F06: chat-btn pulse animation controller ───────────────────────────────
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseScale;
   late Animation<double> _pulseOpacity;
-  bool _chatBtnHovered = false;
+
+  // ── F05: chat-btn hover state ──────────────────────────────────────────────
+  final bool _chatBtnHovered = false;
+
+  // ── F02/F20: per-step slide-up controllers (rebuilt on routine toggle) ─────
   late List<AnimationController> _stepAnimCtrls;
   late List<Animation<double>> _stepSlideAnims;
   late List<Animation<double>> _stepFadeAnims;
@@ -105,9 +231,15 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
   double get _progressPct => _total == 0 ? 0 : _completed / _total;
 
   String get _infoText {
-    if (_skinType.isEmpty) return 'Select your skin type to personalise your routine';
-    if (_concerns.isEmpty) return '$_skinType skin · ${_isNight ? 'night' : 'day'} routine · Pick your concerns';
-    if (_completed == 0) return '$_skinType · ${_concerns.join(', ')} · Tap a step to start!';
+    if (_skinType.isEmpty) {
+      return 'Select your skin type to personalise your routine';
+    }
+    if (_concerns.isEmpty) {
+      return '$_skinType skin · ${_isNight ? 'night' : 'day'} routine · Pick your concerns';
+    }
+    if (_completed == 0) {
+      return '$_skinType · ${_concerns.join(', ')} · Tap a step to start!';
+    }
     if (_completed < _total) {
       final rem = _total - _completed;
       return '${(_progressPct * 100).round()}% done · $rem step${rem > 1 ? 's' : ''} remaining';
@@ -118,79 +250,67 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
   @override
   void initState() {
     super.initState();
-    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 2500))..repeat();
+
+    // ── F06: Init pulse animation (2.5s infinite) ──────────────────────────
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2500),
+    )..repeat();
     _pulseScale = Tween<double>(begin: 1.0, end: 1.04).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: const Interval(0.0, 0.7, curve: Curves.easeOut)),
+      CurvedAnimation(
+        parent: _pulseCtrl,
+        curve: const Interval(0.0, 0.7, curve: Curves.easeOut),
+      ),
     );
     _pulseOpacity = Tween<double>(begin: 0.6, end: 0.0).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: const Interval(0.0, 0.7, curve: Curves.easeOut)),
+      CurvedAnimation(
+        parent: _pulseCtrl,
+        curve: const Interval(0.0, 0.7, curve: Curves.easeOut),
+      ),
     );
 
-    _loadSkincareData();
+    // ── F02: Init step animations ──────────────────────────────────────────
     _buildStepAnimations();
+    _playStepAnimations();
   }
 
-  // ── 1. Fetch data from DB ──
-  Future<void> _loadSkincareData() async {
-    try {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      final doc = await appwrite.getSkincareProfile();
-      
-      if (doc != null && mounted) {
-        setState(() {
-          _documentId = doc.$id;
-          _skinType = doc.data['skinType'] ?? '';
-          _concerns = List<String>.from(doc.data['concerns'] ?? []);
-          
-          _completedDaySteps = Set<int>.from(doc.data['daySteps']?.map((e) => e as int) ?? []);
-          _completedNightSteps = Set<int>.from(doc.data['nightSteps']?.map((e) => e as int) ?? []);
-          
-          _completedSteps = _isNight ? _completedNightSteps : _completedDaySteps;
-          _isLoading = false;
-        });
-        _playStepAnimations();
-      }
-    } catch (e) {
-      debugPrint("Error loading skincare: $e");
-      if(mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  // ── 2. Sync updates to DB ──
-  void _syncToDB() {
-    if (_documentId == null) return;
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    
-    appwrite.updateSkincareProfile(
-      documentId: _documentId!,
-      skinType: _skinType,
-      concerns: _concerns,
-      daySteps: _completedDaySteps.toList(),
-      nightSteps: _completedNightSteps.toList(),
-    );
-  }
-
+  // ── F02/F20: Build and stagger step slide-up animations ───────────────────
   void _buildStepAnimations() {
+    // Dispose old controllers if rebuilding
     if (mounted) {
-      try { for (final c in _stepAnimCtrls) { c.dispose(); } } catch (_) {}
+      try {
+        for (final c in _stepAnimCtrls) {
+          c.dispose();
+        }
+      } catch (_) {}
     }
     _stepAnimCtrls = List.generate(
       _currentRoutine.length,
-          (i) => AnimationController(vsync: this, duration: const Duration(milliseconds: 350)),
+      (i) => AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 350),
+      ),
     );
-    _stepSlideAnims = _stepAnimCtrls.map((ctrl) =>
-        Tween<double>(begin: 16, end: 0).animate(
-          CurvedAnimation(parent: ctrl, curve: Curves.easeOut),
-        ),
-    ).toList();
-    _stepFadeAnims = _stepAnimCtrls.map((ctrl) =>
-        Tween<double>(begin: 0, end: 1).animate(
-          CurvedAnimation(parent: ctrl, curve: Curves.easeOut),
-        ),
-    ).toList();
+    _stepSlideAnims = _stepAnimCtrls
+        .map(
+          (ctrl) => Tween<double>(
+            begin: 16,
+            end: 0,
+          ).animate(CurvedAnimation(parent: ctrl, curve: Curves.easeOut)),
+        )
+        .toList();
+    _stepFadeAnims = _stepAnimCtrls
+        .map(
+          (ctrl) => Tween<double>(
+            begin: 0,
+            end: 1,
+          ).animate(CurvedAnimation(parent: ctrl, curve: Curves.easeOut)),
+        )
+        .toList();
   }
 
   void _playStepAnimations() {
+    // Stagger: each step fires 60ms after the previous (matches HTML i*0.06s)
     for (int i = 0; i < _stepAnimCtrls.length; i++) {
       Future.delayed(Duration(milliseconds: i * 60), () {
         if (mounted) _stepAnimCtrls[i].forward(from: 0);
@@ -201,24 +321,28 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
   @override
   void dispose() {
     _pulseCtrl.dispose();
-    for (final c in _stepAnimCtrls) { c.dispose(); }
+    for (final c in _stepAnimCtrls) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   void _setRoutine(bool night) {
     setState(() {
       _isNight = night;
-      _completedSteps = _isNight ? _completedNightSteps : _completedDaySteps;
+      _completedSteps = {};
     });
+    // ── F20: Re-trigger step slideUp animations on routine switch ─────────
     _buildStepAnimations();
-    setState(() {}); 
+    setState(() {}); // Rebuild with new controllers
     _playStepAnimations();
   }
 
   void _setSkin(String type) {
     setState(() {
       _skinType = type;
-      _syncToDB();
+      _completedSteps = {};
+      _concerns = [];
     });
   }
 
@@ -229,21 +353,12 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
       } else {
         _concerns.add(concern);
       }
-      _syncToDB();
     });
   }
 
   void _markStep(int index) {
     if (_completedSteps.contains(index)) return;
-    setState(() {
-      _completedSteps.add(index);
-      if (_isNight) {
-        _completedNightSteps.add(index);
-      } else {
-        _completedDaySteps.add(index);
-      }
-      _syncToDB();
-    });
+    setState(() => _completedSteps.add(index));
   }
 
   @override
@@ -260,31 +375,13 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
         backgroundColor: _bg,
         body: Stack(
           children: [
-            Center(
-              child: SizedBox(
-                width: 390,
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildHeader(),
-                      _buildContent(),
-                    ],
-                  ),
-                ),
+            SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [_buildHeader(), _buildContent()],
               ),
             ),
-            if (_isLoading)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: LinearProgressIndicator(
-                  minHeight: 2,
-                  color: _accent,
-                  backgroundColor: Colors.transparent,
-                ),
-              ),
+            // ── F07: Chat overlay – AnimatedOpacity for backdrop fade ──────────
             AnimatedOpacity(
               duration: const Duration(milliseconds: 300),
               opacity: _chatOpen ? 1.0 : 0.0,
@@ -305,43 +402,27 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
     );
   }
 
+  // ── Header ──────────────────────────────────────────────────────────────────
   Widget _buildHeader() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 54, 20, 16),
+      padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 8, 20, 16),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          MouseRegion(
-            onEnter: (_) => setState(() => _backBtnHovered = true),
-            onExit: (_) => setState(() => _backBtnHovered = false),
-            child: GestureDetector(
-              onTap: () {
-                if (_chatOpen) {
-                  setState(() => _chatOpen = false);
-                  return;
-                }
-                Navigator.maybePop(context);
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: 38,
-                height: 38,
-                transform: Matrix4.translationValues(_backBtnHovered ? -1.0 : 0.0, 0.0, 0.0)
-                  ..multiply(Matrix4.diagonal3Values(_backBtnHovered ? 1.06 : 1.0, _backBtnHovered ? 1.06 : 1.0, 1.0)),
-                decoration: BoxDecoration(
-                  color: _panel2,
-                  border: Border.all(color: _cardBorder),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(color: _accent.withValues(alpha: 0.10), blurRadius: 14, offset: Offset(0, 2))
-                  ],
-                ),
-                child: Center(
-                  child: Icon(Icons.chevron_left_rounded, color: _muted, size: 20),
-                ),
+          GestureDetector(
+            onTap: () => Navigator.of(context).pop(),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: _panel,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _cardBorder),
               ),
+              child: Icon(Icons.chevron_left_rounded, color: _text, size: 22),
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -354,14 +435,19 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
                 child: Text(
                   'Skincare',
                   style: TextStyle(
-                    fontSize: 28, fontWeight: FontWeight.w700,
-                    color: _text, letterSpacing: -0.5, height: 1,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                    color: _text,
+                    letterSpacing: -0.5,
+                    height: 1,
                   ),
                 ),
               ),
               const SizedBox(height: 3),
-              Text('Your personalised ritual ✨',
-                  style: TextStyle(fontSize: 12, color: _muted)),
+              Text(
+                'Your personalised ritual ?',
+                style: TextStyle(fontSize: 12, color: _muted),
+              ),
             ],
           ),
         ],
@@ -369,6 +455,7 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
     );
   }
 
+  // ── Content ─────────────────────────────────────────────────────────────────
   Widget _buildContent() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 40),
@@ -379,36 +466,60 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
           const SizedBox(height: 16),
           _buildCard(
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _buildSecLabel('Skin Type'),
-              _buildSkinBar(),
-            ]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [_buildSecLabel('Skin Type'), _buildSkinBar()],
+            ),
           ),
           const SizedBox(height: 16),
-          _buildSection(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _buildSecLabel('Concerns'),
-            _buildConcernPills(),
-          ])),
+          _buildSection(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [_buildSecLabel('Concerns'), _buildConcernPills()],
+            ),
+          ),
           const SizedBox(height: 16),
           _buildInfoBar(),
           const SizedBox(height: 16),
-          _buildCard(child: Column(children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('Daily Progress',
-                  style: TextStyle(fontSize: 12, color: _muted, fontWeight: FontWeight.w500)),
-              Text(
-                '${(_progressPct * 100).round()}%',
-                style: TextStyle(fontSize: 13, color: _accent, fontWeight: FontWeight.w700),
-              ),
-            ]),
-            const SizedBox(height: 8),
-            _buildProgressTrack(),
-          ])),
+          _buildCard(
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Daily Progress',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _muted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(
+                      '${(_progressPct * 100).round()}%',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: _accent,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _buildProgressTrack(),
+              ],
+            ),
+          ),
           const SizedBox(height: 16),
-          _buildSection(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _buildSecLabel(_isNight ? 'Night Routine' : 'Morning Routine'),
-            _buildStepsGrid(),
-          ])),
+          _buildSection(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildSecLabel(_isNight ? 'Night Routine' : 'Morning Routine'),
+                _buildStepsGrid(),
+              ],
+            ),
+          ),
           const SizedBox(height: 16),
           _buildTipCard(),
           const SizedBox(height: 16),
@@ -418,20 +529,29 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
     );
   }
 
+  // ── Routine Toggle ──────────────────────────────────────────────────────────
   Widget _buildRoutineToggle() {
     return Container(
       decoration: BoxDecoration(
         color: _phoneShell,
         border: Border.all(color: _cardBorder),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: _accent.withValues(alpha: 0.10), blurRadius: 12, offset: Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+            color: _accent.withValues(alpha: 0.10),
+            blurRadius: 12,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
       padding: const EdgeInsets.all(5),
-      child: Row(children: [
-        Expanded(child: _buildRtBtn(isDay: true)),
-        const SizedBox(width: 5),
-        Expanded(child: _buildRtBtn(isDay: false)),
-      ]),
+      child: Row(
+        children: [
+          Expanded(child: _buildRtBtn(isDay: true)),
+          const SizedBox(width: 5),
+          Expanded(child: _buildRtBtn(isDay: false)),
+        ],
+      ),
     );
   }
 
@@ -444,11 +564,27 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
 
     if (isActive) {
       if (isDay) {
-        bgColor = _accent5; textColor = _tileText; iconColor = _tileText;
-        shadows = [BoxShadow(color: _accent5.withValues(alpha: 0.45), blurRadius: 14, offset: Offset(0, 3))];
+        bgColor = _accent5;
+        textColor = _tileText;
+        iconColor = _tileText;
+        shadows = [
+          BoxShadow(
+            color: _accent5.withValues(alpha: 0.45),
+            blurRadius: 14,
+            offset: Offset(0, 3),
+          ),
+        ];
       } else {
-        bgColor = _accent2; textColor = _text; iconColor = _text;
-        shadows = [BoxShadow(color: _accent2.withValues(alpha: 0.45), blurRadius: 14, offset: Offset(0, 3))];
+        bgColor = _accent2;
+        textColor = _text;
+        iconColor = _text;
+        shadows = [
+          BoxShadow(
+            color: _accent2.withValues(alpha: 0.45),
+            blurRadius: 14,
+            offset: Offset(0, 3),
+          ),
+        ];
       }
     }
 
@@ -462,24 +598,57 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
           borderRadius: BorderRadius.circular(12),
           boxShadow: shadows,
         ),
-        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(isDay ? Icons.wb_sunny_outlined : Icons.nightlight_round,
-              size: 15, color: iconColor),
-          const SizedBox(width: 7),
-          Text(isDay ? 'Morning' : 'Night',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor)),
-        ]),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isDay ? Icons.wb_sunny_outlined : Icons.nightlight_round,
+              size: 15,
+              color: iconColor,
+            ),
+            const SizedBox(width: 7),
+            Text(
+              isDay ? 'Morning' : 'Night',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
+  // ── Skin Bar ────────────────────────────────────────────────────────────────
   Widget _buildSkinBar() {
     final List<_SkinData> skins = [
-      _SkinData('Oily', Icons.water_drop_outlined, _accent, _accent.withValues(alpha: 0.40)),
-      _SkinData('Dry', Icons.wb_sunny_outlined, _accent5, _accent5.withValues(alpha: 0.40)),
-      _SkinData('Normal', Icons.eco_outlined, _accent3, _accent3.withValues(alpha: 0.40)),
+      _SkinData(
+        'Oily',
+        Icons.water_drop_outlined,
+        _accent,
+        _accent.withValues(alpha: 0.40),
+      ),
+      _SkinData(
+        'Dry',
+        Icons.wb_sunny_outlined,
+        _accent5,
+        _accent5.withValues(alpha: 0.40),
+      ),
+      _SkinData(
+        'Normal',
+        Icons.eco_outlined,
+        _accent3,
+        _accent3.withValues(alpha: 0.40),
+      ),
       _SkinData('Combo', Icons.add, _accent2, _accent2.withValues(alpha: 0.40)),
-      _SkinData('Sensitive', Icons.favorite_outline, _accent4, _accent4.withValues(alpha: 0.40)),
+      _SkinData(
+        'Sensitive',
+        Icons.favorite_outline,
+        _accent4,
+        _accent4.withValues(alpha: 0.40),
+      ),
     ];
 
     return Container(
@@ -502,18 +671,33 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
                   color: isActive ? s.activeColor : kTransparent,
                   borderRadius: BorderRadius.circular(11),
                   boxShadow: isActive
-                      ? [BoxShadow(color: s.shadowColor, blurRadius: 10, offset: const Offset(0, 2))]
+                      ? [
+                          BoxShadow(
+                            color: s.shadowColor,
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
                       : [],
                 ),
-                child: Column(children: [
-                  Icon(s.icon, size: 15, color: isActive ? _tileText : _muted),
-                  const SizedBox(height: 4),
-                  Text(s.label,
+                child: Column(
+                  children: [
+                    Icon(
+                      s.icon,
+                      size: 15,
+                      color: isActive ? _tileText : _muted,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      s.label,
                       style: TextStyle(
-                        fontSize: 9, fontWeight: FontWeight.w600,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
                         color: isActive ? _tileText : _muted,
-                      )),
-                ]),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -522,18 +706,49 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
     );
   }
 
+  // ── Concern Pills ───────────────────────────────────────────────────────────
   Widget _buildConcernPills() {
     final List<_ConcernData> concerns = [
-      _ConcernData('Acne', Icons.shield_outlined, _accent4,
-          _accent4.withValues(alpha: 0.12), _accent4.withValues(alpha: 0.28), _accent4.withValues(alpha: 0.40)),
-      _ConcernData('Pigmentation', Icons.grain, _accent2,
-          _accent2.withValues(alpha: 0.12), _accent2.withValues(alpha: 0.28), _accent2.withValues(alpha: 0.40)),
-      _ConcernData('Aging', Icons.auto_awesome_outlined, _accent5,
-          _accent5.withValues(alpha: 0.12), _accent5.withValues(alpha: 0.28), _accent5.withValues(alpha: 0.45)),
-      _ConcernData('Dullness', Icons.wb_sunny_outlined, _accent,
-          _accent.withValues(alpha: 0.12), _accent.withValues(alpha: 0.28), _accent.withValues(alpha: 0.45)),
-      _ConcernData('Dryness', Icons.water_drop_outlined, _accent3,
-          _accent3.withValues(alpha: 0.12), _accent3.withValues(alpha: 0.28), _accent3.withValues(alpha: 0.45)),
+      _ConcernData(
+        'Acne',
+        Icons.shield_outlined,
+        _accent4,
+        _accent4.withValues(alpha: 0.12),
+        _accent4.withValues(alpha: 0.28),
+        _accent4.withValues(alpha: 0.40),
+      ),
+      _ConcernData(
+        'Pigmentation',
+        Icons.grain,
+        _accent2,
+        _accent2.withValues(alpha: 0.12),
+        _accent2.withValues(alpha: 0.28),
+        _accent2.withValues(alpha: 0.40),
+      ),
+      _ConcernData(
+        'Aging',
+        Icons.auto_awesome_outlined,
+        _accent5,
+        _accent5.withValues(alpha: 0.12),
+        _accent5.withValues(alpha: 0.28),
+        _accent5.withValues(alpha: 0.45),
+      ),
+      _ConcernData(
+        'Dullness',
+        Icons.wb_sunny_outlined,
+        _accent,
+        _accent.withValues(alpha: 0.12),
+        _accent.withValues(alpha: 0.28),
+        _accent.withValues(alpha: 0.45),
+      ),
+      _ConcernData(
+        'Dryness',
+        Icons.water_drop_outlined,
+        _accent3,
+        _accent3.withValues(alpha: 0.12),
+        _accent3.withValues(alpha: 0.28),
+        _accent3.withValues(alpha: 0.45),
+      ),
     ];
 
     return Wrap(
@@ -549,27 +764,46 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
             decoration: BoxDecoration(
               color: isActive ? c.activeColor : c.bgColor,
               border: Border.all(
-                  color: isActive ? c.activeColor : c.borderColor, width: 1.5),
+                color: isActive ? c.activeColor : c.borderColor,
+                width: 1.5,
+              ),
               borderRadius: BorderRadius.circular(30),
               boxShadow: isActive
-                  ? [BoxShadow(color: c.shadowColor, blurRadius: 12, offset: const Offset(0, 3))]
+                  ? [
+                      BoxShadow(
+                        color: c.shadowColor,
+                        blurRadius: 12,
+                        offset: const Offset(0, 3),
+                      ),
+                    ]
                   : [],
             ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(c.icon, size: 13, color: isActive ? _tileText : c.activeColor),
-              const SizedBox(width: 6),
-              Text(c.label,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  c.icon,
+                  size: 13,
+                  color: isActive ? _tileText : c.activeColor,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  c.label,
                   style: TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                     color: isActive ? _tileText : c.activeColor,
-                  )),
-            ]),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       }).toList(),
     );
   }
 
+  // ── Info Bar ────────────────────────────────────────────────────────────────
   Widget _buildInfoBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
@@ -578,15 +812,22 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
         border: Border.all(color: _cardBorder),
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Row(children: [
-        Icon(Icons.info_outline_rounded, size: 13, color: _accent),
-        const SizedBox(width: 7),
-        Expanded(child: Text(_infoText,
-            style: TextStyle(fontSize: 11.5, color: _accent))),
-      ]),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline_rounded, size: 13, color: _accent),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              _infoText,
+              style: TextStyle(fontSize: 11.5, color: _accent),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
+  // ── Progress Track ──────────────────────────────────────────────────────────
   Widget _buildProgressTrack() {
     return Container(
       height: 7,
@@ -608,7 +849,12 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
               decoration: BoxDecoration(
                 gradient: LinearGradient(colors: [_accent, _accent2, _accent3]),
                 borderRadius: BorderRadius.circular(10),
-                boxShadow: [BoxShadow(color: _accent.withValues(alpha: 0.40), blurRadius: 8)],
+                boxShadow: [
+                  BoxShadow(
+                    color: _accent.withValues(alpha: 0.40),
+                    blurRadius: 8,
+                  ),
+                ],
               ),
             ),
           );
@@ -617,18 +863,23 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
     );
   }
 
+  // ── Steps Grid ──────────────────────────────────────────────────────────────
   Widget _buildStepsGrid() {
     final steps = _currentRoutine;
     final List<Widget> rows = [];
     for (int i = 0; i < steps.length; i += 2) {
-      rows.add(Row(children: [
-        Expanded(child: _buildStepCard(i, steps[i])),
-        const SizedBox(width: 9),
-        if (i + 1 < steps.length)
-          Expanded(child: _buildStepCard(i + 1, steps[i + 1]))
-        else
-          const Expanded(child: SizedBox()),
-      ]));
+      rows.add(
+        Row(
+          children: [
+            Expanded(child: _buildStepCard(i, steps[i])),
+            const SizedBox(width: 9),
+            if (i + 1 < steps.length)
+              Expanded(child: _buildStepCard(i + 1, steps[i + 1]))
+            else
+              const Expanded(child: SizedBox()),
+          ],
+        ),
+      );
       if (i + 2 < steps.length) rows.add(const SizedBox(height: 9));
     }
     return Column(children: rows);
@@ -651,23 +902,57 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
       fadeAnim: index < _stepFadeAnims.length ? _stepFadeAnims[index] : null,
       onTap: () => _markStep(index),
       stepIconData: _stepIcon(name),
+      stepImageUrl: _stepImageUrl(name),
     );
+  }
+
+  String? _stepImageUrl(String name) {
+    switch (name) {
+      case 'Cleanser':
+        return 'https://images.unsplash.com/photo-1556228724-4f3e2f3bb7f1?auto=format&fit=crop&w=120&q=80';
+      case 'Toner':
+        return 'https://images.unsplash.com/photo-1629198735660-e39ea93f5b49?auto=format&fit=crop&w=120&q=80';
+      case 'Vitamin C Serum':
+        return 'https://images.unsplash.com/photo-1571781418606-70265b9cce90?auto=format&fit=crop&w=120&q=80';
+      case 'Moisturizer':
+        return 'https://images.unsplash.com/photo-1625772452859-1c03d5bf1137?auto=format&fit=crop&w=120&q=80';
+      case 'Sunscreen':
+        return 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=120&q=80';
+      case 'Retinol Serum':
+        return 'https://images.unsplash.com/photo-1612817288484-6f916006741a?auto=format&fit=crop&w=120&q=80';
+      case 'Night Cream':
+        return 'https://images.unsplash.com/photo-1611080541599-8c6dbde6ed28?auto=format&fit=crop&w=120&q=80';
+      case 'Lip Care':
+        return 'https://images.unsplash.com/photo-1586495777744-4413f21062fa?auto=format&fit=crop&w=120&q=80';
+      default:
+        return null;
+    }
   }
 
   IconData _stepIcon(String name) {
     switch (name) {
-      case 'Cleanser': return Icons.water_drop_outlined;
-      case 'Toner': return Icons.grid_view_outlined;
-      case 'Vitamin C Serum': return Icons.bolt;
-      case 'Moisturizer': return Icons.water_drop;
-      case 'Sunscreen': return Icons.wb_sunny_outlined;
-      case 'Retinol Serum': return Icons.nightlight_round;
-      case 'Night Cream': return Icons.nightlight_outlined;
-      case 'Lip Care': return Icons.favorite_outline;
-      default: return Icons.spa_outlined;
+      case 'Cleanser':
+        return Icons.water_drop_outlined;
+      case 'Toner':
+        return Icons.grid_view_outlined;
+      case 'Vitamin C Serum':
+        return Icons.science_outlined;
+      case 'Moisturizer':
+        return Icons.opacity;
+      case 'Sunscreen':
+        return Icons.light_mode_outlined;
+      case 'Retinol Serum':
+        return Icons.biotech_outlined;
+      case 'Night Cream':
+        return Icons.bedtime_outlined;
+      case 'Lip Care':
+        return Icons.face_retouching_natural;
+      default:
+        return Icons.spa_outlined;
     }
   }
 
+  // ── Tip Card ────────────────────────────────────────────────────────────────
   Widget _buildTipCard() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -676,142 +961,82 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
         border: Border.all(color: _cardBorder),
         borderRadius: BorderRadius.circular(18),
       ),
-      child: Row(children: [
-        Container(
-          width: 36, height: 36,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft, end: Alignment.bottomRight,
-              colors: [_accent.withValues(alpha: 0.15), _accent2.withValues(alpha: 0.15)],
-            ),
-            border: Border.all(color: _cardBorder),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Center(child: Text('💡', style: TextStyle(fontSize: 16))),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: RichText(
-            text: TextSpan(
-              style: TextStyle(fontSize: 12, color: _muted, height: 1.5),
-              children: [
-                TextSpan(text: 'Pro tip: ',
-                    style: TextStyle(color: _accent5, fontWeight: FontWeight.w600)),
-                const TextSpan(
-                    text: 'Consistency is your best skincare ingredient. Even 3 steps done daily beats 10 steps occasionally.'),
-              ],
-            ),
-          ),
-        ),
-      ]),
-    );
-  }
-
-  Widget _buildChatButton() {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _chatBtnHovered = true),
-      onExit: (_) => setState(() => _chatBtnHovered = false),
-      child: GestureDetector(
-        onTap: () => setState(() => _chatOpen = true),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned.fill(
-              child: AnimatedBuilder(
-                animation: _pulseCtrl,
-                builder: (context, child) {
-                  return Opacity(
-                    opacity: _pulseOpacity.value,
-                    child: Transform.scale(
-                      scale: _pulseScale.value,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                              color: _accent.withValues(alpha: 0.22), width: 1.5),
-                        ),
-                      ),
-                    ),
-                  );
-                },
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  _accent.withValues(alpha: 0.15),
+                  _accent2.withValues(alpha: 0.15),
+                ],
               ),
+              border: Border.all(color: _cardBorder),
+              borderRadius: BorderRadius.circular(12),
             ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 250),
-              curve: const Cubic(0.34, 1.56, 0.64, 1),
-              transform: Matrix4.translationValues(
-                  0, _chatBtnHovered ? -2.0 : 0.0, 0),
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft, end: Alignment.bottomRight,
-                  colors: [_accent.withValues(alpha: 0.15), _accent2.withValues(alpha: 0.18)],
-                ),
-                border: Border.all(color: _accent.withValues(alpha: 0.30), width: 1.5),
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: _accent.withValues(alpha: 0.12),
-                    blurRadius: _chatBtnHovered ? 28.0 : 20.0,
-                    offset: const Offset(0, 4),
+            child: const Center(
+              child: Text('💡', style: TextStyle(fontSize: 16)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            // FIX: removed `const` — RichText uses runtime color getters _muted and _accent5
+            child: RichText(
+              text: TextSpan(
+                style: TextStyle(fontSize: 12, color: _muted, height: 1.5),
+                children: [
+                  TextSpan(
+                    text: 'Pro tip: ',
+                    style: TextStyle(
+                      color: _accent5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const TextSpan(
+                    text:
+                        'Consistency is your best skincare ingredient. Even 3 steps done daily beats 10 steps occasionally.',
                   ),
                 ],
               ),
-              child: Row(children: [
-                Stack(children: [
-                  Container(
-                    width: 40, height: 40,
-                    decoration: BoxDecoration(
-                      color: _phoneShell2,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(color: _bg.withValues(alpha: 0.35), blurRadius: 14, offset: Offset(0, 4))
-                      ],
-                    ),
-                    child: Center(
-                      child: Text('✦', style: TextStyle(fontSize: 17, color: _accent)),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 1, right: 1,
-                    child: Container(
-                      width: 10, height: 10,
-                      decoration: BoxDecoration(
-                        color: _accent3, shape: BoxShape.circle,
-                        border: Border.all(color: _bg, width: 2),
-                      ),
-                    ),
-                  ),
-                ]),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Ask AI Skincare Expert',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _text)),
-                    SizedBox(height: 1),
-                    Text('Get personalised advice',
-                        style: TextStyle(fontSize: 11, color: _muted)),
-                  ]),
-                ),
-                Icon(Icons.chevron_right_rounded, size: 14, color: _muted),
-              ]),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+  }
+
+  // ── Chat Button ─────────────────────────────────────────────────────────────
+  Widget _buildChatButton() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        _AskAhviFab(onTap: () => showAhviStylistChatSheet(context)),
+      ],
     );
   }
 
   Widget _buildSection(Widget child) => child;
 
-  Widget _buildCard({required Widget child, EdgeInsets padding = const EdgeInsets.all(16)}) {
+  Widget _buildCard({
+    required Widget child,
+    EdgeInsets padding = const EdgeInsets.all(16),
+  }) {
     return Container(
       decoration: BoxDecoration(
         color: _card,
         border: Border.all(color: _cardBorder),
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: _accent.withValues(alpha: 0.08), blurRadius: 24, offset: Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+            color: _accent.withValues(alpha: 0.08),
+            blurRadius: 24,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
       padding: padding,
       child: child,
@@ -821,26 +1046,37 @@ class _SkincareScreenState extends State<SkincareScreen> with TickerProviderStat
   Widget _buildSecLabel(String label) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
-      child: Row(children: [
-        Text(label.toUpperCase(),
+      child: Row(
+        children: [
+          Text(
+            label.toUpperCase(),
             style: TextStyle(
-              fontSize: 10, fontWeight: FontWeight.w700,
-              letterSpacing: 0.14 * 10, color: _muted,
-            )),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Container(
-            height: 1,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [_accent.withValues(alpha: 0.30), kTransparent]),
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.14 * 10,
+              color: _muted,
             ),
           ),
-        ),
-      ]),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Container(
+              height: 1,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [_accent.withValues(alpha: 0.30), kTransparent],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  F02 + F03: Step Card — SlideUp on render + Hover lift (-3px)
+// ─────────────────────────────────────────────────────────────────────────────
 class _StepCard extends StatefulWidget {
   final int index;
   final String name;
@@ -852,12 +1088,20 @@ class _StepCard extends StatefulWidget {
   final Animation<double>? fadeAnim;
   final VoidCallback onTap;
   final IconData stepIconData;
+  final String? stepImageUrl;
 
   const _StepCard({
-    required this.index, required this.name, required this.isDone,
-    required this.color, required this.bg, required this.border,
-    this.slideAnim, this.fadeAnim,
-    required this.onTap, required this.stepIconData,
+    required this.index,
+    required this.name,
+    required this.isDone,
+    required this.color,
+    required this.bg,
+    required this.border,
+    this.slideAnim,
+    this.fadeAnim,
+    required this.onTap,
+    required this.stepIconData,
+    this.stepImageUrl,
   });
 
   @override
@@ -882,44 +1126,65 @@ class _StepCardState extends State<_StepCard> {
             color: widget.isDone ? _bg.withValues(alpha: 0.20) : widget.bg,
             gradient: widget.isDone
                 ? LinearGradient(
-              begin: Alignment.topLeft, end: Alignment.bottomRight,
-              colors: [_accent.withValues(alpha: 0.20), _accent2.withValues(alpha: 0.20)],
-            )
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      _accent.withValues(alpha: 0.20),
+                      _accent2.withValues(alpha: 0.20),
+                    ],
+                  )
                 : null,
             border: Border.all(
-              color: widget.isDone ? _accent.withValues(alpha: 0.40) : widget.border,
+              color: widget.isDone
+                  ? _accent.withValues(alpha: 0.40)
+                  : widget.border,
               width: 1.5,
             ),
             borderRadius: BorderRadius.circular(18),
           ),
-          child: Column(children: [
-            Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                color: _panel2,
-                border: Border.all(color: _cardBorder),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(color: _bg.withValues(alpha: 0.20), blurRadius: 8, offset: Offset(0, 2))
-                ],
+          child: Column(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: _panel2,
+                  border: Border.all(color: _cardBorder),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _bg.withValues(alpha: 0.20),
+                      blurRadius: 8,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Icon(
+                    widget.stepIconData,
+                    size: 16,
+                    color: widget.isDone ? _accent : widget.color,
+                  ),
+                ),
               ),
-              child: Center(
-                child: Icon(widget.stepIconData, size: 16,
-                    color: widget.isDone ? _accent : widget.color),
+              const SizedBox(height: 8),
+              Text(
+                widget.name,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: widget.isDone ? _accent : widget.color,
+                  decoration: widget.isDone
+                      ? TextDecoration.lineThrough
+                      : TextDecoration.none,
+                  decorationColor: widget.isDone
+                      ? _accent.withValues(alpha: 0.65)
+                      : null,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              widget.name,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 11.5, fontWeight: FontWeight.w600,
-                color: widget.isDone ? _accent : widget.color,
-                decoration: widget.isDone ? TextDecoration.lineThrough : TextDecoration.none,
-                decorationColor: widget.isDone ? _accent.withValues(alpha: 0.65) : null,
-              ),
-            ),
-          ]),
+            ],
+          ),
         ),
       ),
     );
@@ -943,6 +1208,9 @@ class _StepCardState extends State<_StepCard> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Chat Overlay
+// ─────────────────────────────────────────────────────────────────────────────
 class _ChatMessage {
   final bool isUser;
   final String text;
@@ -979,7 +1247,6 @@ class _ChatOverlayState extends State<_ChatOverlay>
   bool _showWelcome = true;
   bool _isBusy = false;
   bool _showQuickPills = true;
-
   final List<Map<String, String>> _chatHistory = [];
 
   bool _isListening = false;
@@ -1013,19 +1280,26 @@ class _ChatOverlayState extends State<_ChatOverlay>
   void initState() {
     super.initState();
     _animCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 420));
-    _slideAnim = Tween<Offset>(
-        begin: const Offset(0, 1), end: Offset.zero).animate(
-      CurvedAnimation(parent: _animCtrl,
-          curve: const Cubic(0.32, 0.72, 0.0, 1.0)),
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
     );
+    _slideAnim = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _animCtrl,
+            curve: const Cubic(0.32, 0.72, 0.0, 1.0),
+          ),
+        );
     _animCtrl.forward();
 
     _micPulseCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1200));
-    _micPulseAnim = Tween<double>(begin: 1.0, end: 1.08).animate(
-      CurvedAnimation(parent: _micPulseCtrl, curve: Curves.easeInOut),
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
     );
+    _micPulseAnim = Tween<double>(
+      begin: 1.0,
+      end: 1.08,
+    ).animate(CurvedAnimation(parent: _micPulseCtrl, curve: Curves.easeInOut));
 
     _inputFocus.addListener(() {
       setState(() => _inputFocused = _inputFocus.hasFocus);
@@ -1037,27 +1311,34 @@ class _ChatOverlayState extends State<_ChatOverlay>
   }
 
   Future<void> _addAIGreeting() async {
-    setState(() { _isBusy = true; });
-    const greetPrompt = 'Greet the user warmly as AHVI skincare advisor. '
+    setState(() {
+      _isBusy = true;
+    });
+    const greetPrompt =
+        'Greet the user warmly as AHVI skincare advisor. '
         'Introduce yourself in 1-2 sentences and invite them to ask about their skin. '
         'Be friendly and use 1 emoji max.';
 
     try {
-      final backend = BackendService();
-      final data = await backend.sendAnthropicMessages(
-        model: 'claude-sonnet-4-20250514',
-        maxTokens: 120,
-        system: 'You are AHVI, a warm expert skincare advisor.',
-        messages: [
-          {'role': 'user', 'content': greetPrompt},
-        ],
+      final response = await http.post(
+        Uri.parse('https://api.anthropic.com/v1/messages'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'model': 'claude-sonnet-4-20250514',
+          'max_tokens': 120,
+          'system': 'You are AHVI, a warm expert skincare advisor.',
+          'messages': [
+            {'role': 'user', 'content': greetPrompt},
+          ],
+        }),
       );
-      if (data == null) {
-        throw Exception('No response from backend');
-      }
-      final text = (data['content'] as List?)?.firstWhere(
-            (b) => b['type'] == 'text', orElse: () => null,
-      )?['text'] as String?;
+      final data = await compute(_parseSkincareJsonMap, response.body);
+      final text =
+          (data['content'] as List?)?.firstWhere(
+                (b) => b['type'] == 'text',
+                orElse: () => null,
+              )?['text']
+              as String?;
 
       if (mounted && text != null) {
         setState(() {
@@ -1071,9 +1352,12 @@ class _ChatOverlayState extends State<_ChatOverlay>
       if (mounted) {
         setState(() {
           _isBusy = false;
-          const greeting = "Hi! I'm your AHVI skincare advisor ✦\n\n"
+          const greeting =
+              "Hi! I'm your AHVI skincare advisor ✦\n\n"
               "Ask me about routines, ingredients, or skin concerns!";
-          _messages.add(_ChatMessage(isUser: false, text: greeting, time: _ts()));
+          _messages.add(
+            _ChatMessage(isUser: false, text: greeting, time: _ts()),
+          );
           _chatHistory.add({'role': 'assistant', 'content': greeting});
         });
         _scrollToBottom();
@@ -1127,19 +1411,23 @@ class _ChatOverlayState extends State<_ChatOverlay>
         'Use light friendly language with 1-2 emojis max.';
 
     try {
-      final backend = BackendService();
-      final data = await backend.sendAnthropicMessages(
-        model: 'claude-sonnet-4-20250514',
-        maxTokens: 380,
-        system: systemPrompt,
-        messages: _chatHistory,
+      final response = await http.post(
+        Uri.parse('https://api.anthropic.com/v1/messages'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'model': 'claude-sonnet-4-20250514',
+          'max_tokens': 380,
+          'system': systemPrompt,
+          'messages': _chatHistory,
+        }),
       );
-      if (data == null) {
-        throw Exception('No response from backend');
-      }
-      final aiText = (data['content'] as List?)?.firstWhere(
-            (b) => b['type'] == 'text', orElse: () => null,
-      )?['text'] as String?;
+      final data = await compute(_parseSkincareJsonMap, response.body);
+      final aiText =
+          (data['content'] as List?)?.firstWhere(
+                (b) => b['type'] == 'text',
+                orElse: () => null,
+              )?['text']
+              as String?;
 
       if (mounted) {
         final reply = aiText ?? "I'm having a moment — please try again ✦";
@@ -1160,7 +1448,9 @@ class _ChatOverlayState extends State<_ChatOverlay>
       if (mounted) {
         setState(() {
           _isBusy = false;
-          _messages.add(_ChatMessage(isUser: false, text: fallback, time: _ts()));
+          _messages.add(
+            _ChatMessage(isUser: false, text: fallback, time: _ts()),
+          );
           _chatHistory.add({'role': 'assistant', 'content': fallback});
         });
         _scrollToBottom();
@@ -1189,10 +1479,7 @@ class _ChatOverlayState extends State<_ChatOverlay>
           alignment: Alignment.bottomCenter,
           child: GestureDetector(
             onTap: () {},
-            child: SlideTransition(
-              position: _slideAnim,
-              child: _buildModal(),
-            ),
+            child: SlideTransition(position: _slideAnim, child: _buildModal()),
           ),
         ),
       ),
@@ -1209,20 +1496,30 @@ class _ChatOverlayState extends State<_ChatOverlay>
         border: Border.all(color: _cardBorder),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         boxShadow: [
-          BoxShadow(color: _accent.withValues(alpha: 0.15), blurRadius: 50, offset: Offset(0, -8))
+          BoxShadow(
+            color: _accent.withValues(alpha: 0.15),
+            blurRadius: 50,
+            offset: Offset(0, -8),
+          ),
         ],
       ),
-      child: Column(children: [
-        Container(
-          width: 40, height: 4,
-          margin: const EdgeInsets.fromLTRB(0, 14, 0, 6),
-          decoration: BoxDecoration(color: _panel2, borderRadius: BorderRadius.circular(2)),
-        ),
-        _buildModalHeader(),
-        Expanded(child: _buildMessages()),
-        if (_showQuickPills) _buildQuickPills(),
-        _buildInputBar(),
-      ]),
+      child: Column(
+        children: [
+          Container(
+            width: 40,
+            height: 4,
+            margin: const EdgeInsets.fromLTRB(0, 14, 0, 6),
+            decoration: BoxDecoration(
+              color: _panel2,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          _buildModalHeader(),
+          Expanded(child: _buildMessages()),
+          if (_showQuickPills) _buildQuickPills(),
+          _buildInputBar(),
+        ],
+      ),
     );
   }
 
@@ -1230,94 +1527,156 @@ class _ChatOverlayState extends State<_ChatOverlay>
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
       decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: _cardBorder))),
-      child: Row(children: [
-        Container(
-          width: 44, height: 44,
-          decoration: BoxDecoration(
-            color: _phoneShell2, shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(color: _bg.withValues(alpha: 0.30), blurRadius: 16, offset: Offset(0, 4))
-            ],
-          ),
-          child: Center(
-            child: Text('✦', style: TextStyle(fontSize: 18, color: _accent)),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('AHVI Skincare',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: _text)),
-            const SizedBox(height: 2),
-            Row(children: [
-              Container(
-                width: 6, height: 6,
-                decoration: BoxDecoration(
-                  color: _accent3, shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(color: _accent3.withValues(alpha: 0.60), blurRadius: 6)],
-                ),
-              ),
-              const SizedBox(width: 5),
-              Text('Your AI skincare advisor',
-                  style: TextStyle(fontSize: 11, color: _muted)),
-            ]),
-          ]),
-        ),
-        GestureDetector(
-          onTap: _close,
-          child: Container(
-            width: 34, height: 34,
+        border: Border(bottom: BorderSide(color: _cardBorder)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
-              color: _panel, shape: BoxShape.circle,
-              border: Border.all(color: _cardBorder),
+              color: _phoneShell2,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: _bg.withValues(alpha: 0.30),
+                  blurRadius: 16,
+                  offset: Offset(0, 4),
+                ),
+              ],
             ),
+            // FIX: removed `const` — Text style uses runtime color getter _accent
             child: Center(
-              child: Text('✕', style: TextStyle(fontSize: 14, color: _muted)),
+              child: Text('✦', style: TextStyle(fontSize: 18, color: _accent)),
             ),
           ),
-        ),
-      ]),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'AHVI Skincare',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: _text,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: _accent3,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: _accent3.withValues(alpha: 0.60),
+                            blurRadius: 6,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Your AI skincare advisor',
+                      style: TextStyle(fontSize: 11, color: _muted),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: _close,
+            child: Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: _panel,
+                shape: BoxShape.circle,
+                border: Border.all(color: _cardBorder),
+              ),
+              // FIX: removed `const` — Text style uses runtime color getter _muted
+              child: Center(
+                child: Text('✕', style: TextStyle(fontSize: 14, color: _muted)),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildMessages() {
-    return ListView(
+    final itemCount =
+        (_showWelcome ? 1 : 0) + _messages.length + (_isBusy ? 1 : 0);
+    return ListView.builder(
       controller: _scrollCtrl,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      children: [
-        if (_showWelcome) _buildWelcome(),
-        ..._messages.map((msg) => _SlideUpMessage(child: _buildMsgRow(msg))),
-        if (_isBusy) _buildTypingIndicator(),
-      ],
+      itemCount: itemCount,
+      itemBuilder: (context, index) {
+        var cursor = 0;
+        if (_showWelcome) {
+          if (index == 0) return _buildWelcome();
+          cursor = 1;
+        }
+        final messageIndex = index - cursor;
+        if (messageIndex < _messages.length) {
+          return RepaintBoundary(
+            child: _SlideUpMessage(
+              child: _buildMsgRow(_messages[messageIndex]),
+            ),
+          );
+        }
+        return RepaintBoundary(child: _buildTypingIndicator());
+      },
     );
   }
 
   Widget _buildWelcome() {
-    return Column(children: [
-      Container(
-        width: 60, height: 60,
-        decoration: BoxDecoration(
-          color: _phoneShell2, shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(color: _accent.withValues(alpha: 0.20), blurRadius: 24, offset: Offset(0, 6))
-          ],
+    return Column(
+      children: [
+        Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            color: _phoneShell2,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: _accent.withValues(alpha: 0.20),
+                blurRadius: 24,
+                offset: Offset(0, 6),
+              ),
+            ],
+          ),
+          // FIX: removed `const` — Text style uses runtime color getter _accent
+          child: Center(
+            child: Text('✦', style: TextStyle(fontSize: 24, color: _accent)),
+          ),
         ),
-        child: Center(
-          child: Text('✦', style: TextStyle(fontSize: 24, color: _accent)),
+        const SizedBox(height: 8),
+        Text(
+          'Skincare Advisor',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: _text,
+          ),
         ),
-      ),
-      const SizedBox(height: 8),
-      Text('Skincare Advisor',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: _text)),
-      const SizedBox(height: 8),
-      Text(
-        'Ask me about routines, ingredients, skin concerns, or product recommendations.',
-        textAlign: TextAlign.center,
-        style: TextStyle(fontSize: 13, color: _muted, height: 1.55),
-      ),
-      const SizedBox(height: 8),
-    ]);
+        const SizedBox(height: 8),
+        Text(
+          'Ask me about routines, ingredients, skin concerns, or product recommendations.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 13, color: _muted, height: 1.55),
+        ),
+        const SizedBox(height: 8),
+      ],
+    );
   }
 
   Widget _buildMsgRow(_ChatMessage msg) {
@@ -1325,116 +1684,180 @@ class _ChatOverlayState extends State<_ChatOverlay>
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisAlignment:
-        msg.isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: msg.isUser
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         children: msg.isUser
             ? [
-          Flexible(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Container(
-                constraints: const BoxConstraints(maxWidth: 280),
-                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
-                decoration: BoxDecoration(
-                  color: _panel2,
-                  border: Border.all(color: _cardBorder, width: 1.5),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(18), topRight: Radius.circular(4),
-                    bottomLeft: Radius.circular(18), bottomRight: Radius.circular(18),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Container(
+                        constraints: const BoxConstraints(maxWidth: 280),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 15,
+                          vertical: 11,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _panel2,
+                          border: Border.all(color: _cardBorder, width: 1.5),
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(18),
+                            topRight: Radius.circular(4),
+                            bottomLeft: Radius.circular(18),
+                            bottomRight: Radius.circular(18),
+                          ),
+                          // FIX: removed `const` from BoxShadow list — uses runtime getter _bg
+                          boxShadow: [
+                            BoxShadow(
+                              color: _bg.withValues(alpha: 0.15),
+                              blurRadius: 10,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          msg.text,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: _text,
+                            height: 1.6,
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, right: 4),
+                        child: Text(
+                          msg.time,
+                          style: TextStyle(fontSize: 10, color: _muted),
+                        ),
+                      ),
+                    ],
                   ),
-                  boxShadow: [
-                    BoxShadow(color: _bg.withValues(alpha: 0.15), blurRadius: 10, offset: Offset(0, 2))
-                  ],
                 ),
-                child: Text(msg.text,
-                    style: TextStyle(fontSize: 13, color: _text, height: 1.6)),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 4, right: 4),
-                child: Text(msg.time,
-                    style: TextStyle(fontSize: 10, color: _muted)),
-              ),
-            ]),
-          ),
-          const SizedBox(width: 9),
-          Container(
-            width: 28, height: 28,
-            decoration: BoxDecoration(
-              color: _panel, shape: BoxShape.circle,
-              border: Border.all(color: _cardBorder),
-            ),
-            child: const Center(
-              child: Text('👤', style: TextStyle(fontSize: 11)),
-            ),
-          ),
-        ]
+                const SizedBox(width: 9),
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: _panel,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: _cardBorder),
+                  ),
+                  child: const Center(
+                    child: Text('👤', style: TextStyle(fontSize: 11)),
+                  ),
+                ),
+              ]
             : [
-          Container(
-            width: 28, height: 28,
-            decoration: BoxDecoration(color: _phoneShell2, shape: BoxShape.circle),
-            child: Center(
-              child: Text('✦', style: TextStyle(fontSize: 12, color: _accent)),
-            ),
-          ),
-          const SizedBox(width: 9),
-          Flexible(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Container(
-                constraints: const BoxConstraints(maxWidth: 280),
-                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
-                decoration: BoxDecoration(
-                  color: _panel,
-                  border: Border.all(color: _cardBorder),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(4), topRight: Radius.circular(18),
-                    bottomLeft: Radius.circular(18), bottomRight: Radius.circular(18),
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: _phoneShell2,
+                    shape: BoxShape.circle,
                   ),
-                  boxShadow: [
-                    BoxShadow(color: _bg.withValues(alpha: 0.15), blurRadius: 8, offset: Offset(0, 2))
-                  ],
+                  // FIX: removed `const` — Text style uses runtime getter _accent
+                  child: Center(
+                    child: Text(
+                      '✦',
+                      style: TextStyle(fontSize: 12, color: _accent),
+                    ),
+                  ),
                 ),
-                child: Text(msg.text,
-                    style: TextStyle(fontSize: 13, color: _text, height: 1.6)),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 4, left: 4),
-                child: Text(msg.time,
-                    style: TextStyle(fontSize: 10, color: _muted)),
-              ),
-            ]),
-          ),
-        ],
+                const SizedBox(width: 9),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        constraints: const BoxConstraints(maxWidth: 280),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 15,
+                          vertical: 11,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _panel,
+                          border: Border.all(color: _cardBorder),
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(4),
+                            topRight: Radius.circular(18),
+                            bottomLeft: Radius.circular(18),
+                            bottomRight: Radius.circular(18),
+                          ),
+                          // FIX: removed `const` from BoxShadow list — uses runtime getter _bg
+                          boxShadow: [
+                            BoxShadow(
+                              color: _bg.withValues(alpha: 0.15),
+                              blurRadius: 8,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          msg.text,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: _text,
+                            height: 1.6,
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, left: 4),
+                        child: Text(
+                          msg.time,
+                          style: TextStyle(fontSize: 10, color: _muted),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
       ),
     );
   }
 
   Widget _buildTypingIndicator() {
-    return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-      Container(
-        width: 28, height: 28,
-        decoration: BoxDecoration(color: _phoneShell2, shape: BoxShape.circle),
-        child: Center(
-          child: Text('✦', style: TextStyle(fontSize: 12, color: _accent)),
-        ),
-      ),
-      const SizedBox(width: 9),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-        decoration: BoxDecoration(
-          color: _panel,
-          border: Border.all(color: _cardBorder),
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(4), topRight: Radius.circular(18),
-            bottomLeft: Radius.circular(18), bottomRight: Radius.circular(18),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: _phoneShell2,
+            shape: BoxShape.circle,
+          ),
+          // FIX: removed `const` — Text style uses runtime getter _accent
+          child: Center(
+            child: Text('✦', style: TextStyle(fontSize: 12, color: _accent)),
           ),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: List.generate(
-            3, (i) => _TypingDot(delay: Duration(milliseconds: i * 180)),
+        const SizedBox(width: 9),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          decoration: BoxDecoration(
+            color: _panel,
+            border: Border.all(color: _cardBorder),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(4),
+              topRight: Radius.circular(18),
+              bottomLeft: Radius.circular(18),
+              bottomRight: Radius.circular(18),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List.generate(
+              3,
+              (i) => _TypingDot(delay: Duration(milliseconds: i * 180)),
+            ),
           ),
         ),
-      ),
-    ]);
+      ],
+    );
   }
 
   Widget _buildQuickPills() {
@@ -1460,100 +1883,136 @@ class _ChatOverlayState extends State<_ChatOverlay>
         color: _panel,
         border: Border(top: BorderSide(color: _cardBorder)),
       ),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-        GestureDetector(
-          onTap: _toggleVoice,
-          child: AnimatedBuilder(
-            animation: _micPulseAnim,
-            builder: (context, child) {
-              return Transform.scale(
-                scale: _isListening ? _micPulseAnim.value : 1.0,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 44, height: 44,
-                  decoration: BoxDecoration(
-                    gradient: _isListening
-                        ? LinearGradient(
-                      begin: Alignment.topLeft, end: Alignment.bottomRight,
-                      colors: [_accent4, _accent2],
-                    )
-                        : null,
-                    color: _isListening ? null : _panel,
-                    shape: BoxShape.circle,
-                    border: _isListening
-                        ? null
-                        : Border.all(color: _cardBorder, width: 1.5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          GestureDetector(
+            onTap: _toggleVoice,
+            child: AnimatedBuilder(
+              animation: _micPulseAnim,
+              builder: (context, child) {
+                return Transform.scale(
+                  scale: _isListening ? _micPulseAnim.value : 1.0,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      gradient: _isListening
+                          ? LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [_accent4, _accent2],
+                            )
+                          : null,
+                      color: _isListening ? null : _panel,
+                      shape: BoxShape.circle,
+                      border: _isListening
+                          ? null
+                          : Border.all(color: _cardBorder, width: 1.5),
+                    ),
+                    child: Center(
+                      child: Icon(
+                        Icons.mic_outlined,
+                        size: 16,
+                        color: _isListening ? _text : _muted,
+                      ),
+                    ),
                   ),
-                  child: Center(
-                    child: Icon(Icons.mic_outlined, size: 16,
-                        color: _isListening ? _text : _muted),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(width: 9),
-        Expanded(
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            constraints: const BoxConstraints(minHeight: 48),
-            padding: const EdgeInsets.fromLTRB(16, 4, 6, 4),
-            decoration: BoxDecoration(
-              color: _panel2,
-              border: Border.all(
-                color: _inputFocused
-                    ? _accent.withValues(alpha: 0.45)
-                    : _cardBorder,
-              ),
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: TextField(
-              controller: _inputCtrl,
-              focusNode: _inputFocus,
-              style: TextStyle(fontSize: 14, color: _text),
-              maxLines: 5,
-              minLines: 1,
-              decoration: InputDecoration(
-                hintText: _isListening ? '🎙 Listening…' : 'Ask about skincare…',
-                hintStyle: TextStyle(color: _muted),
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 8),
-              ),
-              onSubmitted: (v) => _sendMessage(v),
+                );
+              },
             ),
           ),
-        ),
-        const SizedBox(width: 9),
-        AnimatedOpacity(
-          duration: const Duration(milliseconds: 150),
-          opacity: _isBusy ? 0.28 : 1.0,
-          child: _ScaleOnTapButton(
-            onTap: _isBusy ? null : () => _sendMessage(_inputCtrl.text),
-            child: Container(
-              width: 44, height: 44,
+          const SizedBox(width: 9),
+          Expanded(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              constraints: const BoxConstraints(minHeight: 48),
+              padding: const EdgeInsets.fromLTRB(16, 4, 6, 4),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft, end: Alignment.bottomRight,
-                  colors: [_accent, _accent2],
+                color: _panel2,
+                border: Border.all(
+                  color: _inputFocused
+                      ? _accent.withValues(alpha: 0.45)
+                      : _cardBorder,
                 ),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: TextField(
+                controller: _inputCtrl,
+                focusNode: _inputFocus,
+                style: TextStyle(fontSize: 14, color: _text),
+                maxLines: 5,
+                minLines: 1,
+                decoration: InputDecoration(
+                  hintText: _isListening
+                      ? '🎙 Listening…'
+                      : 'Ask about skincare…',
+                  hintStyle: TextStyle(color: _muted),
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                ),
+                onSubmitted: (v) => _sendMessage(v),
+              ),
+            ),
+          ),
+          const SizedBox(width: 9),
+          // ── AHVI Lens search button ──
+          _ScaleOnTapButton(
+            onTap: () => showAhviLensSheet(context, t: context.themeTokens),
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: _panel,
                 shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(color: _accent.withValues(alpha: 0.35), blurRadius: 16, offset: Offset(0, 4))
-                ],
+                border: Border.all(color: _cardBorder, width: 1.5),
               ),
               child: Center(
-                child: Icon(Icons.send_rounded, size: 16, color: _text),
+                child: Icon(Icons.search_rounded, size: 18, color: _muted),
               ),
             ),
           ),
-        ),
-      ]),
+          const SizedBox(width: 9),
+          AnimatedOpacity(
+            duration: const Duration(milliseconds: 150),
+            opacity: _isBusy ? 0.28 : 1.0,
+            child: _ScaleOnTapButton(
+              onTap: _isBusy ? null : () => _sendMessage(_inputCtrl.text),
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [_accent, _accent2],
+                  ),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: _accent.withValues(alpha: 0.35),
+                      blurRadius: 16,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Icon(Icons.send_rounded, size: 16, color: _text),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  F12: SlideUp wrapper for each new chat message
+// ─────────────────────────────────────────────────────────────────────────────
 class _SlideUpMessage extends StatefulWidget {
   final Widget child;
   const _SlideUpMessage({required this.child});
@@ -1571,18 +2030,24 @@ class _SlideUpMessageState extends State<_SlideUpMessage>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 320))
-      ..forward();
-    _slide = Tween<double>(begin: 16, end: 0).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOut),
-    );
-    _fade = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOut),
-    );
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    )..forward();
+    _slide = Tween<double>(
+      begin: 16,
+      end: 0,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    _fade = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
   }
 
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1591,7 +2056,8 @@ class _SlideUpMessageState extends State<_SlideUpMessage>
       builder: (_, child) => Opacity(
         opacity: _fade.value,
         child: Transform.translate(
-          offset: Offset(0, _slide.value), child: child,
+          offset: Offset(0, _slide.value),
+          child: child,
         ),
       ),
       child: widget.child,
@@ -1599,6 +2065,9 @@ class _SlideUpMessageState extends State<_SlideUpMessage>
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  F08: Scale-on-tap button
+// ─────────────────────────────────────────────────────────────────────────────
 class _ScaleOnTapButton extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -1628,6 +2097,9 @@ class _ScaleOnTapButtonState extends State<_ScaleOnTapButton> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  F14: Quick pill button
+// ─────────────────────────────────────────────────────────────────────────────
 class _QuickPillButton extends StatefulWidget {
   final String label;
   final VoidCallback onTap;
@@ -1654,20 +2126,21 @@ class _QuickPillButtonState extends State<_QuickPillButton> {
         decoration: BoxDecoration(
           gradient: _active
               ? LinearGradient(
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
-            colors: [_accent, _accent2],
-          )
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [_accent, _accent2],
+                )
               : null,
           color: _active ? null : _panel,
-          border: Border.all(
-              color: _active ? kTransparent : _cardBorder),
+          border: Border.all(color: _active ? kTransparent : _cardBorder),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Center(
           child: Text(
             widget.label,
             style: TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w600,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
               color: _active ? _text : _accent,
               height: 1,
             ),
@@ -1678,6 +2151,9 @@ class _QuickPillButtonState extends State<_QuickPillButton> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  F11: Typing dot — bounce + color change at peak
+// ─────────────────────────────────────────────────────────────────────────────
 class _TypingDot extends StatefulWidget {
   final Duration delay;
   const _TypingDot({required this.delay});
@@ -1695,8 +2171,9 @@ class _TypingDotState extends State<_TypingDot>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1200))
-      ..repeat();
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
 
     _yAnim = TweenSequence<double>([
       TweenSequenceItem(tween: Tween(begin: 0, end: -5), weight: 30),
@@ -1706,18 +2183,20 @@ class _TypingDotState extends State<_TypingDot>
 
     _colorAnim = TweenSequence<Color?>([
       TweenSequenceItem(
-          tween: ColorTween(
-              begin: _accent.withValues(alpha: 0.50), end: _accent),
-          weight: 30),
+        tween: ColorTween(begin: _accent.withValues(alpha: 0.50), end: _accent),
+        weight: 30,
+      ),
       TweenSequenceItem(
-          tween: ColorTween(
-              begin: _accent, end: _accent.withValues(alpha: 0.50)),
-          weight: 30),
+        tween: ColorTween(begin: _accent, end: _accent.withValues(alpha: 0.50)),
+        weight: 30,
+      ),
       TweenSequenceItem(
-          tween: ColorTween(
-              begin: _accent.withValues(alpha: 0.50),
-              end: _accent.withValues(alpha: 0.50)),
-          weight: 40),
+        tween: ColorTween(
+          begin: _accent.withValues(alpha: 0.50),
+          end: _accent.withValues(alpha: 0.50),
+        ),
+        weight: 40,
+      ),
     ]).animate(_ctrl);
 
     Future.delayed(widget.delay, () {
@@ -1726,7 +2205,10 @@ class _TypingDotState extends State<_TypingDot>
   }
 
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1735,7 +2217,8 @@ class _TypingDotState extends State<_TypingDot>
       builder: (_, _) => Transform.translate(
         offset: Offset(0, _yAnim.value),
         child: Container(
-          width: 7, height: 7,
+          width: 7,
+          height: 7,
           margin: const EdgeInsets.symmetric(horizontal: 2.5),
           decoration: BoxDecoration(
             color: _colorAnim.value ?? _accent.withValues(alpha: 0.50),
@@ -1747,6 +2230,9 @@ class _TypingDotState extends State<_TypingDot>
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Helper data classes
+// ─────────────────────────────────────────────────────────────────────────────
 class _SkinData {
   final String label;
   final IconData icon;
@@ -1762,6 +2248,135 @@ class _ConcernData {
   final Color bgColor;
   final Color borderColor;
   final Color shadowColor;
-  const _ConcernData(this.label, this.icon, this.activeColor,
-      this.bgColor, this.borderColor, this.shadowColor);
+  const _ConcernData(
+    this.label,
+    this.icon,
+    this.activeColor,
+    this.bgColor,
+    this.borderColor,
+    this.shadowColor,
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// ASK AHVI FAB
+// ─────────────────────────────────────────────────────────────────────────────
+class _AskAhviFab extends StatefulWidget {
+  final VoidCallback onTap;
+  const _AskAhviFab({required this.onTap});
+
+  @override
+  State<_AskAhviFab> createState() => _AskAhviFabState();
+}
+
+class _AskAhviFabState extends State<_AskAhviFab>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseCtrl;
+  late final Animation<double> _pulseScale;
+  late final Animation<double> _pulseOpacity;
+  bool _pressed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2500),
+    )..repeat();
+    _pulseScale = Tween<double>(begin: 1.0, end: 1.12).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut),
+    );
+    _pulseOpacity = Tween<double>(begin: 0.55, end: 0.0).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        widget.onTap();
+      },
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedScale(
+        scale: _pressed ? 0.94 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOutCubic,
+        child: AnimatedBuilder(
+          animation: _pulseCtrl,
+          builder: (_, child) => Stack(
+            alignment: Alignment.center,
+            children: [
+              Opacity(
+                opacity: _pulseOpacity.value,
+                child: Transform.scale(
+                  scale: _pulseScale.value,
+                  child: Container(
+                    width: 130,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(50),
+                      border: Border.all(
+                        color: t.accent.primary.withValues(alpha: 0.35),
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              child!,
+            ],
+          ),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(14, 13, 20, 13),
+            decoration: BoxDecoration(
+              color: Colors.black,
+              borderRadius: BorderRadius.circular(50),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 14,
+                  backgroundColor: Colors.white.withValues(alpha: 0.14),
+                  child: const Text('✦', style: TextStyle(color: Colors.white)),
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Ask AHVI',
+                      style: GoogleFonts.anton(
+                        fontSize: 13,
+                        letterSpacing: 0.4,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const Text(
+                      'Ask AHVI',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
