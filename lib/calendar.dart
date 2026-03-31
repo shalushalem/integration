@@ -1,6 +1,10 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/theme/theme_tokens.dart';
+import 'package:provider/provider.dart';
 
 void main() {
   runApp(const ScheduleApp());
@@ -23,35 +27,99 @@ class ScheduleApp extends StatelessWidget {
 // MODELS
 // ==========================================
 class PlanItem {
+  String? id;
   final String occasion;
   final IconData icon;
   final String colorTheme;
   final String time;
   final String outfit;
+  final DateTime dateTime;
   bool hasReminder;
 
   PlanItem({
+    this.id,
     required this.occasion,
     required this.icon,
     this.colorTheme = 'orange',
     this.time = '',
     this.outfit = '',
+    DateTime? dateTime,
     this.hasReminder = true,
+  }) : dateTime = dateTime ?? DateTime.now();
+}
+
+class _OccasionOption {
+  final String name;
+  final IconData icon;
+
+  const _OccasionOption({
+    required this.name,
+    required this.icon,
   });
 }
 
-class OutfitIdea {
-  final String vibe;
-  final String desc;
-  final String tip;
-  final String summary;
+const List<_OccasionOption> _fallbackOccasionOptions = [
+  _OccasionOption(name: 'Gym', icon: Icons.fitness_center),
+  _OccasionOption(name: 'Office', icon: Icons.work_outline),
+  _OccasionOption(name: 'Party', icon: Icons.celebration),
+  _OccasionOption(name: 'Shopping', icon: Icons.shopping_bag_outlined),
+  _OccasionOption(name: 'Study', icon: Icons.menu_book),
+  _OccasionOption(name: 'Travel', icon: Icons.flight_takeoff),
+  _OccasionOption(name: 'Event', icon: Icons.event),
+  _OccasionOption(name: 'Date Night', icon: Icons.favorite_border),
+];
 
-  OutfitIdea({
-    required this.vibe,
-    required this.desc,
-    required this.tip,
-    required this.summary,
-  });
+String _dateKey(DateTime date) => '${date.year}-${date.month}-${date.day}';
+
+String _colorThemeForOccasion(String occasion) {
+  final text = occasion.toLowerCase();
+  if (text.contains('office') ||
+      text.contains('work') ||
+      text.contains('study') ||
+      text.contains('travel')) {
+    return 'blue';
+  }
+  if (text.contains('party') ||
+      text.contains('date') ||
+      text.contains('event') ||
+      text.contains('wedding')) {
+    return 'pink';
+  }
+  return 'orange';
+}
+
+IconData _iconForOccasion(String occasion) {
+  final text = occasion.toLowerCase();
+  if (text.contains('gym') || text.contains('workout')) {
+    return Icons.fitness_center;
+  }
+  if (text.contains('office') || text.contains('work')) {
+    return Icons.work_outline;
+  }
+  if (text.contains('party')) {
+    return Icons.celebration;
+  }
+  if (text.contains('shopping')) {
+    return Icons.shopping_bag_outlined;
+  }
+  if (text.contains('study') || text.contains('exam')) {
+    return Icons.menu_book;
+  }
+  if (text.contains('travel') || text.contains('trip') || text.contains('vacation')) {
+    return Icons.flight_takeoff;
+  }
+  if (text.contains('date')) {
+    return Icons.favorite_border;
+  }
+  return Icons.event;
+}
+
+String _formatPlanTime(DateTime dateTime) {
+  final tod = TimeOfDay.fromDateTime(dateTime);
+  final hour = tod.hourOfPeriod == 0 ? 12 : tod.hourOfPeriod;
+  final minute = tod.minute.toString().padLeft(2, '0');
+  final suffix = tod.period == DayPeriod.am ? 'AM' : 'PM';
+  return '$hour:$minute $suffix';
 }
 
 // ==========================================
@@ -67,16 +135,152 @@ class CalendarShell extends StatefulWidget {
 class _CalendarShellState extends State<CalendarShell> {
   DateTime _currentMonth = DateTime.now();
   DateTime _selectedDate = DateTime.now();
-  
-  Map<String, List<PlanItem>> _plansData = {};
-  
+
+  Map<String, List<PlanItem>> _plansData = <String, List<PlanItem>>{};
+  List<_OccasionOption> _occasionOptions = _fallbackOccasionOptions;
+  bool _isLoadingPlans = true;
+
   bool _isChatOpen = false;
   String _activeOccasion = 'Gym';
   IconData _activeIcon = Icons.fitness_center;
 
   // Helper formats
-  String get _selectedDateKey => "${_selectedDate.year}-${_selectedDate.month}-${_selectedDate.day}";
-  String get _todayKey => "${DateTime.now().year}-${DateTime.now().month}-${DateTime.now().day}";
+  String get _selectedDateKey => _dateKey(_selectedDate);
+  String get _todayKey => _dateKey(DateTime.now());
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlansFromBackend();
+  }
+
+  DateTime? _parseDateTime(dynamic value) {
+    if (value is DateTime) return value.toLocal();
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true).toLocal();
+    }
+    if (value is String && value.trim().isNotEmpty) {
+      try {
+        return DateTime.parse(value).toLocal();
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  bool _toBool(dynamic value, {bool fallback = true}) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final text = value.trim().toLowerCase();
+      if (text == 'true' || text == '1' || text == 'yes') return true;
+      if (text == 'false' || text == '0' || text == 'no') return false;
+    }
+    return fallback;
+  }
+
+  List<_OccasionOption> _buildDynamicOccasionOptions(Set<String> source) {
+    final normalized = source
+        .map((name) => name.trim())
+        .where((name) => name.isNotEmpty)
+        .toSet();
+    if (normalized.isEmpty) return _fallbackOccasionOptions;
+
+    final options = <_OccasionOption>[];
+    final seen = <String>{};
+
+    for (final item in _fallbackOccasionOptions) {
+      final match = normalized.firstWhere(
+        (name) => name.toLowerCase() == item.name.toLowerCase(),
+        orElse: () => '',
+      );
+      if (match.isNotEmpty) {
+        options.add(_OccasionOption(name: match, icon: item.icon));
+        seen.add(match.toLowerCase());
+      }
+    }
+
+    final extras = normalized.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    for (final name in extras) {
+      final key = name.toLowerCase();
+      if (seen.contains(key)) continue;
+      options.add(_OccasionOption(name: name, icon: _iconForOccasion(name)));
+      seen.add(key);
+    }
+
+    return options.isEmpty ? _fallbackOccasionOptions : options;
+  }
+
+  void _insertPlanLocally(PlanItem plan) {
+    final key = _dateKey(plan.dateTime);
+    _plansData.putIfAbsent(key, () => <PlanItem>[]);
+    _plansData[key]!.add(plan);
+    _plansData[key]!.sort((a, b) => a.dateTime.compareTo(b.dateTime));
+  }
+
+  PlanItem? _planFromDoc(ProxyDocument doc) {
+    final data = doc.data;
+    final dateTime = _parseDateTime(
+      data['dateTime'] ?? data['date_time'] ?? data['datetime'],
+    );
+    if (dateTime == null) return null;
+
+    final occasionRaw = (data['occasion'] ?? data['title'] ?? 'Event').toString();
+    final occasion = occasionRaw.trim().isEmpty ? 'Event' : occasionRaw.trim();
+    final outfit = (data['outfitDescription'] ?? data['outfit'] ?? '').toString().trim();
+    final storedTime = (data['time'] ?? '').toString().trim();
+
+    return PlanItem(
+      id: doc.$id,
+      occasion: occasion,
+      icon: _iconForOccasion(occasion),
+      colorTheme: _colorThemeForOccasion(occasion),
+      time: storedTime.isEmpty ? _formatPlanTime(dateTime) : storedTime,
+      outfit: outfit,
+      hasReminder: _toBool(data['reminder'], fallback: true),
+      dateTime: dateTime,
+    );
+  }
+
+  Future<void> _loadPlansFromBackend() async {
+    final appwrite = context.read<AppwriteService>();
+    try {
+      final docs = await appwrite.getUserPlans();
+      final loaded = <String, List<PlanItem>>{};
+      final occasionSet = <String>{};
+
+      for (final doc in docs) {
+        final parsed = _planFromDoc(doc);
+        if (parsed == null) continue;
+        final key = _dateKey(parsed.dateTime);
+        loaded.putIfAbsent(key, () => <PlanItem>[]).add(parsed);
+        occasionSet.add(parsed.occasion);
+      }
+      for (final list in loaded.values) {
+        list.sort((a, b) => a.dateTime.compareTo(b.dateTime));
+      }
+
+      if (!mounted) return;
+      final options = _buildDynamicOccasionOptions(occasionSet);
+      setState(() {
+        _plansData = loaded;
+        _occasionOptions = options;
+        _activeOccasion = options.first.name;
+        _activeIcon = options.first.icon;
+        _isLoadingPlans = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _occasionOptions = _fallbackOccasionOptions;
+        _activeOccasion = _fallbackOccasionOptions.first.name;
+        _activeIcon = _fallbackOccasionOptions.first.icon;
+        _isLoadingPlans = false;
+      });
+    }
+  }
 
   void _changeMonth(int increment) {
     setState(() {
@@ -86,23 +290,110 @@ class _CalendarShellState extends State<CalendarShell> {
 
   void _addPlan(PlanItem plan) {
     setState(() {
-      if (!_plansData.containsKey(_selectedDateKey)) {
-        _plansData[_selectedDateKey] = [];
+      _insertPlanLocally(plan);
+      final hasOccasion = _occasionOptions.any(
+        (opt) => opt.name.toLowerCase() == plan.occasion.toLowerCase(),
+      );
+      if (!hasOccasion) {
+        _occasionOptions = [
+          ..._occasionOptions,
+          _OccasionOption(name: plan.occasion, icon: _iconForOccasion(plan.occasion)),
+        ];
       }
-      _plansData[_selectedDateKey]!.add(plan);
     });
+
+    unawaited(_persistPlan(plan));
+  }
+
+  Future<void> _persistPlan(PlanItem plan) async {
+    final appwrite = context.read<AppwriteService>();
+    try {
+      final doc = await appwrite.createPlan({
+        'occasion': plan.occasion,
+        'outfitDescription': plan.outfit,
+        'dateTime': plan.dateTime.toUtc().toIso8601String(),
+        'time': plan.time,
+        'reminder': plan.hasReminder,
+      });
+      if (!mounted) return;
+      setState(() {
+        plan.id = doc.$id;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Saved locally. Cloud sync failed.'),
+          backgroundColor: context.themeTokens.backgroundSecondary,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _removePlan(int index) {
+    unawaited(_removePlanAsync(index));
+  }
+
+  Future<void> _removePlanAsync(int index) async {
+    final list = _plansData[_selectedDateKey];
+    if (list == null || index < 0 || index >= list.length) return;
+
+    final removed = list[index];
     setState(() {
-      _plansData[_selectedDateKey]?.removeAt(index);
+      list.removeAt(index);
+      if (list.isEmpty) {
+        _plansData.remove(_selectedDateKey);
+      }
     });
+
+    if (removed.id == null) return;
+    final appwrite = context.read<AppwriteService>();
+    try {
+      await appwrite.deletePlan(removed.id!);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Plan removed locally. Cloud delete failed.'),
+          backgroundColor: context.themeTokens.backgroundSecondary,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _toggleReminder(int index) {
+    unawaited(_toggleReminderAsync(index));
+  }
+
+  Future<void> _toggleReminderAsync(int index) async {
+    final list = _plansData[_selectedDateKey];
+    if (list == null || index < 0 || index >= list.length) return;
+
+    final plan = list[index];
+    final previous = plan.hasReminder;
     setState(() {
-      _plansData[_selectedDateKey]![index].hasReminder = !_plansData[_selectedDateKey]![index].hasReminder;
+      plan.hasReminder = !plan.hasReminder;
     });
+
+    if (plan.id == null) return;
+    final appwrite = context.read<AppwriteService>();
+    try {
+      await appwrite.updatePlanReminder(plan.id!, plan.hasReminder);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        plan.hasReminder = previous;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Reminder update failed.'),
+          backgroundColor: context.themeTokens.backgroundSecondary,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _openChat(String occasion, IconData icon) {
@@ -141,14 +432,35 @@ class _CalendarShellState extends State<CalendarShell> {
                           icon: _activeIcon,
                           onBack: _closeChat,
                           onSavePlan: (time, outfit) {
+                            final mergedDate = DateTime(
+                              _selectedDate.year,
+                              _selectedDate.month,
+                              _selectedDate.day,
+                              time.hour,
+                              time.minute,
+                            );
                             _addPlan(PlanItem(
                               occasion: _activeOccasion,
                               icon: _activeIcon,
-                              time: time,
+                              time: _formatPlanTime(mergedDate),
                               outfit: outfit,
-                              colorTheme: ['orange', 'blue', 'pink'][DateTime.now().millisecond % 3], // Random theme
+                              colorTheme: _colorThemeForOccasion(_activeOccasion),
+                              hasReminder: true,
+                              dateTime: mergedDate,
                             ));
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Plan saved to calendar!', style: TextStyle(color: context.themeTokens.textPrimary, fontWeight: FontWeight.w600)), backgroundColor: context.themeTokens.backgroundSecondary, duration: const Duration(seconds: 2)));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Plan saved to calendar!',
+                                  style: TextStyle(
+                                    color: context.themeTokens.textPrimary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                backgroundColor: context.themeTokens.backgroundSecondary,
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
                           },
                         )
                       : MainCalendarView(
@@ -159,6 +471,7 @@ class _CalendarShellState extends State<CalendarShell> {
                           selectedDateKey: _selectedDateKey,
                           plans: _plansData[_selectedDateKey] ?? [],
                           allPlansData: _plansData,
+                          isLoading: _isLoadingPlans,
                           onMonthChanged: _changeMonth,
                           onDaySelected: (date) {
                             setState(() {
@@ -171,7 +484,7 @@ class _CalendarShellState extends State<CalendarShell> {
                               isScrollControlled: true,
                               backgroundColor: Colors.transparent,
                               builder: (ctx) => AddPlanModal(
-                                onPlanSaved: _addPlan,
+                                options: _occasionOptions,
                                 onChatOpened: (occ, emo) {
                                   Navigator.pop(ctx);
                                   _openChat(occ, emo);
@@ -282,6 +595,7 @@ class MainCalendarView extends StatelessWidget {
   final String selectedDateKey;
   final List<PlanItem> plans;
   final Map<String, List<PlanItem>> allPlansData;
+  final bool isLoading;
   final Function(int) onMonthChanged;
   final Function(DateTime) onDaySelected;
   final VoidCallback onAddPlanPressed;
@@ -296,6 +610,7 @@ class MainCalendarView extends StatelessWidget {
     required this.selectedDateKey,
     required this.plans,
     required this.allPlansData,
+    required this.isLoading,
     required this.onMonthChanged,
     required this.onDaySelected,
     required this.onAddPlanPressed,
@@ -450,7 +765,21 @@ class MainCalendarView extends StatelessWidget {
                     Text(selectedDateKey == todayKey ? "Today's Plans" : "${_months[selectedDate.month - 1]} ${selectedDate.day} Plans", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: theme.mutedText, letterSpacing: 1.2)),
                     const SizedBox(height: 10),
                     
-                    if (plans.isEmpty)
+                    if (isLoading)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 22),
+                        child: Center(
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: theme.accent.primary,
+                            ),
+                          ),
+                        ),
+                      )
+                    else if (plans.isEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 20),
                         child: Text("Nothing planned 🌿\nTap 'Add a Plan' below", textAlign: TextAlign.center, style: TextStyle(color: theme.mutedText, fontSize: 13, height: 1.5)),
@@ -579,41 +908,30 @@ class MainCalendarView extends StatelessWidget {
 // ADD PLAN MODAL
 // ==========================================
 class AddPlanModal extends StatefulWidget {
-  final Function(PlanItem) onPlanSaved;
+  final List<_OccasionOption> options;
   final Function(String, IconData) onChatOpened;
 
-  const AddPlanModal({Key? key, required this.onPlanSaved, required this.onChatOpened}) : super(key: key);
+  const AddPlanModal({
+    Key? key,
+    required this.options,
+    required this.onChatOpened,
+  }) : super(key: key);
 
   @override
   State<AddPlanModal> createState() => _AddPlanModalState();
 }
 
 class _AddPlanModalState extends State<AddPlanModal> {
-  final List<Map<String, dynamic>> _buttons = [
-    {'name': 'Gym', 'icon': Icons.fitness_center},
-    {'name': 'Office', 'icon': Icons.work_outline},
-    {'name': 'Party', 'icon': Icons.celebration},
-    {'name': 'Shopping', 'icon': Icons.shopping_bag_outlined},
-    {'name': 'Study', 'icon': Icons.menu_book},
-    {'name': 'Travel', 'icon': Icons.flight_takeoff},
-    {'name': 'Event', 'icon': Icons.event},
-    {'name': 'Date Night', 'icon': Icons.favorite_border},
-  ];
+  String? _selectedOccasion;
 
-  String _selectedOccasion = 'Gym';
-  int _pickedOutfitIdx = -1;
+  @override
+  void initState() {
+    super.initState();
+    if (widget.options.isNotEmpty) {
+      _selectedOccasion = widget.options.first.name;
+    }
+  }
 
-  final Map<String, List<OutfitIdea>> _outfits = {
-    'Gym': [
-      OutfitIdea(vibe: 'Cardio Day', desc: 'Leggings, Sports tank, Running shoes', tip: 'Go breathable — skip cotton.', summary: 'Leggings, sports tank & running shoes'),
-      OutfitIdea(vibe: 'Weight Training', desc: 'Gym shorts, Loose tee, Cross-trainers', tip: 'Flat soles = better grip.', summary: 'Gym shorts, loose tee & cross-trainers'),
-    ],
-    'Office': [
-      OutfitIdea(vibe: 'Formal Meeting', desc: 'Dress shirt, Dark trousers, Leather shoes', tip: 'Iron your collar the night before.', summary: 'Dress shirt, dark trousers & leather shoes'),
-      OutfitIdea(vibe: 'Regular Workday', desc: 'Chinos, Polo or blouse, Loafers', tip: 'Stick to 2–3 neutral colors.', summary: 'Chinos, polo or blouse & loafers'),
-    ]
-    // ... we can add more mock data here
-  };
 
   @override
   Widget build(BuildContext context) {
@@ -659,34 +977,69 @@ class _AddPlanModalState extends State<AddPlanModal> {
           // Occasions grid
           Text('CHOOSE OCCASION', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: theme.mutedText)),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8, runSpacing: 8,
-            children: _buttons.map((b) {
-              bool isSel = _selectedOccasion == b['name'];
-              return GestureDetector(
-                onTap: () {
-                  widget.onChatOpened(b['name'] as String, b['icon'] as IconData);
-                },
-                child: Container(
-                  width: (MediaQuery.of(context).size.width - 40 - 24) / 4,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    color: isSel ? theme.accent.primary.withOpacity(0.2) : theme.card,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: isSel ? theme.accent.primary : theme.cardBorder),
-                    boxShadow: isSel ? [BoxShadow(color: theme.accent.primary.withOpacity(0.4), blurRadius: 12)] : [],
-                  ),
-                  child: Column(
-                    children: [
-                      Icon(b['icon'] as IconData, size: 24, color: theme.textPrimary),
-                      const SizedBox(height: 4),
-                      Text(b['name']!, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isSel ? theme.accent.primary : theme.mutedText)),
-                    ],
-                  ),
+          if (widget.options.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              child: Text(
+                'No occasion history yet. Add a plan from chat to get started.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: theme.mutedText,
+                  height: 1.4,
                 ),
-              );
-            }).toList(),
-          ),
+              ),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: widget.options.map((option) {
+                final isSel =
+                    _selectedOccasion?.toLowerCase() == option.name.toLowerCase();
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _selectedOccasion = option.name;
+                    });
+                    widget.onChatOpened(option.name, option.icon);
+                  },
+                  child: Container(
+                    width: (MediaQuery.of(context).size.width - 40 - 24) / 4,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isSel ? theme.accent.primary.withOpacity(0.2) : theme.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isSel ? theme.accent.primary : theme.cardBorder,
+                      ),
+                      boxShadow: isSel
+                          ? [
+                              BoxShadow(
+                                color: theme.accent.primary.withOpacity(0.4),
+                                blurRadius: 12,
+                              ),
+                            ]
+                          : [],
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(option.icon, size: 24, color: theme.textPrimary),
+                        const SizedBox(height: 4),
+                        Text(
+                          option.name,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: isSel ? theme.accent.primary : theme.mutedText,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
           const SizedBox(height: 10),
         ],
       ),
@@ -708,7 +1061,7 @@ class StyleChatScreen extends StatefulWidget {
   final String occasion;
   final IconData icon;
   final VoidCallback onBack;
-  final Function(String, String) onSavePlan;
+  final Function(TimeOfDay, String) onSavePlan;
 
   const StyleChatScreen({Key? key, required this.occasion, required this.icon, required this.onBack, required this.onSavePlan}) : super(key: key);
 
@@ -719,56 +1072,144 @@ class StyleChatScreen extends StatefulWidget {
 class _StyleChatScreenState extends State<StyleChatScreen> {
   final TextEditingController _textCtrl = TextEditingController();
   final List<ChatMessage> _msgs = [];
+  final List<Map<String, String>> _chatHistory = [];
   bool _isListening = false;
+  bool _isSending = false;
 
   @override
   void initState() {
     super.initState();
-    _msgs.add(ChatMessage("Hi! I'm your style assistant for ${widget.occasion}. Ask me what to wear!", isUser: false, time: 'Now'));
+    final intro = "Hi! I'm your style assistant for ${widget.occasion}. Ask me what to wear!";
+    _msgs.add(ChatMessage(intro, isUser: false, time: 'Now'));
+    _chatHistory.add({'role': 'assistant', 'content': intro});
   }
 
-  // Helper to extract time
-  String _extractTime(String text) {
-     final match = RegExp(r"\b(\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.|o'clock)?)\b", caseSensitive: false).firstMatch(text);
-     return match != null ? match.group(1) ?? "" : "";
+  @override
+  void dispose() {
+    _textCtrl.dispose();
+    super.dispose();
   }
 
-  void _sendMsg() {
-    if (_textCtrl.text.trim().isEmpty) return;
-    
-    final userText = _textCtrl.text;
-    final lower = userText.toLowerCase();
-    
-    // We mock the outfit strictly for this demo
-    final mockOutfit = "Styling layer with ${widget.occasion} vibes.";
+  TimeOfDay? _extractTimeOfDay(String text) {
+    final regex = RegExp(
+      r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.|o'clock)?\b",
+      caseSensitive: false,
+    );
+    final match = regex.firstMatch(text);
+    if (match == null) return null;
+
+    final rawHour = int.tryParse(match.group(1) ?? '');
+    if (rawHour == null || rawHour < 0 || rawHour > 23) return null;
+    final rawMinute = int.tryParse(match.group(2) ?? '0') ?? 0;
+    if (rawMinute < 0 || rawMinute > 59) return null;
+
+    final marker = (match.group(3) ?? '').toLowerCase().replaceAll('.', '');
+    var hour = rawHour;
+    if (marker == 'am' || marker == "o'clock") {
+      if (hour == 12) hour = 0;
+    } else if (marker == 'pm') {
+      if (hour < 12) hour += 12;
+    }
+
+    if (hour > 23) return null;
+    return TimeOfDay(hour: hour, minute: rawMinute);
+  }
+
+  String _formatTimeOfDay(TimeOfDay time) {
+    final hour = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
+    final minute = time.minute.toString().padLeft(2, '0');
+    final suffix = time.period == DayPeriod.am ? 'AM' : 'PM';
+    return '$hour:$minute $suffix';
+  }
+
+  String _extractOutfitSummary(String text) {
+    final cleaned = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (cleaned.isEmpty) {
+      return 'Styled look for ${widget.occasion}.';
+    }
+    final firstSentence = cleaned.split(RegExp(r'[.!?]')).first.trim();
+    if (firstSentence.isEmpty) {
+      return 'Styled look for ${widget.occasion}.';
+    }
+    if (firstSentence.length > 120) {
+      return '${firstSentence.substring(0, 120).trim()}...';
+    }
+    return firstSentence;
+  }
+
+  Future<String> _fetchAiStylingReply(String userText) async {
+    final backend = context.read<BackendService>();
+    final appwrite = context.read<AppwriteService>();
+
+    var userId = 'calendar_guest';
+    try {
+      final user = await appwrite.getCurrentUser();
+      if (user != null) userId = user.$id;
+    } catch (_) {}
+
+    final result = await backend.sendChatQuery(
+      userText,
+      userId,
+      List<Map<String, String>>.from(_chatHistory),
+      '',
+      moduleContext: 'calendar_style_${widget.occasion}',
+    );
+
+    if (result['error'] != null) {
+      return "I couldn't reach styling AI right now. Try again in a moment.";
+    }
+
+    final rawMessage = result['message'];
+    if (rawMessage is Map<String, dynamic>) {
+      final text = (rawMessage['content'] ?? '').toString().trim();
+      if (text.isNotEmpty) return text;
+    }
+    if (rawMessage is String && rawMessage.trim().isNotEmpty) {
+      return rawMessage.trim();
+    }
+
+    final fallback = (result['content'] ?? '').toString().trim();
+    if (fallback.isNotEmpty) return fallback;
+    return "Let's style your ${widget.occasion.toLowerCase()} look.";
+  }
+
+  Future<void> _sendMsg() async {
+    final userText = _textCtrl.text.trim();
+    if (userText.isEmpty || _isSending) return;
 
     setState(() {
       _msgs.add(ChatMessage(userText, isUser: true, time: 'Now'));
       _textCtrl.clear();
-      
-      // Mock AI response
-      Future.delayed(const Duration(seconds: 1), () {
-        if(mounted) {
-           setState(() {
-             String extractedTime = _extractTime(userText);
-             
-             if (lower.contains('yes') || lower.contains('save') || lower.contains('add')) {
-                if (extractedTime.isNotEmpty) {
-                  widget.onSavePlan(extractedTime, mockOutfit);
-                  _msgs.add(ChatMessage("Perfect! I've saved the ${widget.occasion} plan with a reminder at $extractedTime to your calendar.", isUser: false, time: 'Now'));
-                } else {
-                  _msgs.add(ChatMessage("Got it! What time should I set the reminder for?", isUser: false, time: 'Now'));
-                }
-             } else if (extractedTime.isNotEmpty) {
-                widget.onSavePlan(extractedTime, mockOutfit);
-                _msgs.add(ChatMessage("Awesome! I've set a reminder at $extractedTime and saved the plan to your calendar.", isUser: false, time: 'Now'));
-             } else {
-                _msgs.add(ChatMessage("That sounds great! Would you like me to save this outfit plan and set a reminder? What time?", isUser: false, time: 'Now'));
-             }
-           });
-        }
-      });
+      _isSending = true;
     });
+    _chatHistory.add({'role': 'user', 'content': userText});
+
+    final lower = userText.toLowerCase();
+    final wantsSave = lower.contains('yes') ||
+        lower.contains('save') ||
+        lower.contains('add') ||
+        lower.contains('reminder');
+    final extractedTime = _extractTimeOfDay(userText);
+
+    String aiText = await _fetchAiStylingReply(userText);
+    final summary = _extractOutfitSummary(aiText);
+
+    if (extractedTime != null) {
+      final reminderAt = _formatTimeOfDay(extractedTime);
+      widget.onSavePlan(extractedTime, summary);
+      aiText =
+          '$aiText\n\nSaved this plan with a reminder at $reminderAt.';
+    } else if (wantsSave) {
+      aiText =
+          '$aiText\n\nTell me the reminder time (for example, 7:30 pm) and I will save it.';
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _msgs.add(ChatMessage(aiText, isUser: false, time: 'Now'));
+      _isSending = false;
+    });
+    _chatHistory.add({'role': 'assistant', 'content': aiText});
   }
 
   @override

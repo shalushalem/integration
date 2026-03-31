@@ -47,6 +47,73 @@ class ProxyDocument {
   }
 }
 
+class DuplicateOutfitException implements Exception {
+  final Map<String, dynamic> detail;
+  final String rawBody;
+
+  const DuplicateOutfitException({
+    required this.detail,
+    required this.rawBody,
+  });
+
+  static Map<String, dynamic> _asMap(dynamic value) {
+    if (value is Map<String, dynamic>) return Map<String, dynamic>.from(value);
+    if (value is Map) {
+      return value.map(
+        (key, val) => MapEntry(key.toString(), val),
+      );
+    }
+    return <String, dynamic>{};
+  }
+
+  static bool _isRenderableImageUrl(String value) {
+    final text = value.trim().toLowerCase();
+    return text.startsWith('http://') ||
+        text.startsWith('https://') ||
+        text.startsWith('data:image/');
+  }
+
+  Map<String, dynamic> get _root {
+    final direct = _asMap(detail);
+    final nested = _asMap(direct['detail']);
+    return nested.isNotEmpty ? nested : direct;
+  }
+
+  Map<String, dynamic> get duplicate =>
+      _asMap(_root['duplicate']);
+
+  Map<String, dynamic> get existingDocument =>
+      _asMap(_root['existing_document']);
+
+  Map<String, dynamic> get cleanup =>
+      _asMap(_root['cleanup']);
+
+  String? get existingPreviewUrl {
+    final dataUrl = (_root['existing_preview_data_url'] ?? '').toString().trim();
+    if (dataUrl.isNotEmpty && _isRenderableImageUrl(dataUrl)) return dataUrl;
+    final fromRoot = (_root['existing_preview_url'] ?? '').toString().trim();
+    if (fromRoot.isNotEmpty && _isRenderableImageUrl(fromRoot)) return fromRoot;
+    final doc = existingDocument;
+    for (final key in const [
+      'masked_url',
+      'maskedUrl',
+      'image_masked_url',
+      'maskedImageUrl',
+      'image_url',
+      'imageUrl',
+    ]) {
+      final value = (doc[key] ?? '').toString().trim();
+      if (value.isNotEmpty && _isRenderableImageUrl(value)) return value;
+    }
+    return null;
+  }
+
+  String get message => (_root['message'] ?? 'Duplicate outfit detected').toString();
+
+  @override
+  String toString() => 'DuplicateOutfitException: $message';
+}
+
 class AppwriteService extends ChangeNotifier {
   static const _lastUserIdKey = 'last_user_id';
   late Client client;
@@ -141,6 +208,16 @@ class AppwriteService extends ChangeNotifier {
           await _localStore.deletePendingOp(op.id);
           continue;
         }
+      } on DuplicateOutfitException catch (dup) {
+        if (op.entity == 'wardrobe' && op.op == 'create') {
+          debugPrint(
+            'Dropping duplicate pending create ${op.refId}: ${dup.message}',
+          );
+          await _localStore.deleteWardrobeItem(userId, op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+        break;
       } catch (_) {
         break;
       }
@@ -270,6 +347,7 @@ class AppwriteService extends ChangeNotifier {
     Map<String, dynamic> data, {
     String? userId,
     String? documentId,
+    bool forceSave = false,
   }) async {
     final response = await http.post(
       Uri.parse(_baseUrl),
@@ -279,8 +357,33 @@ class AppwriteService extends ChangeNotifier {
         'data': data,
         if (userId != null) 'user_id': userId,
         if (documentId != null) 'document_id': documentId,
+        if (forceSave) 'force_save': true,
       }),
     );
+
+    if (response.statusCode == 409) {
+      Map<String, dynamic> detail = <String, dynamic>{};
+      try {
+        final body = jsonDecode(response.body);
+        if (body is Map<String, dynamic>) {
+          if (body['detail'] is Map<String, dynamic>) {
+            detail = Map<String, dynamic>.from(body['detail'] as Map<String, dynamic>);
+          } else {
+            detail = Map<String, dynamic>.from(body);
+          }
+        } else if (body is Map) {
+          final map = body.map((key, value) => MapEntry(key.toString(), value));
+          if (map['detail'] is Map) {
+            detail = Map<String, dynamic>.from(
+              (map['detail'] as Map).map((k, v) => MapEntry(k.toString(), v)),
+            );
+          } else {
+            detail = Map<String, dynamic>.from(map);
+          }
+        }
+      } catch (_) {}
+      throw DuplicateOutfitException(detail: detail, rawBody: response.body);
+    }
 
     if (response.statusCode != 200) {
       throw Exception('Failed to create $resource: ${response.body}');
@@ -367,6 +470,8 @@ class AppwriteService extends ChangeNotifier {
                 "occasions": doc.data['occasions'],
                 "image_url": doc.data['image_url'],
                 "masked_url": doc.data['masked_url'],
+                "qdrant_point_id": doc.data['qdrant_point_id'],
+                "qdrantPointId": doc.data['qdrantPointId'] ?? doc.data['qdrant_point_id'],
                 "notes": doc.data['notes'],
                 "worn": doc.data['worn'] ?? 0,
                 "liked": doc.data['liked'] ?? false,
@@ -383,13 +488,81 @@ class AppwriteService extends ChangeNotifier {
     }
   }
 
-  Future<ProxyDocument> createWardrobeItem(Map<String, dynamic> data) async {
+  Future<Map<String, dynamic>?> getWardrobeItemById(String documentId) async {
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/outfits/$documentId'));
+      if (response.statusCode != 200) return null;
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final raw = Map<String, dynamic>.from(body['document'] ?? const {});
+      if (raw.isEmpty) return null;
+      return raw;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<DuplicateOutfitException?> checkWardrobeDuplicate(
+    Map<String, dynamic> data,
+  ) async {
+    final userId = await _requireUserId();
+    final response = await http.post(
+      Uri.parse('$_baseUrl/outfits/duplicate-check'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        'data': data,
+      }),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed duplicate check: ${response.body}');
+    }
+
+    final body = jsonDecode(response.body);
+    if (body is! Map) {
+      return null;
+    }
+    final mappedBody = body.map((key, value) => MapEntry(key.toString(), value));
+    final duplicate = mappedBody['duplicate'];
+    final duplicateMap = duplicate is Map
+        ? duplicate.map((key, value) => MapEntry(key.toString(), value))
+        : const <String, dynamic>{};
+    final isDuplicate = duplicateMap['is_duplicate'] == true;
+    if (!isDuplicate) {
+      return null;
+    }
+
+    final existing = mappedBody['existing_document'];
+    final existingMap = existing is Map
+        ? existing.map((key, value) => MapEntry(key.toString(), value))
+        : const <String, dynamic>{};
+
+    final detail = <String, dynamic>{
+      'message': 'Duplicate outfit detected',
+      'duplicate': duplicateMap,
+      'existing_document': existingMap,
+      'existing_preview_url': mappedBody['existing_preview_url'],
+      'existing_preview_data_url': mappedBody['existing_preview_data_url'],
+    };
+    return DuplicateOutfitException(detail: detail, rawBody: response.body);
+  }
+
+  Future<ProxyDocument> createWardrobeItem(
+    Map<String, dynamic> data, {
+    bool forceSave = false,
+  }) async {
     await _ensureLocalReady();
     final userId = await _requireUserId();
     await _syncPendingLocalChanges(userId);
 
     try {
-      return await _createDoc('outfits', data, userId: userId);
+      return await _createDoc(
+        'outfits',
+        data,
+        userId: userId,
+        forceSave: forceSave,
+      );
+    } on DuplicateOutfitException {
+      rethrow;
     } catch (_) {
       final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
       final localMap = Map<String, dynamic>.from(data)..['id'] = localId;

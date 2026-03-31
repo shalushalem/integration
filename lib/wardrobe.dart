@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:myapp/chat.dart';
 import 'package:myapp/services/appwrite_service.dart';
@@ -163,75 +164,537 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final cat = (item['cat'] ?? '').toString().trim();
     final notes = (item['notes'] ?? '').toString();
     final occasions = List<String>.from(item['occasions'] as List? ?? const <String>[]);
+    final rawImageBytes = item['rawImageBytes'] as Uint8List?;
     final imageBytes = item['imageBytes'] as Uint8List?;
 
     String? imageUrl = item['imageUrl'] as String?;
     String? maskedUrl = item['maskedUrl'] as String?;
+    bool forceSave = false;
+
+    try {
+      final duplicateProbePayload = _buildWardrobePayload(
+        name: name,
+        category: cat,
+        notes: notes,
+        occasions: occasions,
+      );
+      if (imageBytes != null) {
+        duplicateProbePayload['processed_image_base64'] = _encodeBytes(imageBytes);
+        duplicateProbePayload['image_base64'] = _encodeBytes(rawImageBytes ?? imageBytes);
+      }
+
+      _showToast('Searching duplicate items...');
+      final precheckDuplicate = await appwrite.checkWardrobeDuplicate(duplicateProbePayload);
+      if (precheckDuplicate != null) {
+        if (!mounted) return;
+        final proceed = await _confirmDuplicateProceed(
+          appwrite: appwrite,
+          dup: precheckDuplicate,
+          incomingName: name,
+          incomingBytes: imageBytes ?? rawImageBytes,
+          incomingUrl: maskedUrl ?? imageUrl,
+        );
+        if (!proceed) {
+          _showToast('Duplicate skipped');
+          return;
+        }
+        forceSave = true;
+      }
+    } catch (e) {
+      debugPrint('Duplicate precheck warning: $e');
+    }
 
     if (imageBytes != null) {
       try {
-        final removedBgB64 = await backend.removeBackground(base64Encode(imageBytes));
-        final maskedBytes = (removedBgB64 != null && removedBgB64.isNotEmpty)
-            ? base64Decode(removedBgB64)
-            : imageBytes;
-
-        final upload = await backend.uploadWardrobeImages(
-          fileId: 'wardrobe_${DateTime.now().millisecondsSinceEpoch}',
-          rawImageBytes: imageBytes,
-          maskedImageBytes: maskedBytes,
+        final upload = await _uploadWardrobeImages(
+          backend: backend,
+          rawBytes: rawImageBytes ?? imageBytes,
+          maskedBytes: imageBytes,
+          prefix: 'wardrobe',
         );
-
-        if (upload != null) {
-          if ((upload['raw_image_url'] ?? '').isNotEmpty) {
-            imageUrl = upload['raw_image_url'];
-          }
-          if ((upload['masked_image_url'] ?? '').isNotEmpty) {
-            maskedUrl = upload['masked_image_url'];
-          }
-        }
+        imageUrl = upload['raw_image_url'] ?? imageUrl;
+        maskedUrl = upload['masked_image_url'] ?? maskedUrl;
       } catch (e) {
         debugPrint('Wardrobe upload warning: $e');
       }
     }
 
     try {
-      final doc = await appwrite.createWardrobeItem({
-        'name': name,
-        'category': cat,
-        'occasions': occasions,
-        'notes': notes,
-        'worn': 0,
-        'liked': false,
-        if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
-        if (maskedUrl != null && maskedUrl.isNotEmpty) 'masked_url': maskedUrl,
-      });
+      final payload = _buildWardrobePayload(
+        name: name,
+        category: cat,
+        notes: notes,
+        occasions: occasions,
+        imageUrl: imageUrl,
+        maskedUrl: maskedUrl,
+      );
+      final doc = await appwrite.createWardrobeItem(
+        payload,
+        forceSave: forceSave,
+      );
 
       if (!mounted) return;
-
-      setState(() {
-        _wardrobe.insert(
-          0,
-          WardrobeItem(
-            id: (doc[r'$id'] ?? doc['id'] ?? item['id']).toString(),
-            name: (doc['name'] ?? name).toString(),
-            cat: (doc['category'] ?? cat).toString(),
-            occasions: doc['occasions'] != null
-                ? List<String>.from(doc['occasions'])
-                : occasions,
-            notes: (doc['notes'] ?? notes).toString(),
-            imageBytes: imageBytes,
-            imageUrl: (doc['image_url'] ?? doc['imageUrl'] ?? imageUrl)?.toString(),
-            maskedUrl: (doc['masked_url'] ?? doc['maskedUrl'] ?? maskedUrl)?.toString(),
-            worn: ((doc['worn'] ?? 0) as num).toInt(),
-            liked: (doc['liked'] ?? false) as bool,
-          ),
-        );
-      });
+      _insertWardrobeFromDoc(
+        doc: doc,
+        fallbackId: item['id']?.toString(),
+        fallbackName: name,
+        fallbackCategory: cat,
+        fallbackOccasions: occasions,
+        fallbackNotes: notes,
+        fallbackImageBytes: imageBytes,
+        fallbackImageUrl: imageUrl,
+        fallbackMaskedUrl: maskedUrl,
+      );
       _showToast('âœ“ "${name.isEmpty ? "Item" : name}" saved to wardrobe');
+    } on DuplicateOutfitException catch (dup) {
+      if (!mounted) return;
+      final useForceSave = await _confirmDuplicateProceed(
+        appwrite: appwrite,
+        dup: dup,
+        incomingName: name,
+        incomingBytes: imageBytes ?? rawImageBytes,
+        incomingUrl: maskedUrl ?? imageUrl,
+      );
+      if (!useForceSave) {
+        _showToast('Duplicate skipped');
+        return;
+      }
+
+      String? forceImageUrl = imageUrl;
+      String? forceMaskedUrl = maskedUrl;
+
+      if (imageBytes != null) {
+        try {
+          final upload = await _uploadWardrobeImages(
+            backend: backend,
+            rawBytes: rawImageBytes ?? imageBytes,
+            maskedBytes: imageBytes,
+            prefix: 'wardrobe_force',
+          );
+          forceImageUrl = upload['raw_image_url'] ?? forceImageUrl;
+          forceMaskedUrl = upload['masked_image_url'] ?? forceMaskedUrl;
+        } catch (e) {
+          debugPrint('Force upload warning: $e');
+        }
+      }
+
+      final forcedPayload = _buildWardrobePayload(
+        name: name,
+        category: cat,
+        notes: notes,
+        occasions: occasions,
+        imageUrl: forceImageUrl,
+        maskedUrl: forceMaskedUrl,
+      );
+      try {
+        final forcedDoc = await appwrite.createWardrobeItem(
+          forcedPayload,
+          forceSave: true,
+        );
+        if (!mounted) return;
+        _insertWardrobeFromDoc(
+          doc: forcedDoc,
+          fallbackId: item['id']?.toString(),
+          fallbackName: name,
+          fallbackCategory: cat,
+          fallbackOccasions: occasions,
+          fallbackNotes: notes,
+          fallbackImageBytes: imageBytes,
+          fallbackImageUrl: forceImageUrl,
+          fallbackMaskedUrl: forceMaskedUrl,
+        );
+        _showToast('Duplicate uploaded by your choice');
+      } on DuplicateOutfitException catch (forceDup) {
+        debugPrint('Force-save still conflicted: ${forceDup.rawBody}');
+        _showToast('Still blocked by duplicate check. Please try once more.');
+      }
     } catch (e) {
       debugPrint('Save wardrobe item failed: $e');
       _showToast('Could not save item');
     }
+  }
+
+  Future<bool> _confirmDuplicateProceed({
+    required AppwriteService appwrite,
+    required DuplicateOutfitException dup,
+    required String incomingName,
+    Uint8List? incomingBytes,
+    String? incomingUrl,
+  }) async {
+    final existing = dup.existingDocument;
+    final duplicateMeta = dup.duplicate;
+    final existingId =
+        (existing[r'$id'] ?? existing['id'] ?? duplicateMeta['point_id'] ?? duplicateMeta['id'] ?? '')
+            .toString()
+            .trim();
+    String duplicateName = (existing['name'] ?? existingId).toString();
+    String? existingImageUrl = dup.existingPreviewUrl ?? _pickBestImageUrl(existing);
+    if ((existingImageUrl == null || existingImageUrl.isEmpty) &&
+        existingId.isNotEmpty) {
+      final fetched = await appwrite.getWardrobeItemById(existingId);
+      if (fetched != null) {
+        existingImageUrl = _pickBestImageUrl(fetched);
+        final fetchedName = (fetched['name'] ?? '').toString().trim();
+        if (fetchedName.isNotEmpty) {
+          duplicateName = fetchedName;
+        }
+      }
+    }
+    if (existingImageUrl == null || existingImageUrl.isEmpty) {
+      try {
+        final allItems = await appwrite.getWardrobeItems();
+        Map<String, dynamic>? match;
+        final duplicatePointId = (duplicateMeta['point_id'] ?? duplicateMeta['id'] ?? '')
+            .toString()
+            .trim();
+        if (duplicatePointId.isNotEmpty) {
+          for (final row in allItems) {
+            final rowPointId =
+                (row['qdrant_point_id'] ?? row['qdrantPointId'] ?? '')
+                    .toString()
+                    .trim();
+            final rowId = (row['id'] ?? '').toString().trim();
+            if (rowPointId == duplicatePointId || rowId == duplicatePointId) {
+              match = row;
+              break;
+            }
+          }
+        }
+        if (match == null) {
+          final wantedCategory =
+              (existing['category'] ?? existing['cat'] ?? '').toString().trim().toLowerCase();
+          final wantedColor =
+              (existing['color_code'] ?? '').toString().trim().toLowerCase();
+          for (final row in allItems) {
+            final rowCategory = (row['category'] ?? '').toString().trim().toLowerCase();
+            final rowColor = (row['color_code'] ?? '').toString().trim().toLowerCase();
+            if (wantedCategory.isNotEmpty && rowCategory != wantedCategory) {
+              continue;
+            }
+            if (wantedColor.isNotEmpty && rowColor.isNotEmpty && rowColor != wantedColor) {
+              continue;
+            }
+            match = row;
+            break;
+          }
+        }
+        if (match != null) {
+          existingImageUrl = _pickBestImageUrl(match);
+          final matchName = (match['name'] ?? '').toString().trim();
+          if (matchName.isNotEmpty) {
+            duplicateName = matchName;
+          }
+        }
+      } catch (_) {}
+    }
+    if (duplicateName.trim().isEmpty) {
+      duplicateName = existingId;
+    }
+    if (existingImageUrl == null || existingImageUrl.isEmpty) {
+      debugPrint(
+        'Duplicate preview missing. existingId=$existingId reason=${duplicateMeta['reason']} raw=${dup.rawBody}',
+      );
+    }
+    final duplicateBytes = await _downloadImageBytes(existingImageUrl);
+    final useForceSave = await _showDuplicateDecisionDialog(
+      incomingName: incomingName,
+      incomingBytes: incomingBytes,
+      incomingUrl: incomingUrl,
+      duplicateName: duplicateName,
+      duplicateUrl: existingImageUrl,
+      duplicateBytes: duplicateBytes,
+    );
+    return useForceSave == true;
+  }
+
+  Future<Uint8List?> _downloadImageBytes(String? url) async {
+    final value = (url ?? '').trim();
+    if (value.isEmpty) return null;
+    final lower = value.toLowerCase();
+    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+      return null;
+    }
+    try {
+      final response = await http.get(Uri.parse(value));
+      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+        return response.bodyBytes;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, dynamic> _buildWardrobePayload({
+    required String name,
+    required String category,
+    required String notes,
+    required List<String> occasions,
+    String? imageUrl,
+    String? maskedUrl,
+  }) {
+    return {
+      'name': name,
+      'category': category,
+      'occasions': occasions,
+      'notes': notes,
+      'worn': 0,
+      'liked': false,
+      if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
+      if (maskedUrl != null && maskedUrl.isNotEmpty) 'masked_url': maskedUrl,
+    };
+  }
+
+  String? _pickBestImageUrl(Map<String, dynamic>? source) {
+    if (source == null || source.isEmpty) return null;
+    bool isRenderableImageUrl(String value) {
+      final text = value.trim().toLowerCase();
+      return text.startsWith('http://') ||
+          text.startsWith('https://') ||
+          text.startsWith('data:image/');
+    }
+    for (final key in const [
+      'existing_preview_data_url',
+      'existing_preview_url',
+      'masked_url',
+      'maskedUrl',
+      'image_masked_url',
+      'maskedImageUrl',
+      'image_url',
+      'imageUrl',
+    ]) {
+      final value = (source[key] ?? '').toString().trim();
+      if (value.isNotEmpty && isRenderableImageUrl(value)) return value;
+    }
+    return null;
+  }
+
+  Future<Map<String, String>> _uploadWardrobeImages({
+    required BackendService backend,
+    required Uint8List rawBytes,
+    required Uint8List maskedBytes,
+    required String prefix,
+  }) async {
+    final upload = await backend.uploadWardrobeImages(
+      fileId: '${prefix}_${DateTime.now().millisecondsSinceEpoch}',
+      rawImageBytes: rawBytes,
+      maskedImageBytes: maskedBytes,
+    );
+    if (upload == null) return <String, String>{};
+    return <String, String>{
+      'raw_image_url': (upload['raw_image_url'] ?? '').toString(),
+      'masked_image_url': (upload['masked_image_url'] ?? '').toString(),
+    };
+  }
+
+  void _insertWardrobeFromDoc({
+    required ProxyDocument doc,
+    required String fallbackName,
+    required String fallbackCategory,
+    required List<String> fallbackOccasions,
+    required String fallbackNotes,
+    String? fallbackId,
+    Uint8List? fallbackImageBytes,
+    String? fallbackImageUrl,
+    String? fallbackMaskedUrl,
+  }) {
+    setState(() {
+      _wardrobe.insert(
+        0,
+        WardrobeItem(
+          id: (doc[r'$id'] ?? doc['id'] ?? fallbackId ?? '').toString(),
+          name: (doc['name'] ?? fallbackName).toString(),
+          cat: (doc['category'] ?? fallbackCategory).toString(),
+          occasions: doc['occasions'] != null
+              ? List<String>.from(doc['occasions'])
+              : fallbackOccasions,
+          notes: (doc['notes'] ?? fallbackNotes).toString(),
+          imageBytes: fallbackImageBytes,
+          imageUrl: (doc['image_url'] ?? doc['imageUrl'] ?? fallbackImageUrl)
+              ?.toString(),
+          maskedUrl:
+              (doc['masked_url'] ?? doc['maskedUrl'] ?? fallbackMaskedUrl)
+                  ?.toString(),
+          worn: ((doc['worn'] ?? 0) as num).toInt(),
+          liked: (doc['liked'] ?? false) as bool,
+        ),
+      );
+    });
+  }
+
+  Future<bool?> _showDuplicateDecisionDialog({
+    required String incomingName,
+    Uint8List? incomingBytes,
+    String? incomingUrl,
+    required String duplicateName,
+    String? duplicateUrl,
+    Uint8List? duplicateBytes,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) {
+        final tokens = context.themeTokens;
+        final titleIncoming = incomingName.trim().isEmpty ? 'New upload' : incomingName;
+        final titleDuplicate =
+            duplicateName.trim().isEmpty ? 'Existing item' : duplicateName;
+
+        Widget preview(String? url, Uint8List? bytes) {
+          final normalizedUrl = (url ?? '').trim();
+          final hasDataUrl = normalizedUrl.toLowerCase().startsWith('data:image/');
+          final dataPayload = hasDataUrl
+              ? (normalizedUrl.contains(',')
+                  ? normalizedUrl.substring(normalizedUrl.indexOf(',') + 1)
+                  : normalizedUrl)
+              : '';
+          Uint8List? dataBytes;
+          if (hasDataUrl && dataPayload.isNotEmpty) {
+            try {
+              dataBytes = base64Decode(dataPayload);
+            } catch (_) {
+              dataBytes = null;
+            }
+          }
+          final hasNetworkUrl = (() {
+            final text = (url ?? '').trim().toLowerCase();
+            return text.startsWith('http://') || text.startsWith('https://');
+          })();
+          return Container(
+            height: 150,
+            decoration: BoxDecoration(
+              color: tokens.panel,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: tokens.cardBorder),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: (dataBytes != null)
+                ? Image.memory(
+                    dataBytes,
+                    fit: BoxFit.cover,
+                  )
+                : hasNetworkUrl
+                ? Image.network(
+                    normalizedUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) {
+                      if (bytes != null) {
+                        return Image.memory(bytes, fit: BoxFit.cover);
+                      }
+                      return Center(
+                        child: Text(
+                          'No preview',
+                          style: TextStyle(color: tokens.mutedText),
+                        ),
+                      );
+                    },
+                  )
+                : (bytes != null
+                    ? Image.memory(bytes, fit: BoxFit.cover)
+                    : Center(
+                        child: Text(
+                          'No preview',
+                          style: TextStyle(color: tokens.mutedText),
+                        ),
+                      )),
+          );
+        }
+
+        return AlertDialog(
+          backgroundColor: tokens.backgroundSecondary,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(
+            'Duplicate Found',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              color: tokens.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          content: SizedBox(
+            width: 320,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'A similar outfit already exists. Upload anyway?',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    color: tokens.mutedText,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Uploaded image',
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              color: tokens.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          preview(incomingUrl, incomingBytes),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Duplicate',
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              color: tokens.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          preview(duplicateUrl, duplicateBytes),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '$titleIncoming vs $titleDuplicate',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    color: tokens.mutedText,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(
+                'Skip',
+                style: TextStyle(fontFamily: 'Inter', color: tokens.mutedText),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: tokens.accent.primary,
+                foregroundColor: tokens.textPrimary,
+              ),
+              child: const Text('Upload anyway'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _toggleLikePersist(String id) async {
@@ -274,8 +737,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       context: context,
       barrierColor: t.backgroundPrimary.withValues(alpha: 0.7),
       builder: (_) => _AddItemModal(
-        onSave: (item) {
-          _saveNewItem(item);
+        onSave: (item) async {
+          await _saveNewItem(item);
         },
       ),
     );
@@ -1034,7 +1497,7 @@ enum _ModalStep { camera, detecting, results, editing }
 
 // â”€â”€ ADD ITEM MODAL â€” Camera embedded inside â”€â”€
 class _AddItemModal extends StatefulWidget {
-  final void Function(Map<String, dynamic> item) onSave;
+  final Future<void> Function(Map<String, dynamic> item) onSave;
   const _AddItemModal({required this.onSave});
 
   @override
@@ -1060,6 +1523,7 @@ class _AddItemModalState extends State<_AddItemModal>
   // â”€â”€ Flow state â”€â”€
   _ModalStep _step = _ModalStep.camera;
   Uint8List? _capturedBytes;
+  Uint8List? _capturedRawBytes;
   List<_DetectedItem> _detected = [];
   String? _detectError;
 
@@ -1128,6 +1592,7 @@ class _AddItemModalState extends State<_AddItemModal>
       final bytes = await File(xfile.path).readAsBytes();
       setState(() {
         _capturedBytes = bytes;
+        _capturedRawBytes = bytes;
         _step = _ModalStep.detecting;
         _detectError = null;
       });
@@ -1147,6 +1612,7 @@ class _AddItemModalState extends State<_AddItemModal>
       if (!mounted) return;
       setState(() {
         _capturedBytes = bytes;
+        _capturedRawBytes = bytes;
         _step = _ModalStep.detecting;
         _detectError = null;
       });
@@ -1164,7 +1630,23 @@ class _AddItemModalState extends State<_AddItemModal>
   Future<void> _runDetection(Uint8List bytes) async {
     try {
       final backend = Provider.of<BackendService>(context, listen: false);
-      final analysis = await backend.analyzeImage(bytes);
+      final originalBase64 = base64Encode(bytes);
+      final bgInfo = await backend.removeBackgroundDetailed(originalBase64);
+      final bgRemovedBase64 = bgInfo?['image_base64']?.toString();
+      final bgRemoved = bgInfo?['bg_removed'] == true;
+      final bgReason = bgInfo?['fallback_reason']?.toString();
+      if (!bgRemoved || bgRemovedBase64 == null || bgRemovedBase64.isEmpty) {
+        throw Exception('Background removal failed before analyze-image: ${bgReason ?? 'unknown'}');
+      }
+      final removedBytes = base64Decode(bgRemovedBase64);
+      if (mounted) {
+        setState(() {
+          _capturedBytes = removedBytes;
+          _capturedRawBytes = bytes;
+        });
+      }
+
+      final analysis = await backend.analyzeImageFromBase64(bgRemovedBase64);
       if (analysis == null) {
         throw Exception('Backend returned null for analyze-image');
       }
@@ -1180,7 +1662,8 @@ class _AddItemModalState extends State<_AddItemModal>
         payload = payload['items'] ??
             payload['detected_items'] ??
             payload['garments'] ??
-            payload['results'];
+            payload['results'] ??
+            [payload];
       }
 
       if (payload is! List) {
@@ -1195,7 +1678,7 @@ class _AddItemModalState extends State<_AddItemModal>
                 id: r['id']?.toString() ?? UniqueKey().toString(),
                 name: (r['name'] ?? 'Unknown').toString(),
                 category: _DetectedItem.mapCategory((r['category'] ?? '').toString()),
-                color: r['color']?.toString(),
+                color: (r['color'] ?? r['color_code'])?.toString(),
                 pattern: r['pattern']?.toString(),
                 selected: true,
               ))
@@ -1209,8 +1692,12 @@ class _AddItemModalState extends State<_AddItemModal>
       }
     } catch (e) {
       if (mounted) {
+        final err = e.toString();
+        final msg = err.contains('Background removal failed')
+            ? err.replaceFirst('Exception: ', '')
+            : 'Detection failed. Please retake with better lighting.';
         setState(() {
-        _detectError = 'Detection failed. Please retake with better lighting.';
+        _detectError = msg;
         _step = _ModalStep.results;
         _detected = [];
       });
@@ -1221,6 +1708,7 @@ class _AddItemModalState extends State<_AddItemModal>
   void _retake() => setState(() {
     _step = _ModalStep.camera;
     _capturedBytes = null;
+    _capturedRawBytes = null;
     _detected = [];
     _detectError = null;
   });
@@ -1250,19 +1738,20 @@ class _AddItemModalState extends State<_AddItemModal>
     }
   }
 
-  void _confirmAndSave() {
+  Future<void> _confirmAndSave() async {
     final selected = _detected.where((i) => i.selected).toList();
     if (selected.isEmpty) { _toast('Select at least one item'); return; }
     HapticFeedback.lightImpact();
     Navigator.of(context).pop();
     for (final item in selected) {
-      widget.onSave({
+      await widget.onSave({
         'id': DateTime.now().millisecondsSinceEpoch.toString(),
         'name': item.name,
         'cat': item.category,
         'occasions': <String>[],
         'notes': [item.color, item.pattern]
             .where((v) => v != null && v.isNotEmpty && v != 'null').join(', '),
+        'rawImageBytes': _capturedRawBytes ?? _capturedBytes,
         'imageBytes': _capturedBytes,
         'imageUrl': null,
         'maskedUrl': null,
@@ -1272,18 +1761,19 @@ class _AddItemModalState extends State<_AddItemModal>
     }
   }
 
-  void _manualSave() {
+  Future<void> _manualSave() async {
     if (_nameCtrl.text.trim().isEmpty || _selectedCat.isEmpty) {
       _toast('Name and category are required');
       return;
     }
     Navigator.of(context).pop();
-    widget.onSave({
+    await widget.onSave({
       'id': DateTime.now().millisecondsSinceEpoch.toString(),
       'name': _nameCtrl.text.trim(),
       'cat': _selectedCat,
       'occasions': List<String>.from(_selectedOccs),
       'notes': _notesCtrl.text.trim(),
+      'rawImageBytes': _capturedRawBytes ?? _capturedBytes,
       'imageBytes': _capturedBytes,
       'imageUrl': null,
       'maskedUrl': null,
@@ -1974,8 +2464,8 @@ class _AddItemModalState extends State<_AddItemModal>
     final VoidCallback? primaryAction = switch (_step) {
       _ModalStep.camera    => null,
       _ModalStep.detecting => null,
-      _ModalStep.results   => (selCount == 0 || _detected.isEmpty) ? null : _confirmAndSave,
-      _ModalStep.editing   => _editingIndex != null ? _saveEditedItem : _manualSave,
+      _ModalStep.results   => (selCount == 0 || _detected.isEmpty) ? null : () { _confirmAndSave(); },
+      _ModalStep.editing   => _editingIndex != null ? _saveEditedItem : () { _manualSave(); },
     };
 
     return Container(

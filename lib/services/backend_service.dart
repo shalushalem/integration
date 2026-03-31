@@ -116,15 +116,27 @@ class BackendService {
   //  WARDROBE: VISION & BACKGROUND REMOVAL
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  Future<String?> removeBackground(String base64Image) async {
+  Future<Map<String, dynamic>?> removeBackgroundDetailed(String base64Image) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/remove-bg'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'image_base64': base64Image}),
-      );
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body)['image_base64'];
+      const candidates = <String>[
+        '/api/background/remove-bg',
+        '/api/remove-bg',
+      ];
+
+      for (final path in candidates) {
+        final response = await http.post(
+          Uri.parse('$baseUrl$path'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'image_base64': base64Image}),
+        );
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          return {
+            'image_base64': data['image_base64']?.toString(),
+            'bg_removed': data['bg_removed'] == true,
+            'fallback_reason': data['fallback_reason']?.toString(),
+          };
+        }
       }
       return null;
     } catch (e) {
@@ -132,10 +144,19 @@ class BackendService {
     }
   }
 
+  Future<String?> removeBackground(String base64Image) async {
+    final info = await removeBackgroundDetailed(base64Image);
+    return info?['image_base64']?.toString();
+  }
+
   // ðŸš€ FIXED: Now converts Uint8List to Base64 and sends to the NEW JSON endpoint!
   Future<Map<String, dynamic>?> analyzeImage(Uint8List imageBytes) async {
+    final base64String = base64Encode(imageBytes);
+    return analyzeImageFromBase64(base64String);
+  }
+
+  Future<Map<String, dynamic>?> analyzeImageFromBase64(String base64String) async {
     try {
-      final base64String = base64Encode(imageBytes);
       const candidates = <String>[
         '/api/analyze-image',
         '/api/vision/analyze-image',

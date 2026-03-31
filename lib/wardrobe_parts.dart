@@ -531,33 +531,44 @@ class _AddItemModalState extends State<_AddItemModal>
       });
 
       final backend = BackendService();
-      String base64Image = base64Encode(bytes);
+      final base64Image = base64Encode(bytes);
 
-      // 1. Remove the Background 
-      final bgResult = await backend.removeBackground(base64Image);
-      if (bgResult != null && mounted) {
+      // 1. Remove background first (required).
+      final bgInfo = await backend.removeBackgroundDetailed(base64Image);
+      final bgRemoved = bgInfo?['bg_removed'] == true;
+      final bgResult = bgInfo?['image_base64']?.toString();
+      final bgReason = bgInfo?['fallback_reason']?.toString();
+      if (!bgRemoved || bgResult == null || bgResult.isEmpty) {
+        throw Exception('Background removal failed: ${bgReason ?? 'unknown'}');
+      }
+
+      if (mounted) {
         setState(() {
-          _itemImageBytes = base64Decode(bgResult); 
+          _itemImageBytes = base64Decode(bgResult);
           _processStatus = 'Analyzing fabric & color...';
         });
       }
 
-      // 2. Analyze the Garment 
-      final analysis = await backend.analyzeImage(_itemImageBytes!);
+      // 2. Analyze the garment using processed image.
+      final analysis = await backend.analyzeImageFromBase64(bgResult);
       
       if (analysis != null && mounted) {
-        setState(() {
-          _aiData = analysis; // Holds secret Color & Pattern payloads!
+        final payload = (analysis['data'] is Map<String, dynamic>)
+            ? Map<String, dynamic>.from(analysis['data'] as Map)
+            : Map<String, dynamic>.from(analysis);
 
-          _nameCtrl.text = analysis['item_name'] ?? 'New Item';
+        setState(() {
+          _aiData = payload;
+
+          _nameCtrl.text = payload['name']?.toString() ?? 'New Item';
           
-          String aiCat = analysis['app_category'] ?? '';
+          String aiCat = payload['category']?.toString() ?? '';
           if (_cats.contains(aiCat)) {
             _selectedCat = aiCat;
           }
           
-          if (analysis['sub_category'] != null) {
-             String sub = analysis['sub_category'].toString();
+          if (payload['sub_category'] != null) {
+             String sub = payload['sub_category'].toString();
              _subCategoryCtrl.text = sub.substring(0, 1).toUpperCase() + sub.substring(1);
           }
           
@@ -568,8 +579,11 @@ class _AddItemModalState extends State<_AddItemModal>
     } catch (e) {
       debugPrint("Image Process Error: $e");
       if (!mounted) return;
+      final msg = e.toString().contains('Background removal failed')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : 'Unable to process image.';
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to process image.')),
+        SnackBar(content: Text(msg)),
       );
     } finally {
       if (mounted) {
