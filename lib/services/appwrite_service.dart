@@ -23,7 +23,10 @@ class ProxyDocument {
 
   factory ProxyDocument.fromApi(Map<String, dynamic> rawMap) {
     final mapped = Map<String, dynamic>.from(rawMap);
-    final id = (mapped[r'$id'] ?? mapped['id'] ?? '').toString();
+    final id = (mapped[r'$id'] ?? mapped['id'] ?? '').toString().trim();
+    if (id.isEmpty) {
+      throw const FormatException('Document is missing required id');
+    }
     final data = <String, dynamic>{};
 
     mapped.forEach((key, value) {
@@ -67,10 +70,15 @@ class DuplicateOutfitException implements Exception {
   }
 
   static bool _isRenderableImageUrl(String value) {
-    final text = value.trim().toLowerCase();
-    return text.startsWith('http://') ||
-        text.startsWith('https://') ||
-        text.startsWith('data:image/');
+    final text = value.trim();
+    if (text.isEmpty || text.contains(RegExp(r'\s'))) return false;
+    final lower = text.toLowerCase();
+    if (lower.startsWith('data:image/')) {
+      return lower.contains(';base64,');
+    }
+    final uri = Uri.tryParse(text);
+    if (uri == null) return false;
+    return uri.hasScheme && (uri.scheme == 'http' || uri.scheme == 'https');
   }
 
   Map<String, dynamic> get _root {
@@ -114,6 +122,16 @@ class DuplicateOutfitException implements Exception {
   String toString() => 'DuplicateOutfitException: $message';
 }
 
+class _HttpStatusException implements Exception {
+  final int statusCode;
+  final String body;
+
+  const _HttpStatusException(this.statusCode, this.body);
+
+  @override
+  String toString() => 'HttpStatusException($statusCode): $body';
+}
+
 class AppwriteService extends ChangeNotifier {
   static const _lastUserIdKey = 'last_user_id';
   late Client client;
@@ -122,6 +140,7 @@ class AppwriteService extends ChangeNotifier {
   late String _baseUrl;
   final LocalDataStore _localStore = LocalDataStore();
   bool _localReady = false;
+  static const Set<int> _retryableStatusCodes = {408, 429};
 
   AppwriteService() {
     client = Client()
@@ -229,6 +248,7 @@ class AppwriteService extends ChangeNotifier {
             await _localStore.deletePendingOp(op.id);
             continue;
           }
+          throw _HttpStatusException(response.statusCode, response.body);
         }
       } on DuplicateOutfitException catch (dup) {
         if (op.entity == 'wardrobe' && op.op == 'create') {
@@ -240,7 +260,12 @@ class AppwriteService extends ChangeNotifier {
           continue;
         }
         break;
-      } catch (_) {
+      } catch (e) {
+        if (_isPermanentSyncError(e)) {
+          debugPrint('Dropping broken offline op ${op.id}: $e');
+          await _dropBrokenPendingOp(userId, op);
+          continue;
+        }
         break;
       }
     }
@@ -255,6 +280,18 @@ class AppwriteService extends ChangeNotifier {
       return user;
     } catch (e) {
       debugPrint("No active session or error: $e");
+      return null;
+    }
+  }
+
+  Future<String?> getBackendJwtToken() async {
+    try {
+      final jwt = await account.createJWT();
+      final token = jwt.jwt.trim();
+      if (token.isEmpty) return null;
+      return token;
+    } catch (e) {
+      debugPrint('Failed to refresh backend token: $e');
       return null;
     }
   }
@@ -347,6 +384,27 @@ class AppwriteService extends ChangeNotifier {
         text.contains('handshakeexception');
   }
 
+  bool _isPermanentSyncError(Object error) {
+    if (error is DuplicateOutfitException) return true;
+    if (error is FormatException) return true;
+    if (error is _HttpStatusException) {
+      final status = error.statusCode;
+      if (status >= 400 && status < 500) {
+        return !_retryableStatusCodes.contains(status);
+      }
+    }
+    return false;
+  }
+
+  Future<void> _dropBrokenPendingOp(String userId, PendingLocalOp op) async {
+    if (op.entity == 'wardrobe') {
+      await _localStore.deleteWardrobeItem(userId, op.refId);
+    } else if (op.entity == 'saved_board') {
+      await _localStore.deleteBoard(userId, op.refId);
+    }
+    await _localStore.deletePendingOp(op.id);
+  }
+
   Uri _resourceUri(String resource, {Map<String, String>? query}) {
     final uri = Uri.parse('$_baseUrl/$resource');
     if (query == null || query.isEmpty) return uri;
@@ -435,7 +493,7 @@ class AppwriteService extends ChangeNotifier {
     }
 
     if (response.statusCode != 200) {
-      throw Exception('Failed to create $resource: ${response.body}');
+      throw _HttpStatusException(response.statusCode, response.body);
     }
     final body = jsonDecode(response.body) as Map<String, dynamic>;
     return ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
@@ -456,7 +514,7 @@ class AppwriteService extends ChangeNotifier {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('Failed to update $resource: ${response.body}');
+      throw _HttpStatusException(response.statusCode, response.body);
     }
     final body = jsonDecode(response.body) as Map<String, dynamic>;
     return ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
@@ -469,7 +527,7 @@ class AppwriteService extends ChangeNotifier {
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
     if (response.statusCode != 200) {
-      throw Exception('Failed to delete $resource: ${response.body}');
+      throw _HttpStatusException(response.statusCode, response.body);
     }
   }
 
@@ -682,7 +740,10 @@ class AppwriteService extends ChangeNotifier {
       return created;
     } on DuplicateOutfitException {
       rethrow;
-    } catch (_) {
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
       final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
       final localMap = Map<String, dynamic>.from(data)..['id'] = localId;
       await _localStore.upsertWardrobeItem(userId, localMap);
@@ -751,7 +812,10 @@ class AppwriteService extends ChangeNotifier {
       final updated = await _updateDoc('outfits', documentId, data);
       await _localStore.upsertWardrobeItem(userId, _wardrobeDocToLocalMap(updated));
       return updated;
-    } catch (_) {
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
       final cached = await _localStore.loadWardrobeItems(userId);
       final existing = cached
           .where((i) => (i['id'] ?? '').toString() == documentId)
@@ -798,7 +862,10 @@ class AppwriteService extends ChangeNotifier {
     try {
       await _deleteDoc('outfits', documentId);
       await _syncPendingLocalChanges(userId);
-    } catch (_) {
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
       await _localStore.addPendingOp(
         userId: userId,
         entity: 'wardrobe',

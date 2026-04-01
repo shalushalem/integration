@@ -3,11 +3,14 @@ import 'dart:typed_data'; // ðŸš€ Added this so it understands Uint8List!
 import 'package:http/http.dart' as http;
 import 'package:myapp/config/env.dart';
 
+typedef TokenRefresher = Future<String?> Function();
+
 class BackendService {
-  BackendService({this.authToken});
+  BackendService({this.authToken, this.refreshAuthToken});
 
   final String baseUrl = Env.backendApiUrl;
   String? authToken;
+  final TokenRefresher? refreshAuthToken;
 
   void setAuthToken(String? token) {
     authToken = (token ?? '').trim().isEmpty ? null : token!.trim();
@@ -29,6 +32,82 @@ class BackendService {
     };
   }
 
+  Future<http.Response> _postJsonWithAuthRetry(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    Future<http.Response> doPost(Map<String, String> headers) {
+      return http.post(
+        Uri.parse('$baseUrl$path'),
+        headers: headers,
+        body: jsonEncode(body),
+      );
+    }
+
+    var response = await doPost(_jsonHeaders());
+    if (response.statusCode == 401 && refreshAuthToken != null) {
+      final refreshed = (await refreshAuthToken!())?.trim() ?? '';
+      if (refreshed.isNotEmpty) {
+        setAuthToken(refreshed);
+        response = await doPost(_jsonHeaders());
+      }
+    }
+    return response;
+  }
+
+  Future<http.Response> _getWithAuthRetry(String path) async {
+    Future<http.Response> doGet(Map<String, String> headers) {
+      return http.get(Uri.parse('$baseUrl$path'), headers: headers);
+    }
+
+    var response = await doGet(_authHeaders());
+    if (response.statusCode == 401 && refreshAuthToken != null) {
+      final refreshed = (await refreshAuthToken!())?.trim() ?? '';
+      if (refreshed.isNotEmpty) {
+        setAuthToken(refreshed);
+        response = await doGet(_authHeaders());
+      }
+    }
+    return response;
+  }
+
+  List<String> _toStringList(dynamic value) {
+    if (value is List) {
+      return value
+          .map((e) => e?.toString().trim() ?? '')
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+    if (value is String) {
+      final text = value.trim();
+      if (text.isEmpty) return const <String>[];
+      if (text.contains(',')) {
+        return text
+            .split(',')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      }
+      return <String>[text];
+    }
+    return const <String>[];
+  }
+
+  String? _asOptionalActionString(dynamic value) {
+    if (value is String) {
+      final v = value.trim();
+      return v.isEmpty ? null : v;
+    }
+    if (value is List) {
+      final joined = value
+          .map((e) => e?.toString().trim() ?? '')
+          .where((e) => e.isNotEmpty)
+          .join(',');
+      return joined.isEmpty ? null : joined;
+    }
+    return null;
+  }
+
   // --- Chat & Styling Engine ---
   Future<Map<String, dynamic>> sendChatQuery(
     String query,
@@ -42,24 +121,20 @@ class BackendService {
     String? moduleContext,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/text'),
-        headers: _jsonHeaders(),
-        body: jsonEncode({
-          'messages': [
-            ...chatHistory,
-            {'role': 'user', 'content': query},
-          ],
-          'language': 'en',
-          'current_memory': currentMemory,
-          'user_id': userId,
-          'user_profile': userProfile ?? const <String, dynamic>{},
-          'wardrobe_items':
-              wardrobeItems ?? fetchedWardrobe ?? const <Map<String, dynamic>>[],
-          if (moduleContext != null && moduleContext.trim().isNotEmpty)
-            'module_context': moduleContext.trim(),
-        }),
-      );
+      final response = await _postJsonWithAuthRetry('/api/text', {
+        'messages': [
+          ...chatHistory,
+          {'role': 'user', 'content': query},
+        ],
+        'language': 'en',
+        'current_memory': currentMemory,
+        'user_id': userId,
+        'user_profile': userProfile ?? const <String, dynamic>{},
+        'wardrobe_items':
+            wardrobeItems ?? fetchedWardrobe ?? const <Map<String, dynamic>>[],
+        if (moduleContext != null && moduleContext.trim().isNotEmpty)
+          'module_context': moduleContext.trim(),
+      });
 
       if (response.statusCode == 200) {
         final dynamic decoded = jsonDecode(response.body);
@@ -83,12 +158,8 @@ class BackendService {
         }
         String cleanText = rawText;
 
-        List<dynamic> extractedChips = data['chips'] ?? [];
-        String? extractedBoardData =
-            (data['board_ids'] != null &&
-                data['board_ids'].toString().isNotEmpty)
-            ? data['board_ids']
-            : null;
+        List<String> extractedChips = _toStringList(data['chips']);
+        String? extractedBoardData = _asOptionalActionString(data['board_ids']);
         String? extractedPackData;
         String hiddenMenuText = "";
 
@@ -99,6 +170,7 @@ class BackendService {
               .group(1)!
               .split(',')
               .map((e) => e.trim())
+              .where((e) => e.isNotEmpty)
               .toList();
           cleanText = cleanText.replaceAll(chipsMatch.group(0)!, '').trim();
         }
@@ -106,20 +178,20 @@ class BackendService {
         RegExp boardRegex = RegExp(r'\[STYLE_BOARD:\s*(.*?)\]');
         Match? boardMatch = boardRegex.firstMatch(cleanText);
         if (boardMatch != null) {
-          extractedBoardData = boardMatch.group(1);
+          extractedBoardData = _asOptionalActionString(boardMatch.group(1));
           cleanText = cleanText.replaceAll(boardMatch.group(0)!, '').trim();
         }
 
         RegExp packRegex = RegExp(r'\[PACK_LIST:\s*(.*?)\]');
         Match? packMatch = packRegex.firstMatch(cleanText);
         if (packMatch != null) {
-          extractedPackData = packMatch.group(1);
+          extractedPackData = _asOptionalActionString(packMatch.group(1));
           hiddenMenuText = cleanText.replaceAll(packMatch.group(0)!, '').trim();
           cleanText = "I've prepared your custom Packing Menu!";
         }
 
         data['message'] = {'content': cleanText};
-        data['chips'] = extractedChips;
+        data['chips'] = List<String>.from(extractedChips);
         data['board_ids'] = extractedBoardData;
         data['pack_ids'] = extractedPackData;
         data['full_menu_text'] = hiddenMenuText;
@@ -147,11 +219,9 @@ class BackendService {
       ];
 
       for (final path in candidates) {
-        final response = await http.post(
-          Uri.parse('$baseUrl$path'),
-          headers: _jsonHeaders(),
-          body: jsonEncode({'image_base64': base64Image}),
-        );
+        final response = await _postJsonWithAuthRetry(path, {
+          'image_base64': base64Image,
+        });
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
           return {
@@ -188,11 +258,9 @@ class BackendService {
       ];
 
       for (final path in candidates) {
-        final response = await http.post(
-          Uri.parse('$baseUrl$path'),
-          headers: _jsonHeaders(),
-          body: jsonEncode({'image_base64': base64String}),
-        );
+        final response = await _postJsonWithAuthRetry(path, {
+          'image_base64': base64String,
+        });
 
         if (response.statusCode == 200) {
           return jsonDecode(response.body) as Map<String, dynamic>;
@@ -214,16 +282,12 @@ class BackendService {
     int maxTokens = 380,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/anthropic'),
-        headers: _jsonHeaders(),
-        body: jsonEncode({
-          'model': model,
-          'max_tokens': maxTokens,
-          if (system != null && system.isNotEmpty) 'system': system,
-          'messages': messages,
-        }),
-      );
+      final response = await _postJsonWithAuthRetry('/api/anthropic', {
+        'model': model,
+        'max_tokens': maxTokens,
+        if (system != null && system.isNotEmpty) 'system': system,
+        'messages': messages,
+      });
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
@@ -239,10 +303,9 @@ class BackendService {
     required double longitude,
   }) async {
     try {
-      final uri = Uri.parse(
-        '$baseUrl/api/weather?latitude=$latitude&longitude=$longitude',
+      final response = await _getWithAuthRetry(
+        '/api/weather?latitude=$latitude&longitude=$longitude',
       );
-      final response = await http.get(uri, headers: _authHeaders());
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       }
@@ -257,14 +320,10 @@ class BackendService {
     required Uint8List imageBytes,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/uploads/avatar'),
-        headers: _jsonHeaders(),
-        body: jsonEncode({
-          'user_id': userId,
-          'image_base64': base64Encode(imageBytes),
-        }),
-      );
+      final response = await _postJsonWithAuthRetry('/api/uploads/avatar', {
+        'user_id': userId,
+        'image_base64': base64Encode(imageBytes),
+      });
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         return data['avatar_url']?.toString();
@@ -281,15 +340,11 @@ class BackendService {
     required Uint8List maskedImageBytes,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/uploads/wardrobe'),
-        headers: _jsonHeaders(),
-        body: jsonEncode({
-          'file_id': fileId,
-          'raw_image_base64': base64Encode(rawImageBytes),
-          'masked_image_base64': base64Encode(maskedImageBytes),
-        }),
-      );
+      final response = await _postJsonWithAuthRetry('/api/uploads/wardrobe', {
+        'file_id': fileId,
+        'raw_image_base64': base64Encode(rawImageBytes),
+        'masked_image_base64': base64Encode(maskedImageBytes),
+      });
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         return {
@@ -309,10 +364,7 @@ class BackendService {
     final id = taskId.trim();
     if (id.isEmpty) return null;
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/api/tasks/$id'),
-        headers: _authHeaders(),
-      );
+      final response = await _getWithAuthRetry('/api/tasks/$id');
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         if (decoded is Map<String, dynamic>) return decoded;

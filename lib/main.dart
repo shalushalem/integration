@@ -82,7 +82,12 @@ class MyApp extends StatelessWidget {
         ),
         // Python AI Backend Service
         Provider<BackendService>(
-          create: (_) => BackendService(),
+          create: (context) => BackendService(
+            refreshAuthToken: () async {
+              final appwrite = context.read<AppwriteService>();
+              return appwrite.getBackendJwtToken();
+            },
+          ),
         ),
       ],
       child: Consumer<ThemeController>(
