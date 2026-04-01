@@ -186,8 +186,8 @@ class BackendService {
         Match? packMatch = packRegex.firstMatch(cleanText);
         if (packMatch != null) {
           extractedPackData = _asOptionalActionString(packMatch.group(1));
-          hiddenMenuText = cleanText.replaceAll(packMatch.group(0)!, '').trim();
-          cleanText = "I've prepared your custom Packing Menu!";
+          cleanText = cleanText.replaceAll(packMatch.group(0)!, '').trim();
+          hiddenMenuText = cleanText;
         }
 
         data['message'] = {'content': cleanText};

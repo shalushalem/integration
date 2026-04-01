@@ -530,7 +530,7 @@ class _AddItemModalState extends State<_AddItemModal>
         _aiData = null; 
       });
 
-      final backend = BackendService();
+      final backend = Provider.of<BackendService>(context, listen: false);
       final base64Image = base64Encode(bytes);
 
       // 1. Remove background first (required).
@@ -611,7 +611,7 @@ class _AddItemModalState extends State<_AddItemModal>
 
     try {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      final backend = BackendService();
+      final backend = Provider.of<BackendService>(context, listen: false);
 
       String fileId = DateTime.now().millisecondsSinceEpoch.toString(); 
       

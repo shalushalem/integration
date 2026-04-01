@@ -81,13 +81,12 @@ class MyApp extends StatelessWidget {
           create: (_) => AppwriteService(),
         ),
         // Python AI Backend Service
-        Provider<BackendService>(
-          create: (context) => BackendService(
+        ProxyProvider<AppwriteService, BackendService>(
+          update: (context, appwrite, previous) => BackendService(
             refreshAuthToken: () async {
-              final appwrite = context.read<AppwriteService>();
-              return appwrite.getBackendJwtToken();
+              return await appwrite.getBackendJwtToken();
             },
-          ),
+          )..setAuthToken(previous?.authToken),
         ),
       ],
       child: Consumer<ThemeController>(
@@ -186,11 +185,14 @@ class _MainNavigationShellState extends State<MainNavigationShell>
   );
 
   Widget _pageForIndex(int index) {
+    if (index < 0 || index >= _pages.length) {
+      return const Center(child: Text('Feature in development'));
+    }
     return _pages[index] ??= switch (index) {
       0 => const _HomePageHost(),
       1 => const WardrobeScreen(),
       3 => const BoardsScreen(),
-      _ => const SizedBox.shrink(),
+      _ => const Center(child: Text('Feature in development')),
     };
   }
 

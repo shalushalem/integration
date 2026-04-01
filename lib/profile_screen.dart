@@ -451,7 +451,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
 
       // 1. Upload to Cloudflare R2 if a new image was picked
       if (_avatarBytes != null && _avatarBytes != _savedAvatarBytes) {
-        final backend = BackendService();
+        final backend = Provider.of<BackendService>(context, listen: false);
         final uploadedUrl = await backend.uploadAvatar(
           userId: userId,
           imageBytes: _avatarBytes!,
