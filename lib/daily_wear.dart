@@ -819,7 +819,12 @@ class _DailyWearScreenState extends State<DailyWearScreen>
   }
 
   void _wearOutfit(String outfitId, {bool closeModal = false}) {
-    final outfit = _allOutfits.firstWhere((o) => o['id'] == outfitId);
+    final index = _allOutfits.indexWhere((o) => o['id'] == outfitId);
+    if (index < 0) {
+      _showToast('Outfit not found');
+      return;
+    }
+    final outfit = _allOutfits[index];
     HapticFeedback.lightImpact();
     setState(() {
       _wornOutfitId = outfitId;
@@ -1090,7 +1095,10 @@ class _DailyWearScreenState extends State<DailyWearScreen>
 
   Map<String, dynamic> get _selectedTryOnOutfit {
     final id = _tryOnOutfitId ?? _currentOutfit['id'];
-    return _allOutfits.firstWhere((outfit) => outfit['id'] == id);
+    final index = _allOutfits.indexWhere((outfit) => outfit['id'] == id);
+    if (index >= 0) return _allOutfits[index];
+    if (_allOutfits.isNotEmpty) return _allOutfits.first;
+    return Map<String, dynamic>.from(_currentOutfit);
   }
 
   Color _parseHexColor(String hex) {

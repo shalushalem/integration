@@ -31,8 +31,12 @@ Future<void> main() async {
   // Ensure Flutter bindings are initialized before calling async methods
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load the .env file
-  await dotenv.load(fileName: ".env");
+  // Load environment config, but don't crash app startup if file is missing.
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint('Warning: failed to load .env, using defaults: $e');
+  }
 
   runApp(const MyApp());
 }
@@ -1069,7 +1073,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
   // FIXED: Added Try-Catch block to ensure _isLoading is disabled even on error
   Future<void> _checkAuth() async {
     try {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final appwrite = context.read<AppwriteService>();
       
       // Check if Appwrite has a saved session
       final user = await appwrite.getCurrentUser();

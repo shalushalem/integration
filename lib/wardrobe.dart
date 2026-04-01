@@ -699,7 +699,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
 
   Future<void> _toggleLikePersist(String id) async {
     final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    final item = _wardrobe.firstWhere((e) => e.id == id);
+    final index = _wardrobe.indexWhere((e) => e.id == id);
+    if (index < 0) return;
+    final item = _wardrobe[index];
     final previous = item.liked;
     setState(() => item.liked = !item.liked);
     _showToast(
@@ -718,7 +720,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
 
   Future<void> _logWearPersist(String id) async {
     final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    final item = _wardrobe.firstWhere((e) => e.id == id);
+    final index = _wardrobe.indexWhere((e) => e.id == id);
+    if (index < 0) return;
+    final item = _wardrobe[index];
     final previous = item.worn;
     setState(() => item.worn = previous + 1);
     _showToast('âœ“ Logged a wear for "${item.name}"');
@@ -758,7 +762,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
 
   void _openItemDetail(String id) {
     final t = context.themeTokens;
-    final item = _wardrobe.firstWhere((i) => i.id == id);
+    final index = _wardrobe.indexWhere((i) => i.id == id);
+    if (index < 0) {
+      _showToast('Item no longer available');
+      return;
+    }
+    final item = _wardrobe[index];
     showDialog(
       context: context,
       barrierColor: t.backgroundPrimary.withValues(alpha: 0.55),
@@ -809,7 +818,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   void _showDeleteConfirm(String id) {
     final t = context.themeTokens;
     final accent4 = _accent4(t);
-    final item = _wardrobe.firstWhere((i) => i.id == id);
+    final index = _wardrobe.indexWhere((i) => i.id == id);
+    if (index < 0) {
+      _showToast('Item no longer available');
+      return;
+    }
+    final item = _wardrobe[index];
     showDialog(
       context: context,
       barrierColor: t.backgroundPrimary.withValues(alpha: 0.7),
@@ -959,8 +973,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                         _logWearPersist(id);
                       },
                       onShare: (id) {
-                        final i = _wardrobe.firstWhere((e) => e.id == id);
-                        _shareItem(i);
+                        final index = _wardrobe.indexWhere((e) => e.id == id);
+                        if (index < 0) {
+                          _showToast('Item no longer available');
+                          return;
+                        }
+                        _shareItem(_wardrobe[index]);
                       },
                       onTapCard: _openItemDetail,
                     )

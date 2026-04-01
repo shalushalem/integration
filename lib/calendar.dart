@@ -347,10 +347,11 @@ class _CalendarShellState extends State<CalendarShell> {
       }
     });
 
-    if (removed.id == null) return;
+    final removedId = removed.id;
+    if (removedId == null || removedId.isEmpty) return;
     final appwrite = context.read<AppwriteService>();
     try {
-      await appwrite.deletePlan(removed.id!);
+      await appwrite.deletePlan(removedId);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -377,10 +378,11 @@ class _CalendarShellState extends State<CalendarShell> {
       plan.hasReminder = !plan.hasReminder;
     });
 
-    if (plan.id == null) return;
+    final planId = plan.id;
+    if (planId == null || planId.isEmpty) return;
     final appwrite = context.read<AppwriteService>();
     try {
-      await appwrite.updatePlanReminder(plan.id!, plan.hasReminder);
+      await appwrite.updatePlanReminder(planId, plan.hasReminder);
     } catch (_) {
       if (!mounted) return;
       setState(() {

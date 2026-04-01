@@ -9,6 +9,7 @@ class BackendService {
   BackendService({this.authToken, this.refreshAuthToken});
 
   final String baseUrl = Env.backendApiUrl;
+  static const int _maxImageBytes = 4 * 1024 * 1024;
   String? authToken;
   final TokenRefresher? refreshAuthToken;
 
@@ -108,6 +109,15 @@ class BackendService {
     return null;
   }
 
+  bool _shouldTryNextCandidate(int statusCode) {
+    // Fallback probing is only for route-not-found aliases.
+    return statusCode == 404;
+  }
+
+  bool _isImagePayloadSafe(Uint8List bytes) {
+    return bytes.lengthInBytes <= _maxImageBytes;
+  }
+
   // --- Chat & Styling Engine ---
   Future<Map<String, dynamic>> sendChatQuery(
     String query,
@@ -172,21 +182,21 @@ class BackendService {
               .map((e) => e.trim())
               .where((e) => e.isNotEmpty)
               .toList();
-          cleanText = cleanText.replaceAll(chipsMatch.group(0)!, '').trim();
+          cleanText = cleanText.replaceAll(chipsRegex, '').trim();
         }
 
         RegExp boardRegex = RegExp(r'\[STYLE_BOARD:\s*(.*?)\]');
         Match? boardMatch = boardRegex.firstMatch(cleanText);
         if (boardMatch != null) {
           extractedBoardData = _asOptionalActionString(boardMatch.group(1));
-          cleanText = cleanText.replaceAll(boardMatch.group(0)!, '').trim();
+          cleanText = cleanText.replaceAll(boardRegex, '').trim();
         }
 
         RegExp packRegex = RegExp(r'\[PACK_LIST:\s*(.*?)\]');
         Match? packMatch = packRegex.firstMatch(cleanText);
         if (packMatch != null) {
           extractedPackData = _asOptionalActionString(packMatch.group(1));
-          cleanText = cleanText.replaceAll(packMatch.group(0)!, '').trim();
+          cleanText = cleanText.replaceAll(packRegex, '').trim();
           hiddenMenuText = cleanText;
         }
 
@@ -230,6 +240,9 @@ class BackendService {
             'fallback_reason': data['fallback_reason']?.toString(),
           };
         }
+        if (!_shouldTryNextCandidate(response.statusCode)) {
+          break;
+        }
       }
       return null;
     } catch (e) {
@@ -244,6 +257,12 @@ class BackendService {
 
   // ðŸš€ FIXED: Now converts Uint8List to Base64 and sends to the NEW JSON endpoint!
   Future<Map<String, dynamic>?> analyzeImage(Uint8List imageBytes) async {
+    if (!_isImagePayloadSafe(imageBytes)) {
+      print(
+        'Analyze image skipped: payload too large (${imageBytes.lengthInBytes} bytes).',
+      );
+      return null;
+    }
     final base64String = base64Encode(imageBytes);
     return analyzeImageFromBase64(base64String);
   }
@@ -264,6 +283,9 @@ class BackendService {
 
         if (response.statusCode == 200) {
           return jsonDecode(response.body) as Map<String, dynamic>;
+        }
+        if (!_shouldTryNextCandidate(response.statusCode)) {
+          break;
         }
       }
 
@@ -320,6 +342,12 @@ class BackendService {
     required Uint8List imageBytes,
   }) async {
     try {
+      if (!_isImagePayloadSafe(imageBytes)) {
+        print(
+          'Avatar upload skipped: payload too large (${imageBytes.lengthInBytes} bytes).',
+        );
+        return null;
+      }
       final response = await _postJsonWithAuthRetry('/api/uploads/avatar', {
         'user_id': userId,
         'image_base64': base64Encode(imageBytes),
@@ -340,6 +368,13 @@ class BackendService {
     required Uint8List maskedImageBytes,
   }) async {
     try {
+      if (!_isImagePayloadSafe(rawImageBytes) ||
+          !_isImagePayloadSafe(maskedImageBytes)) {
+        print(
+          'Wardrobe upload skipped: payload too large (raw=${rawImageBytes.lengthInBytes}, masked=${maskedImageBytes.lengthInBytes}).',
+        );
+        return null;
+      }
       final response = await _postJsonWithAuthRetry('/api/uploads/wardrobe', {
         'file_id': fileId,
         'raw_image_base64': base64Encode(rawImageBytes),
