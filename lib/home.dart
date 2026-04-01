@@ -172,6 +172,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   String _userName = '...';
   String _userId = 'user_1';
   Uint8List? _avatarBytes;
+  Map<String, dynamic> _userProfileContext = const {};
 
   Future<void> _savePrepareExactToBoard({
     required String boardId,
@@ -185,7 +186,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     required List<bool> outfitSaved,
   }) async {
     final sectionPayload = <Map<String, dynamic>>[];
+    var totalItems = 0;
+    var completedItems = 0;
     for (var i = 0; i < sections.length; i++) {
+      totalItems += itemsState[i].length;
+      completedItems += checksState[i].where((v) => v).length;
       sectionPayload.add({
         'name': sections[i].name,
         'emoji': sections[i].emoji,
@@ -195,7 +200,45 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       });
     }
 
-    await Future<void>.delayed(const Duration(milliseconds: 180));
+    final occasion = _occasionFromBoardId(boardId);
+    final description =
+        '$title · $completedItems/$totalItems completed items';
+
+    final payload = <String, dynamic>{
+      'title': title.trim().isEmpty ? 'Checklist Board' : title.trim(),
+      'description': description,
+      'occasion': occasion,
+      'imageUrl': '',
+      'itemIds': const <String>[],
+      'source': 'home_prepare_checklist',
+      'checklist': {
+        'sections': sectionPayload,
+        'outfit_saved': List<bool>.from(outfitSaved),
+        'total_items': totalItems,
+        'completed_items': completedItems,
+      },
+      'created_at': DateTime.now().toIso8601String(),
+    };
+
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    await appwrite.createSavedBoard(payload);
+  }
+
+  String _occasionFromBoardId(String boardId) {
+    switch (boardId.trim().toLowerCase()) {
+      case 'party_looks':
+        return 'Party';
+      case 'occasion':
+        return 'Occasion';
+      case 'office_fit':
+        return 'Office';
+      case 'vacation':
+        return 'Vacation';
+      case 'everything_else':
+        return 'Everything Else';
+      default:
+        return 'Occasion';
+    }
   }
 
   @override
@@ -308,6 +351,23 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         _avatarBytes = avatar;
       });
     }
+
+    try {
+      final profile = await appwrite.getUserProfile();
+      if (!mounted) return;
+      setState(() {
+        _userProfileContext = {
+          'name': profile.data['name'] ?? _userName,
+          'username': profile.data['username'],
+          'gender': profile.data['gender'],
+          'skinTone': profile.data['skinTone'],
+          'bodyShape': profile.data['bodyShape'],
+          'styles': profile.data['styles'],
+          'shopPrefs': profile.data['shopPrefs'],
+          'lang': profile.data['lang'],
+        };
+      });
+    } catch (_) {}
   }
 
   void _updateClock() {
@@ -585,6 +645,19 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _openNavScreen(ChatScreen(moduleContext: module, initialPrompt: text));
   }
 
+  String _backendModuleContextForIntent(String intent) {
+    switch (intent.trim().toLowerCase()) {
+      case 'style':
+        return 'style';
+      case 'organize':
+        return 'organize';
+      case 'prepare':
+        return 'plan';
+      default:
+        return 'chat';
+    }
+  }
+
   void _openPickSheet(String name, String tag) {
     showModalBottomSheet<void>(
       context: context,
@@ -730,12 +803,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
     _ResponseData? resp;
 
-    final isPrepareQuickChip =
-        intent == 'prepare' && _prepareChips.any((chip) => chip.$2 == question);
-    if (isPrepareQuickChip) {
-      resp = _buildPrepareChipResponse(question);
-    } else {
-      try {
+    try {
         final backend = Provider.of<BackendService>(context, listen: false);
 
         // Grab the history payload we've been secretly storing
@@ -746,6 +814,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           _userId,
           historyPayload,
           _runningMemory,
+          moduleContext: _backendModuleContextForIntent(intent),
+          userProfile: _userProfileContext,
         );
 
         // Store user's question into history
@@ -808,7 +878,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           intro: "Backend Connection Failed.\n\n$errorMsg",
         );
       }
-    }
 
     if (!mounted) return;
 
@@ -3393,19 +3462,35 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                       return;
                                     }
                                     Navigator.pop(context);
-                                    await _savePrepareExactToBoard(
-                                      boardId: boardId,
-                                      title: title,
-                                      sections: sections,
-                                      itemsState: itemsState,
-                                      checksState: checksState,
-                                      outfitSaved: outfitSaved,
-                                    );
-                                    if (!mounted) return;
-                                    checklistSetState(
-                                      () => _prepareExactSavedByTitle[title] =
-                                          true,
-                                    );
+                                    try {
+                                      await _savePrepareExactToBoard(
+                                        boardId: boardId,
+                                        title: title,
+                                        sections: sections,
+                                        itemsState: itemsState,
+                                        checksState: checksState,
+                                        outfitSaved: outfitSaved,
+                                      );
+                                      if (!mounted) return;
+                                      checklistSetState(
+                                        () => _prepareExactSavedByTitle[title] =
+                                            true,
+                                      );
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Board saved to cloud'),
+                                        ),
+                                      );
+                                    } catch (e) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Failed to save board: $e',
+                                          ),
+                                        ),
+                                      );
+                                    }
                                   },
                                   child: Container(
                                     margin: const EdgeInsets.only(bottom: 8),

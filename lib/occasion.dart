@@ -79,13 +79,28 @@ class _OccasionBoardState extends State<OccasionBoard> {
         final badgeIndex = docId.length % LookBadgeStyle.values.length;
         final dynamicBadge = LookBadgeStyle.values[badgeIndex];
         final dynamicBg = LookBgStyle.values[badgeIndex];
+        final title =
+            (doc['title'] ?? doc['name'] ?? doc['occasion'] ?? widget.occasion)
+                .toString()
+                .trim();
+        final description =
+            (doc['description'] ??
+                    doc['outfitDescription'] ??
+                    doc['subtitle'] ??
+                    'Custom ${widget.occasion} inspiration')
+                .toString()
+                .trim();
+        final emoji = (doc['emoji'] ?? widget.emptyEmoji).toString().trim();
+        final occasion = (doc['occasion'] ?? widget.occasion).toString().trim();
 
         loadedLooks.add(LookItem(
           id: docId,
-          title: (doc['occasion'] ?? widget.occasion).toString(),
-          description: (doc['outfitDescription'] ?? 'Custom ${widget.occasion} inspiration').toString(),
-          emoji: (doc['emoji'] ?? widget.emptyEmoji).toString(),
-          category: widget.occasion,
+          title: title.isEmpty ? widget.occasion : title,
+          description: description.isEmpty
+              ? 'Custom ${widget.occasion} inspiration'
+              : description,
+          emoji: emoji.isEmpty ? widget.emptyEmoji : emoji,
+          category: occasion.isEmpty ? widget.occasion : occasion,
           imageUrl: (doc['imageUrl'] ?? doc['image_url'])?.toString(),
           badge: dynamicBadge,
           bg: dynamicBg,

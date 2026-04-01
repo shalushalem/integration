@@ -3,9 +3,11 @@
 // Imported by: main.dart, home.dart, onboarding1.dart, onboarding2.dart, onboarding3.dart
 
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:myapp/services/appwrite_service.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_controller.dart';
 import 'package:myapp/theme/profile_theme.dart';
@@ -245,6 +247,124 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  bool _profileLoaded = false;
+  bool _isHydratingProfile = false;
+  Timer? _profileSaveDebounce;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadProfileFromBackend();
+    });
+  }
+
+  @override
+  void dispose() {
+    _profileSaveDebounce?.cancel();
+    super.dispose();
+  }
+
+  Set<String> _toStringSet(dynamic value) {
+    if (value is List) {
+      return value
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toSet();
+    }
+    if (value is String && value.trim().isNotEmpty) {
+      return value
+          .split(',')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toSet();
+    }
+    return <String>{};
+  }
+
+  Future<void> _loadProfileFromBackend() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final profileCtrl = Provider.of<ProfileController>(context, listen: false);
+      final doc = await appwrite.getUserProfile();
+      final data = doc.data;
+
+      _isHydratingProfile = true;
+      final oldState = profileCtrl.state;
+
+      final themeName = (data['theme'] ?? '').toString().trim();
+      final parsedTheme = AppTheme.values.firstWhere(
+        (t) => t.name == themeName,
+        orElse: () => profileCtrl.state.theme,
+      );
+      final parsedSkinTone = data['skinTone'] is int
+          ? data['skinTone'] as int
+          : int.tryParse((data['skinTone'] ?? '').toString()) ??
+              profileCtrl.state.skinTone;
+      final parsedStyles = _toStringSet(data['styles']);
+      final parsedShopPrefs = _toStringSet(data['shopPrefs']);
+
+      final merged = profileCtrl.state.copyWith(
+        name: (data['name'] ?? profileCtrl.state.name).toString(),
+        username: (data['username'] ?? profileCtrl.state.username).toString(),
+        email: (data['email'] ?? profileCtrl.state.email).toString(),
+        phone: (data['phone'] ?? profileCtrl.state.phone).toString(),
+        dob: (data['dob'] ?? profileCtrl.state.dob).toString(),
+        gender: (data['gender'] ?? profileCtrl.state.gender).toString(),
+        skinTone: parsedSkinTone,
+        bodyShape: (data['bodyShape'] ?? profileCtrl.state.bodyShape).toString(),
+        styles: parsedStyles.isEmpty ? profileCtrl.state.styles : parsedStyles,
+        shopPrefs: parsedShopPrefs.isEmpty
+            ? profileCtrl.state.shopPrefs
+            : parsedShopPrefs,
+        isDark: data['isDark'] is bool
+            ? data['isDark'] as bool
+            : profileCtrl.state.isDark,
+        theme: parsedTheme,
+        lang: (data['lang'] ?? profileCtrl.state.lang).toString(),
+      );
+
+      profileCtrl.updateState(merged);
+      _syncTheme(context, merged, oldState);
+    } catch (_) {
+      // First-time users may not have a profile document yet.
+    } finally {
+      _isHydratingProfile = false;
+      _profileLoaded = true;
+    }
+  }
+
+  void _queueProfileSave(ProfileState state) {
+    if (!_profileLoaded || _isHydratingProfile) return;
+    _profileSaveDebounce?.cancel();
+    _profileSaveDebounce = Timer(const Duration(milliseconds: 450), () {
+      _persistProfileToBackend(state);
+    });
+  }
+
+  Future<void> _persistProfileToBackend(ProfileState state) async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      await appwrite.upsertUserProfile({
+        'name': state.name,
+        'username': state.username,
+        'email': state.email,
+        'phone': state.phone,
+        'dob': state.dob,
+        'gender': state.gender,
+        'skinTone': state.skinTone,
+        'bodyShape': state.bodyShape,
+        'styles': state.styles.toList(),
+        'shopPrefs': state.shopPrefs.toList(),
+        'isDark': state.isDark,
+        'theme': state.theme.name,
+        'lang': state.lang,
+      });
+    } catch (_) {
+      // Keep UI responsive even if backend write fails.
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final profileCtrl = context.watch<ProfileController>();
@@ -257,6 +377,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         // dark mode లేదా accent theme మారినప్పుడు ThemeController కి sync చేయి
         _syncTheme(context, newState, s);
         profileCtrl.updateState(newState);
+        _queueProfileSave(newState);
       },
     );
   }

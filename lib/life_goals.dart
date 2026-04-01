@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart'; // <-- Added Appwrite import
+import 'package:myapp/services/backend_service.dart';
 
 // ── Color constants ──────────────────────────────────────────────────────────
 const Color kBg = Color(0xFF08111F);
@@ -245,6 +246,9 @@ class _LifeGoalsScreenState extends State<LifeGoalsScreen> with TickerProviderSt
     {'role': 'ai', 'text': "Hey! 👋 I'm AHVI, your AI life coach. Ask me about goals, motivation, or what to focus on next."},
   ];
 
+  final List<Map<String, String>> _chatHistory = [];
+  String _chatMemory = '';
+  String _chatUserId = 'user_1';
   final List<String> _filters = ['All', 'Health & Wellness', 'Relationships', 'Career', 'Learning', 'Finance', 'Creativity', 'Mindfulness'];
   final Map<String, AnimationController> _cardAnimControllers = {};
 
@@ -252,6 +256,16 @@ class _LifeGoalsScreenState extends State<LifeGoalsScreen> with TickerProviderSt
   void initState() {
     super.initState();
     _fetchGoals();
+    _initChatIdentity();
+  }
+
+  Future<void> _initChatIdentity() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final user = await appwrite.getCurrentUser();
+      if (!mounted || user == null || user.$id.isEmpty) return;
+      setState(() => _chatUserId = user.$id);
+    } catch (_) {}
   }
 
   // ── APPWRITE LOGIC ──
@@ -1018,16 +1032,58 @@ class _LifeGoalsScreenState extends State<LifeGoalsScreen> with TickerProviderSt
     );
   }
 
-  void _sendChatMessage() {
+  Future<void> _sendChatMessage() async {
     final text = _chatCtrl.text.trim();
     if (text.isEmpty) return;
-    setState(() { _chatMessages.add({'role': 'user', 'text': text}); _chatCtrl.clear(); _showTyping = true; });
-    _scrollChatToBottom();
-    Future.delayed(const Duration(milliseconds: 1000), () {
-      if (!mounted) return;
-      setState(() { _showTyping = false; _chatMessages.add({'role': 'ai', 'text': 'Great question! Focus on one goal at a time for the best results.'}); });
-      _scrollChatToBottom();
+    setState(() {
+      _chatMessages.add({'role': 'user', 'text': text});
+      _chatHistory.add({'role': 'user', 'content': text});
+      _chatCtrl.clear();
+      _showTyping = true;
     });
+    _scrollChatToBottom();
+
+    try {
+      final backend = Provider.of<BackendService>(context, listen: false);
+      final historyForBackend = _chatHistory.length > 1
+          ? List<Map<String, String>>.from(
+              _chatHistory.sublist(0, _chatHistory.length - 1),
+            )
+          : <Map<String, String>>[];
+      final response = await backend.sendChatQuery(
+        text,
+        _chatUserId,
+        historyForBackend,
+        _chatMemory,
+        moduleContext: 'life_goals',
+      );
+
+      if (!mounted) return;
+      if (response['updated_memory'] != null) {
+        _chatMemory = response['updated_memory'].toString();
+      }
+      final aiText =
+          response['message']?['content']?.toString().trim() ??
+          response['content']?.toString().trim() ??
+          response['error']?.toString().trim() ??
+          "I couldn't reach AHVI backend right now.";
+
+      setState(() {
+        _showTyping = false;
+        _chatMessages.add({'role': 'ai', 'text': aiText});
+        _chatHistory.add({'role': 'assistant', 'content': aiText});
+      });
+      _scrollChatToBottom();
+    } catch (_) {
+      if (!mounted) return;
+      const fallback = "I couldn't reach AHVI backend right now.";
+      setState(() {
+        _showTyping = false;
+        _chatMessages.add({'role': 'ai', 'text': fallback});
+        _chatHistory.add({'role': 'assistant', 'content': fallback});
+      });
+      _scrollChatToBottom();
+    }
   }
 
   void _scrollChatToBottom() {

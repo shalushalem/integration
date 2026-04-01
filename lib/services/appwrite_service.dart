@@ -208,6 +208,28 @@ class AppwriteService extends ChangeNotifier {
           await _localStore.deletePendingOp(op.id);
           continue;
         }
+
+        if (op.entity == 'profile' && op.op == 'upsert') {
+          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+          final response = await http.put(
+            Uri.parse('$_baseUrl/users/$userId'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(data),
+          );
+          if (response.statusCode == 200) {
+            final body = jsonDecode(response.body) as Map<String, dynamic>;
+            final doc = ProxyDocument.fromApi(
+              Map<String, dynamic>.from(body['document']),
+            );
+            await _localStore.cacheUserProfile(
+              userId,
+              data: Map<String, dynamic>.from(doc.data),
+              raw: Map<String, dynamic>.from(doc.raw),
+            );
+            await _localStore.deletePendingOp(op.id);
+            continue;
+          }
+        }
       } on DuplicateOutfitException catch (dup) {
         if (op.entity == 'wardrobe' && op.op == 'create') {
           debugPrint(
@@ -223,10 +245,7 @@ class AppwriteService extends ChangeNotifier {
       }
     }
 
-    final remaining = await _localStore.pendingOps(userId);
-    if (remaining.isEmpty) {
-      await _localStore.clearUserBackupData(userId);
-    }
+    // Keep local cache rows for offline-read; only pending ops are drained here.
   }
 
   Future<User?> getCurrentUser() async {
@@ -306,21 +325,51 @@ class AppwriteService extends ChangeNotifier {
   }
 
   Future<String> _requireUserId() async {
-    final user = await getCurrentUser();
-    if (user != null) {
-      return user.$id;
-    }
     final fallbackUserId = await _lastKnownUserId();
     if (fallbackUserId != null) {
       return fallbackUserId;
     }
+    final user = await getCurrentUser();
+    if (user != null) {
+      return user.$id;
+    }
     throw Exception("User not authenticated");
+  }
+
+  bool _isConnectivityException(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('socketexception') ||
+        text.contains('failed host lookup') ||
+        text.contains('connection refused') ||
+        text.contains('timed out') ||
+        text.contains('network is unreachable') ||
+        text.contains('connection reset') ||
+        text.contains('handshakeexception');
   }
 
   Uri _resourceUri(String resource, {Map<String, String>? query}) {
     final uri = Uri.parse('$_baseUrl/$resource');
     if (query == null || query.isEmpty) return uri;
     return uri.replace(queryParameters: query);
+  }
+
+  Map<String, dynamic> _wardrobeDocToLocalMap(ProxyDocument doc) {
+    return {
+      "id": doc.$id,
+      "name": doc.data['name'],
+      "category": doc.data['category'],
+      "sub_category": doc.data['sub_category'],
+      "color_code": doc.data['color_code'],
+      "pattern": doc.data['pattern'],
+      "occasions": doc.data['occasions'],
+      "image_url": doc.data['image_url'],
+      "masked_url": doc.data['masked_url'],
+      "qdrant_point_id": doc.data['qdrant_point_id'],
+      "qdrantPointId": doc.data['qdrantPointId'] ?? doc.data['qdrant_point_id'],
+      "notes": doc.data['notes'],
+      "worn": doc.data['worn'] ?? 0,
+      "liked": doc.data['liked'] ?? false,
+    };
   }
 
   Future<List<ProxyDocument>> _listDocs(
@@ -425,27 +474,111 @@ class AppwriteService extends ChangeNotifier {
   }
 
   Future<ProxyDocument> getUserProfile() async {
+    await _ensureLocalReady();
     final userId = await _requireUserId();
-    final response = await http.get(Uri.parse('$_baseUrl/users/$userId'));
-    if (response.statusCode != 200) {
-      throw Exception('Failed to fetch profile: ${response.body}');
+    final cached = await _localStore.loadUserProfile(userId);
+    if (cached != null) {
+      // Return instantly from local cache, then refresh in background.
+      Future<void>(() async {
+        await _refreshUserProfileFromServer(userId);
+      });
+      return ProxyDocument(
+        $id: (cached['id'] ?? userId).toString(),
+        data: Map<String, dynamic>.from(cached['data'] ?? const {}),
+        raw: Map<String, dynamic>.from(
+          cached['raw'] ??
+              {
+                r'$id': userId,
+                ...Map<String, dynamic>.from(cached['data'] ?? const {}),
+              },
+        ),
+      );
     }
-    final body = jsonDecode(response.body) as Map<String, dynamic>;
-    return ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
+
+    final fresh = await _refreshUserProfileFromServer(userId);
+    if (fresh != null) return fresh;
+    throw Exception('Failed to fetch profile and no cached profile found');
+  }
+
+  Future<ProxyDocument?> _refreshUserProfileFromServer(String userId) async {
+    try {
+      await _syncPendingLocalChanges(userId);
+    } catch (_) {}
+
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/users/$userId'));
+      if (response.statusCode != 200) {
+        return null;
+      }
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final doc = ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
+      await _localStore.cacheUserProfile(
+        userId,
+        data: Map<String, dynamic>.from(doc.data),
+        raw: Map<String, dynamic>.from(doc.raw),
+      );
+      return doc;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<ProxyDocument> upsertUserProfile(Map<String, dynamic> data) async {
+    await _ensureLocalReady();
     final userId = await _requireUserId();
-    final response = await http.put(
-      Uri.parse('$_baseUrl/users/$userId'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
-    );
-    if (response.statusCode != 200) {
-      throw Exception('Failed to save profile: ${response.body}');
+    try {
+      final response = await http.put(
+        Uri.parse('$_baseUrl/users/$userId'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      );
+      if (response.statusCode != 200) {
+        throw Exception('Failed to save profile: ${response.body}');
+      }
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final doc = ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
+      await _localStore.cacheUserProfile(
+        userId,
+        data: Map<String, dynamic>.from(doc.data),
+        raw: Map<String, dynamic>.from(doc.raw),
+      );
+      await _localStore.deletePendingOpsByRef(
+        userId: userId,
+        entity: 'profile',
+        refId: userId,
+        op: 'upsert',
+      );
+      return doc;
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
+      await _localStore.cacheUserProfile(
+        userId,
+        data: Map<String, dynamic>.from(data),
+        raw: {
+          r'$id': userId,
+          ...Map<String, dynamic>.from(data),
+          '_local_only': true,
+        },
+      );
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'profile',
+        op: 'upsert',
+        refId: userId,
+        payload: {'data': data},
+      );
+      return ProxyDocument(
+        $id: userId,
+        data: Map<String, dynamic>.from(data),
+        raw: {
+          r'$id': userId,
+          ...Map<String, dynamic>.from(data),
+          '_local_only': true,
+        },
+      );
     }
-    final body = jsonDecode(response.body) as Map<String, dynamic>;
-    return ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
   }
 
   Future<List<Map<String, dynamic>>> getWardrobeItems() async {
@@ -459,24 +592,8 @@ class AppwriteService extends ChangeNotifier {
     try {
       userId ??= await _requireUserId();
       final docs = await _listDocs('outfits', userId: userId, limit: 200);
-      final mapped = docs
-          .map((doc) => {
-                "id": doc.$id,
-                "name": doc.data['name'],
-                "category": doc.data['category'],
-                "sub_category": doc.data['sub_category'],
-                "color_code": doc.data['color_code'],
-                "pattern": doc.data['pattern'],
-                "occasions": doc.data['occasions'],
-                "image_url": doc.data['image_url'],
-                "masked_url": doc.data['masked_url'],
-                "qdrant_point_id": doc.data['qdrant_point_id'],
-                "qdrantPointId": doc.data['qdrantPointId'] ?? doc.data['qdrant_point_id'],
-                "notes": doc.data['notes'],
-                "worn": doc.data['worn'] ?? 0,
-                "liked": doc.data['liked'] ?? false,
-              })
-          .toList();
+      final mapped = docs.map(_wardrobeDocToLocalMap).toList();
+      await _localStore.cacheWardrobeItems(userId, mapped);
       return mapped;
     } catch (e) {
       debugPrint("Error fetching wardrobe items: $e");
@@ -555,12 +672,14 @@ class AppwriteService extends ChangeNotifier {
     await _syncPendingLocalChanges(userId);
 
     try {
-      return await _createDoc(
+      final created = await _createDoc(
         'outfits',
         data,
         userId: userId,
         forceSave: forceSave,
       );
+      await _localStore.upsertWardrobeItem(userId, _wardrobeDocToLocalMap(created));
+      return created;
     } on DuplicateOutfitException {
       rethrow;
     } catch (_) {
@@ -630,7 +749,7 @@ class AppwriteService extends ChangeNotifier {
 
     try {
       final updated = await _updateDoc('outfits', documentId, data);
-      await _localStore.deleteWardrobeItem(userId, documentId);
+      await _localStore.upsertWardrobeItem(userId, _wardrobeDocToLocalMap(updated));
       return updated;
     } catch (_) {
       final cached = await _localStore.loadWardrobeItems(userId);
@@ -794,7 +913,10 @@ class AppwriteService extends ChangeNotifier {
 
     try {
       return await _createDoc('saved_boards', data, userId: userId);
-    } catch (_) {
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
       final localId = 'local_board_${DateTime.now().millisecondsSinceEpoch}';
       await _localStore.cacheBoards(
         userId,
@@ -836,7 +958,10 @@ class AppwriteService extends ChangeNotifier {
     try {
       await _deleteDoc('saved_boards', documentId);
       await _syncPendingLocalChanges(userId);
-    } catch (_) {
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
       await _localStore.addPendingOp(
         userId: userId,
         entity: 'saved_board',
@@ -880,6 +1005,32 @@ class AppwriteService extends ChangeNotifier {
     if (nightSteps != null) updateData['nightSteps'] = nightSteps;
     updateData['lastUpdated'] = DateTime.now().toIso8601String();
     await _updateDoc('skincare', documentId, updateData);
+  }
+
+  Future<List<ProxyDocument>> getContacts() async {
+    try {
+      final userId = await _requireUserId();
+      return await _listDocs('contacts', userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching contacts: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createContact(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('contacts', data, userId: userId);
+  }
+
+  Future<ProxyDocument> updateContact(
+    String documentId,
+    Map<String, dynamic> data,
+  ) async {
+    return _updateDoc('contacts', documentId, data);
+  }
+
+  Future<void> deleteContact(String documentId) async {
+    await _deleteDoc('contacts', documentId);
   }
 
   Future<List<ProxyDocument>> getWorkoutOutfits() async {

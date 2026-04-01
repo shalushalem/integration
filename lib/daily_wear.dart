@@ -7,6 +7,9 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/widgets/ahvi_chat_prompt_bar.dart';
 import 'package:myapp/widgets/ahvi_lens_sheet.dart';
@@ -72,6 +75,8 @@ class _DailyWearScreenState extends State<DailyWearScreen>
   bool _isTyping = false;
   bool _quickPromptsVisible = true;
   Timer? _chatGreetingTimer;
+  String _chatMemory = '';
+  String _chatUserId = 'user_1';
 
   int? _speakingMessageId;
 
@@ -251,6 +256,8 @@ class _DailyWearScreenState extends State<DailyWearScreen>
   @override
   void initState() {
     super.initState();
+    _initChatIdentity();
+    _loadWardrobeOutfitsFromDb();
     _displayedOutfits = List<Map<String, dynamic>>.from(_allOutfits);
     _savedCarouselById = {
       for (final outfit in _allOutfits) outfit['id'] as String: false,
@@ -558,6 +565,8 @@ class _DailyWearScreenState extends State<DailyWearScreen>
   }
 
   void _sortOutfitsForWeather(int temp) {
+    if (_allOutfits.isEmpty) return;
+
     int score(Map<String, dynamic> outfit) {
       final range = (outfit['range'] as List).cast<int>();
       final low = range[0];
@@ -569,6 +578,8 @@ class _DailyWearScreenState extends State<DailyWearScreen>
 
     final sorted = List<Map<String, dynamic>>.from(_allOutfits)
       ..sort((a, b) => score(b).compareTo(score(a)));
+    if (sorted.isEmpty) return;
+
     final hero = sorted.first;
     final icon = temp >= 30
         ? '🌡️'
@@ -588,6 +599,173 @@ class _DailyWearScreenState extends State<DailyWearScreen>
     });
     _pageController.jumpToPage(0);
     _restartOptionCardAnimations();
+  }
+
+  Future<void> _loadWardrobeOutfitsFromDb() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final wardrobe = await appwrite.getWardrobeItems();
+      if (!mounted || wardrobe.isEmpty) return;
+
+      final mapped = <Map<String, dynamic>>[];
+      for (var i = 0; i < wardrobe.length; i++) {
+        final outfit = _mapWardrobeToDailyOutfit(wardrobe[i], i);
+        if (outfit != null) mapped.add(outfit);
+      }
+
+      if (!mounted || mapped.isEmpty) return;
+
+      setState(() {
+        _allOutfits
+          ..clear()
+          ..addAll(mapped);
+        _displayedOutfits = List<Map<String, dynamic>>.from(_allOutfits);
+        _savedCarouselById
+          ..clear()
+          ..addEntries(_allOutfits.map((o) => MapEntry(o['id'] as String, false)));
+        _savedOptionById
+          ..clear()
+          ..addEntries(_allOutfits.map((o) => MapEntry(o['id'] as String, false)));
+        _carouselIndex = 0;
+        _tryOnOutfitId = _displayedOutfits.first['id'] as String;
+      });
+
+      final numericTemp = int.tryParse(
+        _weatherTemp.replaceAll(RegExp(r'[^0-9-]'), ''),
+      );
+      if (numericTemp != null) {
+        _sortOutfitsForWeather(numericTemp);
+      } else {
+        _restartOptionCardAnimations();
+      }
+    } catch (_) {}
+  }
+
+  Map<String, dynamic>? _mapWardrobeToDailyOutfit(
+    Map<String, dynamic> item,
+    int index,
+  ) {
+    final imageUrl = _pickRenderableImageUrl(item);
+    if (imageUrl.isEmpty) return null;
+
+    final id =
+        (item['id'] ?? item[r'$id'] ?? 'wardrobe_$index').toString().trim();
+    final name = (item['name'] ?? 'Wardrobe item').toString().trim();
+    final category = (item['category'] ?? '').toString().trim();
+    final subCategory =
+        (item['sub_category'] ?? item['subCategory'] ?? '').toString().trim();
+    final pattern = (item['pattern'] ?? '').toString().trim();
+    final occasions = _normalizeOccasions(item['occasions']);
+    final colorCode =
+        (item['color_code'] ?? item['colorCode'] ?? '').toString().trim();
+
+    final title = name.isEmpty ? 'Wardrobe item' : name;
+    final descParts = <String>[
+      if (subCategory.isNotEmpty) subCategory,
+      if (category.isNotEmpty) category,
+    ];
+    final desc = descParts.isNotEmpty
+        ? '${descParts.join(' · ')} from your wardrobe'
+        : 'From your wardrobe';
+    final tip = occasions.isNotEmpty
+        ? 'Best for ${occasions.take(2).join(' & ')}'
+        : 'Picked from your wardrobe';
+
+    return {
+      'id': id.isEmpty ? 'wardrobe_$index' : id,
+      'name': title,
+      'desc': desc,
+      'tip': tip,
+      'range': const [18, 35],
+      'occ': occasions.isEmpty ? const ['Casual'] : occasions,
+      'colors': _paletteFromColorCode(colorCode),
+      'arTags': _defaultArTagsForCategory(category),
+      'tags': <String>[
+        if (category.isNotEmpty) category,
+        if (subCategory.isNotEmpty) subCategory,
+        if (pattern.isNotEmpty) pattern,
+        ...occasions,
+      ].toSet().take(5).toList(),
+      'img': imageUrl,
+    };
+  }
+
+  String _pickRenderableImageUrl(Map<String, dynamic> item) {
+    final candidates = [
+      item['masked_url'],
+      item['maskedUrl'],
+      item['image_url'],
+      item['imageUrl'],
+    ];
+    for (final candidate in candidates) {
+      final text = (candidate ?? '').toString().trim();
+      if (text.isEmpty) continue;
+      final lower = text.toLowerCase();
+      if (lower.startsWith('http://') ||
+          lower.startsWith('https://') ||
+          lower.startsWith('data:image/')) {
+        return text;
+      }
+    }
+    return '';
+  }
+
+  List<String> _normalizeOccasions(dynamic raw) {
+    if (raw is List) {
+      return raw
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+    if (raw is String) {
+      return raw
+          .split(RegExp(r'[,|/]'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+    return const [];
+  }
+
+  List<String> _paletteFromColorCode(String input) {
+    final cleaned = input.trim().toUpperCase();
+    final hasHash = cleaned.startsWith('#');
+    final rawHex = hasHash ? cleaned.substring(1) : cleaned;
+    final isHex = RegExp(r'^[0-9A-F]{6}$').hasMatch(rawHex);
+    final primary = isHex ? '#$rawHex' : '#6B7280';
+    return [primary, '#1F2937', '#E5E7EB'];
+  }
+
+  List<Map<String, dynamic>> _defaultArTagsForCategory(String category) {
+    final lower = category.toLowerCase();
+    if (lower.contains('top') || lower.contains('shirt') || lower.contains('tee')) {
+      return const [
+        {'t': 'Top Layer', 'top': 0.30, 'left': 0.16},
+        {'t': 'Bottom Pairing', 'top': 0.62, 'left': 0.12},
+        {'t': 'Footwear', 'top': 0.83, 'left': 0.20},
+      ];
+    }
+    if (lower.contains('bottom') || lower.contains('pant') || lower.contains('jean')) {
+      return const [
+        {'t': 'Upper Pairing', 'top': 0.30, 'left': 0.16},
+        {'t': 'Bottom Layer', 'top': 0.62, 'left': 0.12},
+        {'t': 'Footwear', 'top': 0.83, 'left': 0.20},
+      ];
+    }
+    return const [
+      {'t': 'Main Piece', 'top': 0.34, 'left': 0.16},
+      {'t': 'Styling Layer', 'top': 0.60, 'left': 0.12},
+      {'t': 'Complete Look', 'top': 0.83, 'left': 0.20},
+    ];
+  }
+
+  Future<void> _initChatIdentity() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final user = await appwrite.getCurrentUser();
+      if (!mounted || user == null || user.$id.isEmpty) return;
+      setState(() => _chatUserId = user.$id);
+    } catch (_) {}
   }
 
   @override
@@ -814,60 +992,59 @@ class _DailyWearScreenState extends State<DailyWearScreen>
   }
 
   Future<void> _callAnthropicApi(String userText) async {
-    final currentOutfit = _currentOutfit;
-    final wornNote = _wornOutfitId != null
-        ? 'Wearing today: "${_allOutfits.firstWhere((o) => o['id'] == _wornOutfitId)['name']}"'
-        : 'No outfit chosen yet.';
-    final systemPrompt =
-        'You are AHVI, a warm, elegant personal AI fashion stylist. '
-        'Tone: refined, friendly, like a personal shopper.\n'
-        'Context: Outfit shown: "${currentOutfit['name']}" — ${currentOutfit['desc']}. '
-        'Tags: ${(currentOutfit['tags'] as List<String>).join(', ')}. '
-        'Occasions: ${(currentOutfit['occ'] as List<String>).join(', ')}. '
-        'Weather: ${_weatherContext.isEmpty ? 'unknown' : _weatherContext}. $wornNote\n'
-        'Outfits available: Linen & Air (hot/linen/casual), Coffee Run (mild/cosy/weekend), Office Hours (work/formal), Golden Hour (evnings/earth tones).\n'
-        'Keep responses concise — 2–4 sentences max or a short list. Be specific. Reference outfit names when relevant. Light emoji (1–2). Never be generic.';
-
     final history = _messages
         .take(_messages.length - 1)
         .map(
           (m) => {'role': m.isUser ? 'user' : 'assistant', 'content': m.text},
         )
         .toList();
-    history.add({'role': 'user', 'content': userText});
 
-    const apiKey = String.fromEnvironment(
-      'ANTHROPIC_API_KEY',
-      defaultValue: '',
-    );
+    final wardrobeItems = _displayedOutfits
+        .map(
+          (o) => {
+            'name': o['name'],
+            'category': 'tops',
+            'sub_category': 'outfit',
+            'occasions': (o['occ'] as List?)?.map((e) => '$e').toList() ??
+                const <String>[],
+            'notes': o['desc'],
+          },
+        )
+        .toList();
+
+    final userProfile = <String, dynamic>{
+      'occasion': ((_currentOutfit['occ'] as List?) ?? const []).join(', '),
+      'weather': _weatherContext,
+      'current_outfit': _currentOutfit['name'],
+      'worn_today': _wornOutfitId != null,
+    };
 
     try {
-      final response = await http
-          .post(
-            Uri.parse('https://api.anthropic.com/v1/messages'),
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01',
-            },
-            body: jsonEncode({
-              'model': 'claude-sonnet-4-20250514',
-              'max_tokens': 380,
-              'system': systemPrompt,
-              'messages': history,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
+      final backend = Provider.of<BackendService>(context, listen: false);
+      final response = await backend.sendChatQuery(
+        userText,
+        _chatUserId,
+        List<Map<String, String>>.from(history),
+        _chatMemory,
+        moduleContext: 'style',
+        userProfile: userProfile,
+        wardrobeItems: wardrobeItems,
+      );
 
       if (!mounted) return;
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final content = data['content'];
-      final replyText = (content is List && content.isNotEmpty)
-          ? content[0]['text'] as String?
-          : null;
+      if (response['updated_memory'] != null) {
+        _chatMemory = response['updated_memory'].toString();
+      }
+
+      final aiText =
+          response['message']?['content']?.toString().trim() ??
+          response['content']?.toString().trim() ??
+          response['error']?.toString().trim() ??
+          "I couldn't reach AHVI backend right now.";
+
       final message = _ChatMessage(
         id: DateTime.now().microsecondsSinceEpoch,
-        text: replyText ?? "I'm having a moment — try again ✦",
+        text: aiText,
         isUser: false,
         createdAt: DateTime.now(),
       );
@@ -879,14 +1056,9 @@ class _DailyWearScreenState extends State<DailyWearScreen>
       if (_micActive) _speakMessage(message);
     } catch (_) {
       if (!mounted) return;
-      final fallbacks = [
-        "Based on today's conditions, **${_currentOutfit['name']}** is your strongest choice right now. ✦",
-        'For a first date, **Golden Hour** is hard to beat — earth tones feel warm and approachable. 💫',
-        'Linen excels in heat, but fit is everything — slightly relaxed, never shapeless. 🌿',
-      ];
       final message = _ChatMessage(
         id: DateTime.now().microsecondsSinceEpoch,
-        text: fallbacks[DateTime.now().second % fallbacks.length],
+        text: "I couldn't reach AHVI backend right now.",
         isUser: false,
         createdAt: DateTime.now(),
       );
@@ -3388,3 +3560,4 @@ class _BgGradientPainter extends CustomPainter {
       oldDelegate.secondary != secondary ||
       oldDelegate.tertiary != tertiary;
 }
+

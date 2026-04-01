@@ -1,7 +1,25 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:myapp/services/appwrite_service.dart';
 import 'package:myapp/theme/theme_tokens.dart';
+import 'package:provider/provider.dart';
 
 enum _ContactSort { az, recent }
+
+class _ContactRecord {
+  final String id;
+  final String name;
+  final String number;
+  final String? imageUrl;
+  final DateTime addedAt;
+
+  const _ContactRecord({
+    required this.id,
+    required this.name,
+    required this.number,
+    required this.imageUrl,
+    required this.addedAt,
+  });
+}
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key});
@@ -14,56 +32,128 @@ class _ContactsScreenState extends State<ContactsScreen> {
   final TextEditingController _searchCtrl = TextEditingController();
   String _query = '';
   _ContactSort _sort = _ContactSort.az;
+  bool _loading = true;
+  String? _loadError;
+  final List<_ContactRecord> _allContacts = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadContacts();
+  }
+
+  Future<void> _loadContacts() async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _loadError = null;
+      });
+    }
+
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final docs = await appwrite.getContacts();
+      final mapped = docs.map((doc) {
+        final data = doc.data;
+        final raw = doc.raw;
+
+        final name = (data['name'] ?? '').toString().trim();
+        final number =
+            (data['number'] ?? data['phone'] ?? data['phone_number'] ?? '')
+                .toString()
+                .trim();
+        final image =
+            (data['image_url'] ?? data['imageUrl'] ?? '')
+                .toString()
+                .trim();
+        final created =
+            (data['addedAt'] ?? data['createdAt'] ?? raw[r'$createdAt'] ?? '')
+                .toString()
+                .trim();
+
+        return _ContactRecord(
+          id: doc.$id,
+          name: name.isEmpty ? 'Unnamed contact' : name,
+          number: number,
+          imageUrl: image.isEmpty ? null : image,
+          addedAt: DateTime.tryParse(created) ?? DateTime.fromMillisecondsSinceEpoch(0),
+        );
+      }).toList();
+
+      if (!mounted) return;
+      setState(() {
+        _allContacts
+          ..clear()
+          ..addAll(mapped);
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = e.toString();
+      });
+    }
+  }
 
   Future<void> _openAddContactPage() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
         builder: (_) => const _AddContactPage(),
       ),
     );
+    if (saved == true) {
+      await _loadContacts();
+    }
   }
 
-  static final List<({String name, String number, String? image, DateTime added})>
-  _allContacts = [
-    (
-      name: 'Ava Johnson',
-      number: '+1 202 555 0140',
-      image: 'https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?w=300&h=300&fit=crop',
-      added: DateTime(2026, 2, 12),
-    ),
-    (
-      name: 'Noah Carter',
-      number: '+1 202 555 0112',
-      image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&h=300&fit=crop',
-      added: DateTime(2026, 3, 10),
-    ),
-    (
-      name: 'Mia Patel',
-      number: '+1 202 555 0188',
-      image: null,
-      added: DateTime(2026, 1, 20),
-    ),
-    (
-      name: 'Liam Brooks',
-      number: '+1 202 555 0167',
-      image: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300&h=300&fit=crop',
-      added: DateTime(2026, 3, 15),
-    ),
-    (
-      name: 'Sofia Lee',
-      number: '+1 202 555 0131',
-      image: null,
-      added: DateTime(2026, 2, 25),
-    ),
-    (
-      name: 'Ethan Rivera',
-      number: '+1 202 555 0172',
-      image: 'https://images.unsplash.com/photo-1542206395-9feb3edaa68d?w=300&h=300&fit=crop',
-      added: DateTime(2026, 3, 5),
-    ),
-  ];
+  Future<void> _deleteContact(_ContactRecord contact) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final t = dialogContext.themeTokens;
+        return AlertDialog(
+          backgroundColor: t.backgroundSecondary,
+          title: Text(
+            'Delete contact?',
+            style: TextStyle(color: t.textPrimary),
+          ),
+          content: Text(
+            contact.name,
+            style: TextStyle(color: t.mutedText),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
 
-  List<({String name, String number, String? image, DateTime added})> get _contacts {
+    if (confirm != true) return;
+
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      await appwrite.deleteContact(contact.id);
+      if (!mounted) return;
+      setState(() {
+        _allContacts.removeWhere((c) => c.id == contact.id);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Delete failed: $e')),
+      );
+    }
+  }
+
+  List<_ContactRecord> get _contacts {
     final q = _query.trim().toLowerCase();
     final filtered = _allContacts.where((c) {
       if (q.isEmpty) return true;
@@ -74,7 +164,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       case _ContactSort.az:
         filtered.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       case _ContactSort.recent:
-        filtered.sort((a, b) => b.added.compareTo(a.added));
+        filtered.sort((a, b) => b.addedAt.compareTo(a.addedAt));
     }
     return filtered;
   }
@@ -102,24 +192,60 @@ class _ContactsScreenState extends State<ContactsScreen> {
               const SizedBox(height: 14),
               _buildSort(t),
               const SizedBox(height: 12),
+              if (_loading)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 24),
+                    child: CircularProgressIndicator(color: t.accent.primary),
+                  ),
+                ),
+              if (!_loading && _loadError != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: t.panel,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: t.cardBorder),
+                  ),
+                  child: Text(
+                    'Failed to load contacts from backend: $_loadError',
+                    style: TextStyle(color: t.mutedText, fontSize: 12),
+                  ),
+                ),
+              if (!_loading && _loadError == null && contacts.isEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: t.panel,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: t.cardBorder),
+                  ),
+                  child: Text(
+                    'No contacts found. Add your first contact.',
+                    style: TextStyle(color: t.mutedText, fontSize: 12),
+                  ),
+                ),
             ]),
           ),
         ),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-          sliver: SliverGrid(
-            delegate: SliverChildBuilderDelegate(
-              (context, i) => _buildContactCard(t, contacts[i]),
-              childCount: contacts.length,
-            ),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 0.9,
+        if (!_loading && contacts.isNotEmpty)
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            sliver: SliverGrid(
+              delegate: SliverChildBuilderDelegate(
+                (context, i) => _buildContactCard(t, contacts[i]),
+                childCount: contacts.length,
+              ),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 0.9,
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -154,15 +280,19 @@ class _ContactsScreenState extends State<ContactsScreen> {
           child: _ActionBtn(
             icon: Icons.person_add_alt_1_rounded,
             label: 'Add Contact',
-            onTap: _openAddContactPage,
+            onTap: () {
+              _openAddContactPage();
+            },
           ),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: _ActionBtn(
-            icon: Icons.import_contacts_rounded,
-            label: 'Import Contacts',
-            onTap: () {},
+            icon: Icons.refresh_rounded,
+            label: 'Refresh',
+            onTap: () {
+              _loadContacts();
+            },
           ),
         ),
       ],
@@ -214,7 +344,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   Widget _buildContactCard(
     AppThemeTokens t,
-    ({String name, String number, String? image, DateTime added}) contact,
+    _ContactRecord contact,
   ) {
     final initials = contact.name
         .split(' ')
@@ -232,38 +362,46 @@ class _ContactsScreenState extends State<ContactsScreen> {
       ),
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Align(
+            alignment: Alignment.topRight,
+            child: GestureDetector(
+              onTap: () => _deleteContact(contact),
+              child: Icon(Icons.delete_outline_rounded, size: 18, color: t.mutedText),
+            ),
+          ),
           Expanded(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(14),
               child: Container(
                 width: double.infinity,
                 color: t.backgroundSecondary,
-                child: contact.image == null
+                child: contact.imageUrl == null
                     ? Center(
-                  child: Text(
-                    initials,
-                    style: TextStyle(
-                      color: t.textPrimary,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                )
+                        child: Text(
+                          initials,
+                          style: TextStyle(
+                            color: t.textPrimary,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      )
                     : Image.network(
-                  contact.image!,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => Center(
-                    child: Text(
-                      initials,
-                      style: TextStyle(
-                        color: t.textPrimary,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
+                        contact.imageUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => Center(
+                          child: Text(
+                            initials,
+                            style: TextStyle(
+                              color: t.textPrimary,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                ),
               ),
             ),
           ),
@@ -277,6 +415,18 @@ class _ContactsScreenState extends State<ContactsScreen> {
               color: t.textPrimary,
               fontSize: 13,
               fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            contact.number,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: t.mutedText,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -350,6 +500,7 @@ class _AddContactPageState extends State<_AddContactPage> {
 
   DateTime? _birthday;
   String _countryCode = '+1';
+  bool _saving = false;
 
   static const List<String> _countryCodes = [
     '+1',
@@ -384,13 +535,33 @@ class _AddContactPageState extends State<_AddContactPage> {
     }
   }
 
-  void _saveContact() {
+  Future<void> _saveContact() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_saving) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Contact saved')),
-    );
-    Navigator.of(context).pop();
+    final first = _firstNameCtrl.text.trim();
+    final surname = _surnameCtrl.text.trim();
+    final fullName = [first, surname].where((s) => s.isNotEmpty).join(' ').trim();
+    final phone = '$_countryCode ${_phoneCtrl.text.trim()}'.trim();
+
+    final payload = <String, dynamic>{
+      'name': fullName,
+      'number': phone,
+    };
+
+    setState(() => _saving = true);
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      await appwrite.createContact(payload);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Contact save failed: $e')),
+      );
+      setState(() => _saving = false);
+    }
   }
 
   String _birthdayText() {
@@ -514,7 +685,7 @@ class _AddContactPageState extends State<_AddContactPage> {
                 _InputField(
                   controller: _emailCtrl,
                   label: 'Email',
-                  hint: 'Enter email',
+                  hint: 'Optional (not stored yet)',
                   keyboardType: TextInputType.emailAddress,
                 ),
                 const SizedBox(height: 12),
@@ -565,7 +736,7 @@ class _AddContactPageState extends State<_AddContactPage> {
                 _InputField(
                   controller: _addressCtrl,
                   label: 'Address',
-                  hint: 'Enter address',
+                  hint: 'Optional (not stored yet)',
                   keyboardType: TextInputType.streetAddress,
                   maxLines: 2,
                 ),
@@ -573,14 +744,14 @@ class _AddContactPageState extends State<_AddContactPage> {
                 _InputField(
                   controller: _otherInfoCtrl,
                   label: 'Other info',
-                  hint: 'Additional notes',
+                  hint: 'Optional (not stored yet)',
                   maxLines: 2,
                 ),
                 const SizedBox(height: 20),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: _saveContact,
+                    onPressed: _saving ? null : _saveContact,
                     style: ElevatedButton.styleFrom(
                       elevation: 0,
                       backgroundColor: t.accent.primary,
@@ -590,13 +761,19 @@ class _AddContactPageState extends State<_AddContactPage> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text(
-                      'Save Contact',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
-                    ),
+                    child: _saving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text(
+                            'Save Contact',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
+                          ),
                   ),
                 ),
               ],

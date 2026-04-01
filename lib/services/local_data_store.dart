@@ -21,10 +21,11 @@ class PendingLocalOp {
 
 class LocalDataStore {
   static const _dbName = 'ahvi_local_sync.db';
-  static const _dbVersion = 2;
+  static const _dbVersion = 3;
   static const _wardrobeTable = 'wardrobe_cache';
   static const _boardsTable = 'boards_cache';
   static const _chatThreadsTable = 'chat_threads_cache';
+  static const _profileTable = 'profile_cache';
   static const _opsTable = 'pending_local_ops';
 
   Database? _db;
@@ -71,6 +72,14 @@ class LocalDataStore {
           )
         ''');
         await db.execute('''
+          CREATE TABLE $_profileTable (
+            user_id TEXT NOT NULL PRIMARY KEY,
+            data_json TEXT NOT NULL,
+            raw_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          )
+        ''');
+        await db.execute('''
           CREATE TABLE $_opsTable (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
@@ -95,6 +104,16 @@ class LocalDataStore {
               raw_json TEXT NOT NULL,
               updated_at TEXT NOT NULL,
               PRIMARY KEY (user_id, id)
+            )
+          ''');
+        }
+        if (oldVersion < 3) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS $_profileTable (
+              user_id TEXT NOT NULL PRIMARY KEY,
+              data_json TEXT NOT NULL,
+              raw_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL
             )
           ''');
         }
@@ -295,6 +314,52 @@ class LocalDataStore {
       _chatThreadsTable,
       where: 'user_id = ? AND id = ?',
       whereArgs: [userId, id],
+    );
+  }
+
+  Future<void> cacheUserProfile(
+    String userId, {
+    required Map<String, dynamic> data,
+    required Map<String, dynamic> raw,
+  }) async {
+    final db = await _database();
+    await db.insert(
+      _profileTable,
+      {
+        'user_id': userId,
+        'data_json': jsonEncode(data),
+        'raw_json': jsonEncode(raw),
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<Map<String, dynamic>?> loadUserProfile(String userId) async {
+    final db = await _database();
+    final rows = await db.query(
+      _profileTable,
+      where: 'user_id = ?',
+      whereArgs: [userId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+    final data = Map<String, dynamic>.from(
+      jsonDecode((row['data_json'] as String?) ?? '{}'),
+    );
+    final raw = Map<String, dynamic>.from(
+      jsonDecode((row['raw_json'] as String?) ?? '{}'),
+    );
+    return {'id': userId, 'data': data, 'raw': raw};
+  }
+
+  Future<void> deleteUserProfile(String userId) async {
+    final db = await _database();
+    await db.delete(
+      _profileTable,
+      where: 'user_id = ?',
+      whereArgs: [userId],
     );
   }
 

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:myapp/theme/theme_tokens.dart';
-import 'package:myapp/diet_page.dart' as diet;
+import 'package:myapp/meal_planner.dart' as diet;
 import 'package:myapp/fitness_page.dart' as fitness;
 
 class DietAndFitnessScreen extends StatefulWidget {
@@ -109,7 +109,7 @@ class _DietAndFitnessScreenState extends State<DietAndFitnessScreen>
               controller: _tabController,
               physics: const NeverScrollableScrollPhysics(),
               children: const [
-                RepaintBoundary(child: diet.MainScreen()),
+                RepaintBoundary(child: diet.Screen4()),
                 RepaintBoundary(child: fitness.WorkoutStudioScreen()),
               ],
             ),

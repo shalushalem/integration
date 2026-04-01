@@ -1,10 +1,33 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:typed_data'; // ðŸš€ Added this so it understands Uint8List!
 import 'package:http/http.dart' as http;
 import 'package:myapp/config/env.dart';
 
 class BackendService {
+  BackendService({this.authToken});
+
   final String baseUrl = Env.backendApiUrl;
+  String? authToken;
+
+  void setAuthToken(String? token) {
+    authToken = (token ?? '').trim().isEmpty ? null : token!.trim();
+  }
+
+  Map<String, String> _authHeaders() {
+    final headers = <String, String>{};
+    final token = (authToken ?? '').trim();
+    if (token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
+
+  Map<String, String> _jsonHeaders() {
+    return <String, String>{
+      'Content-Type': 'application/json',
+      ..._authHeaders(),
+    };
+  }
 
   // --- Chat & Styling Engine ---
   Future<Map<String, dynamic>> sendChatQuery(
@@ -21,7 +44,7 @@ class BackendService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/text'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _jsonHeaders(),
         body: jsonEncode({
           'messages': [
             ...chatHistory,
@@ -126,7 +149,7 @@ class BackendService {
       for (final path in candidates) {
         final response = await http.post(
           Uri.parse('$baseUrl$path'),
-          headers: {'Content-Type': 'application/json'},
+          headers: _jsonHeaders(),
           body: jsonEncode({'image_base64': base64Image}),
         );
         if (response.statusCode == 200) {
@@ -167,7 +190,7 @@ class BackendService {
       for (final path in candidates) {
         final response = await http.post(
           Uri.parse('$baseUrl$path'),
-          headers: {'Content-Type': 'application/json'},
+          headers: _jsonHeaders(),
           body: jsonEncode({'image_base64': base64String}),
         );
 
@@ -193,7 +216,7 @@ class BackendService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/anthropic'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _jsonHeaders(),
         body: jsonEncode({
           'model': model,
           'max_tokens': maxTokens,
@@ -219,7 +242,7 @@ class BackendService {
       final uri = Uri.parse(
         '$baseUrl/api/weather?latitude=$latitude&longitude=$longitude',
       );
-      final response = await http.get(uri);
+      final response = await http.get(uri, headers: _authHeaders());
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       }
@@ -236,7 +259,7 @@ class BackendService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/uploads/avatar'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _jsonHeaders(),
         body: jsonEncode({
           'user_id': userId,
           'image_base64': base64Encode(imageBytes),
@@ -260,7 +283,7 @@ class BackendService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/uploads/wardrobe'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _jsonHeaders(),
         body: jsonEncode({
           'file_id': fileId,
           'raw_image_base64': base64Encode(rawImageBytes),
@@ -281,4 +304,26 @@ class BackendService {
       return null;
     }
   }
+
+  Future<Map<String, dynamic>?> getTaskStatus(String taskId) async {
+    final id = taskId.trim();
+    if (id.isEmpty) return null;
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/tasks/$id'),
+        headers: _authHeaders(),
+      );
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
 }
+
+
+
+

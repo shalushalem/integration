@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:myapp/bills_page.dart' as bills_page;
 import 'package:myapp/calendar.dart' as calendar_page;
+import 'package:myapp/daily_wear.dart' as daily_wear_page;
 import 'package:myapp/diet_fitness.dart' as diet_fitness_page;
 import 'package:myapp/medi_tracker.dart' as medi_tracker_page;
 import 'package:myapp/services/appwrite_service.dart';
@@ -42,6 +43,7 @@ class _ChatMessage {
   final String text;
   final bool isMe;
   final List<dynamic> chips;
+  final List<Map<String, dynamic>> cards;
   final String? boardId;
   final String? packId;
   final _LocalResponse? local;
@@ -49,6 +51,7 @@ class _ChatMessage {
     required this.text,
     required this.isMe,
     this.chips = const [],
+    this.cards = const [],
     this.boardId,
     this.packId,
     this.local,
@@ -439,10 +442,18 @@ class _ChatScreenState extends State<ChatScreen>
   bool _isTyping = false;
   String _userName = 'User';
   String _userId = 'user_1';
+  Map<String, dynamic> _userProfileContext = const {};
   final Map<String, List<List<bool>>> _checklistChecksByTitle = {};
   final Map<String, List<List<String>>> _checklistItemsByTitle = {};
   final Map<String, List<TextEditingController>> _checklistAddCtrlsByTitle = {};
   final Map<String, bool> _checklistSavedByTitle = {};
+  final Map<String, String> _boardIdByLabel = const {
+    'Party Looks': 'party_looks',
+    'Occasion': 'occasion',
+    'Office Fit': 'office_fit',
+    'Vacation': 'vacation',
+    'Everything Else': 'everything_else',
+  };
 
   // ── Voice ──────────────────────────────────────────────────────────────────
   final stt.SpeechToText _speech = stt.SpeechToText();
@@ -455,6 +466,68 @@ class _ChatScreenState extends State<ChatScreen>
   String get _module => widget.moduleContext.toLowerCase().trim() == 'prepare'
       ? 'plan'
       : widget.moduleContext.toLowerCase().trim();
+
+  String _occasionFromBoardId(String boardId) {
+    switch (boardId.trim().toLowerCase()) {
+      case 'party_looks':
+        return 'Party';
+      case 'occasion':
+        return 'Occasion';
+      case 'office_fit':
+        return 'Office';
+      case 'vacation':
+        return 'Vacation';
+      case 'everything_else':
+        return 'Everything Else';
+      default:
+        return 'Occasion';
+    }
+  }
+
+  Future<void> _saveChecklistToBoard({
+    required String boardId,
+    required String title,
+    required List<({String name, String emoji, Color color, List<String> items})>
+        sections,
+    required List<List<String>> itemsState,
+    required List<List<bool>> checksState,
+  }) async {
+    final sectionPayload = <Map<String, dynamic>>[];
+    var totalItems = 0;
+    var completedItems = 0;
+    for (var i = 0; i < sections.length; i++) {
+      totalItems += itemsState[i].length;
+      completedItems += checksState[i].where((v) => v).length;
+      sectionPayload.add({
+        'name': sections[i].name,
+        'emoji': sections[i].emoji,
+        'color': sections[i].color.value,
+        'items': List<String>.from(itemsState[i]),
+        'checked': List<bool>.from(checksState[i]),
+      });
+    }
+
+    final occasion = _occasionFromBoardId(boardId);
+    final description = '$title · $completedItems/$totalItems completed items';
+
+    final payload = <String, dynamic>{
+      'title': title.trim().isEmpty ? 'Checklist Board' : title.trim(),
+      'description': description,
+      'occasion': occasion,
+      'imageUrl': '',
+      'itemIds': const <String>[],
+      'source': 'chat_checklist',
+      'checklist': {
+        'sections': sectionPayload,
+        'total_items': totalItems,
+        'completed_items': completedItems,
+      },
+      'created_at': DateTime.now().toIso8601String(),
+    };
+
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    await appwrite.createSavedBoard(payload);
+  }
 
   @override
   void initState() {
@@ -487,6 +560,34 @@ class _ChatScreenState extends State<ChatScreen>
           _userId = user.$id;
         },
       );
+    }
+    await _fetchUserProfileContext();
+  }
+
+  Future<void> _fetchUserProfileContext() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final doc = await appwrite.getUserProfile();
+      final data = doc.data;
+      final contextPayload = <String, dynamic>{
+        'name': data['name'] ?? _userName,
+        'username': data['username'],
+        'gender': data['gender'],
+        'skinTone': data['skinTone'],
+        'bodyShape': data['bodyShape'],
+        'styles': data['styles'],
+        'shopPrefs': data['shopPrefs'],
+        'lang': data['lang'],
+      };
+      if (!mounted) return;
+      setState(() {
+        _userProfileContext = contextPayload;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _userProfileContext = {'name': _userName};
+      });
     }
   }
 
@@ -663,13 +764,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _handleChipTap(String chip) {
-    final local = _local[chip];
-    if (local == null) return _sendMessage(chip);
-    setState(() {
-      _messages.add(_ChatMessage(text: chip, isMe: true));
-      _messages.add(_ChatMessage(text: local.intro, isMe: false, local: local));
-    });
-    _scrollToBottom();
+    _sendMessage(chip);
   }
 
   void _sendMessage([String? chipText]) async {
@@ -689,6 +784,8 @@ class _ChatScreenState extends State<ChatScreen>
         _userId,
         List<Map<String, String>>.from(_chatHistory),
         _runningMemory,
+        moduleContext: _module,
+        userProfile: _userProfileContext,
       );
       if (!mounted) return;
       if (response['updated_memory'] != null) {
@@ -696,7 +793,15 @@ class _ChatScreenState extends State<ChatScreen>
       }
       final aiText =
           response['message']?['content']?.toString() ??
+          response['content']?.toString() ??
+          response['error']?.toString() ??
           "I'm having trouble connecting.";
+      final cards = response['cards'] is List
+          ? (response['cards'] as List)
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList()
+          : const <Map<String, dynamic>>[];
       _chatHistory.add({'role': 'assistant', 'content': aiText});
       setState(
         () => _messages.add(
@@ -704,6 +809,7 @@ class _ChatScreenState extends State<ChatScreen>
             text: aiText,
             isMe: false,
             chips: response['chips'] ?? [],
+            cards: cards,
             boardId: response['board_ids'],
             packId: response['pack_ids'],
           ),
@@ -753,6 +859,9 @@ class _ChatScreenState extends State<ChatScreen>
         break;
       case 'skincare':
         page = const skincare_page.SkincareScreen();
+        break;
+      case 'tryon':
+        page = const daily_wear_page.DailyWearScreen();
         break;
     }
     if (page == null) return;
@@ -1037,6 +1146,7 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       ),
       if (!m.isMe && m.local != null) _localView(m.local!, t),
+      if (!m.isMe && m.cards.isNotEmpty) _backendCardsView(m.cards, t),
       if (!m.isMe && m.chips.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(bottom: 16, left: 4),
@@ -1055,6 +1165,185 @@ class _ChatScreenState extends State<ChatScreen>
         ),
     ],
   );
+
+  Widget _backendCardsView(List<Map<String, dynamic>> cards, AppThemeTokens t) {
+    return Column(
+      children: cards.map((card) => _backendCard(card, t)).toList(),
+    );
+  }
+
+  Widget _backendCard(Map<String, dynamic> card, AppThemeTokens t) {
+    final title = (card['title'] ?? 'Checklist').toString().trim();
+    final subtitle = (card['subtitle'] ?? '').toString().trim();
+    final kind = (card['kind'] ?? '').toString().trim().toLowerCase();
+    final items = _extractCardItems(card['items']);
+    final actionPageKey = _extractActionPageKey(card['action']);
+
+    return Container(
+      margin: const EdgeInsets.only(left: 4, right: 28, bottom: 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: t.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title.isEmpty ? 'Checklist' : title,
+                  style: TextStyle(
+                    color: t.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (kind.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: t.accent.primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: t.accent.primary.withValues(alpha: 0.25)),
+                  ),
+                  child: Text(
+                    kind,
+                    style: TextStyle(
+                      color: t.accent.primary,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (subtitle.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: t.mutedText,
+                fontSize: 11.5,
+              ),
+            ),
+          ],
+          if (items.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            ...items.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Icon(
+                        Icons.circle,
+                        size: 6,
+                        color: t.accent.secondary,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        item,
+                        style: TextStyle(
+                          color: t.textPrimary,
+                          fontSize: 12.5,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          if (actionPageKey != null) ...[
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: () => _openOrganizePage(actionPageKey),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: t.panel,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: t.cardBorder),
+                ),
+                child: Text(
+                  'Open',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: t.accent.primary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  List<String> _extractCardItems(dynamic rawItems) {
+    if (rawItems is! List) return const <String>[];
+    final items = <String>[];
+    for (final item in rawItems) {
+      if (item == null) continue;
+      if (item is String) {
+        final text = item.trim();
+        if (text.isNotEmpty) items.add(text);
+        continue;
+      }
+      if (item is Map) {
+        final mapped = Map<String, dynamic>.from(item);
+        final text = (mapped['text'] ??
+                mapped['title'] ??
+                mapped['label'] ??
+                mapped['name'] ??
+                '')
+            .toString()
+            .trim();
+        if (text.isNotEmpty) items.add(text);
+        continue;
+      }
+      final text = item.toString().trim();
+      if (text.isNotEmpty) items.add(text);
+    }
+    return items;
+  }
+
+  String? _extractActionPageKey(dynamic rawAction) {
+    if (rawAction is! Map) return null;
+    final action = Map<String, dynamic>.from(rawAction);
+    final module = (action['module'] ?? '').toString().trim().toLowerCase();
+    final route = (action['route'] ?? '').toString().trim().toLowerCase();
+
+    if (module.contains('meal')) return 'meal';
+    if (module.contains('medi')) return 'medi';
+    if (module.contains('bill')) return 'bill';
+    if (module.contains('workout')) return 'workout';
+    if (module.contains('calendar')) return 'calendar';
+    if (module.contains('skincare') || module.contains('skin')) return 'skincare';
+
+    if (route.contains('meal')) return 'meal';
+    if (route.contains('med')) return 'medi';
+    if (route.contains('bill')) return 'bill';
+    if (route.contains('workout')) return 'workout';
+    if (route.contains('calendar')) return 'calendar';
+    if (route.contains('skincare') || route.contains('skin')) return 'skincare';
+
+    if (module.contains('tryon') || module.contains('try-on') || module.contains('try_on')) return 'tryon';
+    if (route.contains('tryon') || route.contains('try-on') || route.contains('try_on')) return 'tryon';
+    return null;
+  }
 
   Widget _localView(_LocalResponse r, AppThemeTokens t) {
     if (r.type == _RespType.outfits) {
@@ -1741,6 +2030,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     'Occasion',
                                     'Office Fit',
                                     'Vacation',
+                                    'Everything Else',
                                   ].map(
                                     (b) => ListTile(
                                       title: Text(
@@ -1751,12 +2041,44 @@ class _ChatScreenState extends State<ChatScreen>
                                         Icons.chevron_right_rounded,
                                         color: t.mutedText,
                                       ),
-                                      onTap: () {
+                                      onTap: () async {
+                                        final boardId = _boardIdByLabel[b];
                                         Navigator.pop(context);
-                                        checklistSetState(
-                                          () => _checklistSavedByTitle[title] =
-                                              true,
-                                        );
+                                        if (boardId == null) return;
+                                        try {
+                                          await _saveChecklistToBoard(
+                                            boardId: boardId,
+                                            title: title,
+                                            sections: sections,
+                                            itemsState: itemsState,
+                                            checksState: checksState,
+                                          );
+                                          if (!mounted) return;
+                                          checklistSetState(
+                                            () => _checklistSavedByTitle[title] =
+                                                true,
+                                          );
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Board saved to cloud',
+                                              ),
+                                            ),
+                                          );
+                                        } catch (e) {
+                                          if (!mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Failed to save board: $e',
+                                              ),
+                                            ),
+                                          );
+                                        }
                                       },
                                     ),
                                   ),
@@ -2320,3 +2642,5 @@ class _PulsingMicIconState extends State<_PulsingMicIcon>
     );
   }
 }
+
+

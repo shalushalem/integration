@@ -1,15 +1,13 @@
-import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-// ignore: depend_on_referenced_packages
-import 'package:http/http.dart' as http;
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/widgets/ahvi_stylist_chat.dart';
 import 'package:myapp/widgets/ahvi_lens_sheet.dart';
-
-Map<String, dynamic> _parseSkincareJsonMap(String payload) =>
-    Map<String, dynamic>.from(jsonDecode(payload) as Map);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  BEHAVIORAL DIFF ANALYSIS REPORT
@@ -208,6 +206,11 @@ class _SkincareScreenState extends State<SkincareScreen>
   String _skinType = '';
   List<String> _concerns = [];
   Set<int> _completedSteps = {};
+  Set<int> _dayCompletedSteps = {};
+  Set<int> _nightCompletedSteps = {};
+  String? _skincareDocId;
+  bool _profileLoaded = false;
+  Timer? _profileSaveDebounce;
   bool _chatOpen = false;
 
   // ── F01: back-btn hover state ──────────────────────────────────────────────
@@ -250,6 +253,7 @@ class _SkincareScreenState extends State<SkincareScreen>
   @override
   void initState() {
     super.initState();
+    _loadSkincareProfile();
 
     // ── F06: Init pulse animation (2.5s infinite) ──────────────────────────
     _pulseCtrl = AnimationController(
@@ -320,6 +324,7 @@ class _SkincareScreenState extends State<SkincareScreen>
 
   @override
   void dispose() {
+    _profileSaveDebounce?.cancel();
     _pulseCtrl.dispose();
     for (final c in _stepAnimCtrls) {
       c.dispose();
@@ -327,12 +332,84 @@ class _SkincareScreenState extends State<SkincareScreen>
     super.dispose();
   }
 
+  Future<void> _loadSkincareProfile() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final profile = await appwrite.getSkincareProfile();
+      if (!mounted || profile == null) return;
+
+      final data = profile.data;
+      final concerns = (data['concerns'] is List)
+          ? (data['concerns'] as List)
+                .map((e) => e.toString().trim())
+                .where((e) => e.isNotEmpty)
+                .toList()
+          : <String>[];
+
+      setState(() {
+        _skincareDocId = profile.$id;
+        _skinType = (data['skinType'] ?? '').toString();
+        _concerns = concerns;
+        _dayCompletedSteps = _toStepSet(data['daySteps']);
+        _nightCompletedSteps = _toStepSet(data['nightSteps']);
+        _completedSteps = Set<int>.from(
+          _isNight ? _nightCompletedSteps : _dayCompletedSteps,
+        );
+        _profileLoaded = true;
+      });
+    } catch (_) {}
+  }
+
+  Set<int> _toStepSet(dynamic value) {
+    if (value is List) {
+      return value
+          .map((e) => int.tryParse(e.toString()) ?? -1)
+          .where((v) => v >= 0)
+          .toSet();
+    }
+    return <int>{};
+  }
+
+  void _queueProfileSave() {
+    if (!_profileLoaded) return;
+    _profileSaveDebounce?.cancel();
+    _profileSaveDebounce = Timer(
+      const Duration(milliseconds: 350),
+      _persistSkincareProfile,
+    );
+  }
+
+  Future<void> _persistSkincareProfile() async {
+    final docId = _skincareDocId;
+    if (docId == null || docId.isEmpty) return;
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final daySteps = _dayCompletedSteps.toList()..sort();
+      final nightSteps = _nightCompletedSteps.toList()..sort();
+      await appwrite.updateSkincareProfile(
+        documentId: docId,
+        skinType: _skinType,
+        concerns: List<String>.from(_concerns),
+        daySteps: daySteps,
+        nightSteps: nightSteps,
+      );
+    } catch (_) {}
+  }
+
   void _setRoutine(bool night) {
+    if (_isNight) {
+      _nightCompletedSteps = Set<int>.from(_completedSteps);
+    } else {
+      _dayCompletedSteps = Set<int>.from(_completedSteps);
+    }
     setState(() {
       _isNight = night;
-      _completedSteps = {};
+      _completedSteps = Set<int>.from(
+        _isNight ? _nightCompletedSteps : _dayCompletedSteps,
+      );
     });
-    // ── F20: Re-trigger step slideUp animations on routine switch ─────────
+    _queueProfileSave();
+    // Re-trigger step slide-up animations on routine switch.
     _buildStepAnimations();
     setState(() {}); // Rebuild with new controllers
     _playStepAnimations();
@@ -342,8 +419,11 @@ class _SkincareScreenState extends State<SkincareScreen>
     setState(() {
       _skinType = type;
       _completedSteps = {};
+      _dayCompletedSteps = {};
+      _nightCompletedSteps = {};
       _concerns = [];
     });
+    _queueProfileSave();
   }
 
   void _toggleConcern(String concern) {
@@ -354,11 +434,20 @@ class _SkincareScreenState extends State<SkincareScreen>
         _concerns.add(concern);
       }
     });
+    _queueProfileSave();
   }
 
   void _markStep(int index) {
     if (_completedSteps.contains(index)) return;
-    setState(() => _completedSteps.add(index));
+    setState(() {
+      _completedSteps.add(index);
+      if (_isNight) {
+        _nightCompletedSteps = Set<int>.from(_completedSteps);
+      } else {
+        _dayCompletedSteps = Set<int>.from(_completedSteps);
+      }
+    });
+    _queueProfileSave();
   }
 
   @override
@@ -1248,6 +1337,8 @@ class _ChatOverlayState extends State<_ChatOverlay>
   bool _isBusy = false;
   bool _showQuickPills = true;
   final List<Map<String, String>> _chatHistory = [];
+  String _chatMemory = '';
+  String _chatUserId = 'user_1';
 
   bool _isListening = false;
   late AnimationController _micPulseCtrl;
@@ -1279,6 +1370,7 @@ class _ChatOverlayState extends State<_ChatOverlay>
   @override
   void initState() {
     super.initState();
+    _initChatIdentity();
     _animCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 420),
@@ -1310,6 +1402,15 @@ class _ChatOverlayState extends State<_ChatOverlay>
     });
   }
 
+  Future<void> _initChatIdentity() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final user = await appwrite.getCurrentUser();
+      if (!mounted || user == null || user.$id.isEmpty) return;
+      setState(() => _chatUserId = user.$id);
+    } catch (_) {}
+  }
+
   Future<void> _addAIGreeting() async {
     setState(() {
       _isBusy = true;
@@ -1320,25 +1421,26 @@ class _ChatOverlayState extends State<_ChatOverlay>
         'Be friendly and use 1 emoji max.';
 
     try {
-      final response = await http.post(
-        Uri.parse('https://api.anthropic.com/v1/messages'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 120,
-          'system': 'You are AHVI, a warm expert skincare advisor.',
-          'messages': [
-            {'role': 'user', 'content': greetPrompt},
-          ],
-        }),
+      final backend = Provider.of<BackendService>(context, listen: false);
+      final response = await backend.sendChatQuery(
+        greetPrompt,
+        _chatUserId,
+        const <Map<String, String>>[],
+        _chatMemory,
+        moduleContext: 'skincare',
+        userProfile: {
+          'skin_type': widget.skinType,
+          'concerns': widget.concerns,
+          'routine': widget.isNight ? 'night' : 'morning',
+          'completed_steps': widget.completedSteps,
+        },
       );
-      final data = await compute(_parseSkincareJsonMap, response.body);
+      if (response['updated_memory'] != null) {
+        _chatMemory = response['updated_memory'].toString();
+      }
       final text =
-          (data['content'] as List?)?.firstWhere(
-                (b) => b['type'] == 'text',
-                orElse: () => null,
-              )?['text']
-              as String?;
+          response['message']?['content']?.toString().trim() ??
+          response['content']?.toString().trim();
 
       if (mounted && text != null) {
         setState(() {
@@ -1404,47 +1506,47 @@ class _ChatOverlayState extends State<_ChatOverlay>
     });
     _scrollToBottom();
 
-    final systemPrompt =
-        'You are AHVI, a warm expert skincare advisor. '
-        'Context: ${_getCtx()} '
-        'Give concise, personalised, science-backed skincare advice in 2-4 sentences. '
-        'Use light friendly language with 1-2 emojis max.';
-
     try {
-      final response = await http.post(
-        Uri.parse('https://api.anthropic.com/v1/messages'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 380,
-          'system': systemPrompt,
-          'messages': _chatHistory,
-        }),
+      final backend = Provider.of<BackendService>(context, listen: false);
+      final historyForBackend = _chatHistory.length > 1
+          ? List<Map<String, String>>.from(
+              _chatHistory.sublist(0, _chatHistory.length - 1),
+            )
+          : <Map<String, String>>[];
+      final response = await backend.sendChatQuery(
+        text.trim(),
+        _chatUserId,
+        historyForBackend,
+        _chatMemory,
+        moduleContext: 'skincare',
+        userProfile: {
+          'skin_type': widget.skinType,
+          'concerns': widget.concerns,
+          'routine': widget.isNight ? 'night' : 'morning',
+          'completed_steps': widget.completedSteps,
+          'context': _getCtx(),
+        },
       );
-      final data = await compute(_parseSkincareJsonMap, response.body);
+
+      if (response['updated_memory'] != null) {
+        _chatMemory = response['updated_memory'].toString();
+      }
       final aiText =
-          (data['content'] as List?)?.firstWhere(
-                (b) => b['type'] == 'text',
-                orElse: () => null,
-              )?['text']
-              as String?;
+          response['message']?['content']?.toString().trim() ??
+          response['content']?.toString().trim() ??
+          response['error']?.toString().trim() ??
+          "I couldn't reach AHVI backend right now.";
 
       if (mounted) {
-        final reply = aiText ?? "I'm having a moment — please try again ✦";
         setState(() {
           _isBusy = false;
-          _messages.add(_ChatMessage(isUser: false, text: reply, time: _ts()));
-          _chatHistory.add({'role': 'assistant', 'content': reply});
+          _messages.add(_ChatMessage(isUser: false, text: aiText, time: _ts()));
+          _chatHistory.add({'role': 'assistant', 'content': aiText});
         });
         _scrollToBottom();
       }
     } catch (_) {
-      final fallbacks = [
-        'For oily skin, a lightweight niacinamide serum is transformative — it regulates sebum and minimises pores. 💧',
-        'Always apply SPF last in your morning routine. Reapply every 2 hours outdoors! ☀️',
-        'Retinol is best introduced gradually — start 2× per week at a low concentration to avoid irritation. 🌙',
-      ];
-      final fallback = fallbacks[DateTime.now().second % fallbacks.length];
+      const fallback = "I couldn't reach AHVI backend right now.";
       if (mounted) {
         setState(() {
           _isBusy = false;
@@ -2380,3 +2482,6 @@ class _AskAhviFabState extends State<_AskAhviFab>
     );
   }
 }
+
+
+

@@ -2,9 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/widgets/ahvi_chat_prompt_bar.dart';
 import 'package:myapp/widgets/ahvi_lens_sheet.dart';
 import 'package:myapp/theme/theme_tokens.dart';
+import 'package:provider/provider.dart';
 
 Future<void> showAhviStylistChatSheet(BuildContext context) {
   return showModalBottomSheet<void>(
@@ -95,9 +98,12 @@ class _AhviStylistChatSheetState extends State<_AhviStylistChatSheet> {
   final FocusNode _inputFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   final List<_SheetMessage> _messages = [];
+  final List<Map<String, String>> _chatHistory = [];
   bool _typing = false;
   bool _showPrompts = true;
   bool _chatHasText = false;
+  String _runningMemory = '';
+  String _userId = 'demo_user';
 
   final List<String> _quickPrompts = const [
     'What should I wear today?',
@@ -110,6 +116,7 @@ class _AhviStylistChatSheetState extends State<_AhviStylistChatSheet> {
   @override
   void initState() {
     super.initState();
+    _fetchUserId();
     _inputController.addListener(() {
       final hasText = _inputController.text.trim().isNotEmpty;
       if (hasText != _chatHasText && mounted) {
@@ -128,6 +135,15 @@ class _AhviStylistChatSheetState extends State<_AhviStylistChatSheet> {
         );
       });
     });
+  }
+
+  Future<void> _fetchUserId() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final user = await appwrite.getCurrentUser();
+      if (!mounted || user == null || user.$id.isEmpty) return;
+      setState(() => _userId = user.$id);
+    } catch (_) {}
   }
 
   @override
@@ -149,7 +165,7 @@ class _AhviStylistChatSheetState extends State<_AhviStylistChatSheet> {
     });
   }
 
-  void _sendMessage(String text) {
+  Future<void> _sendMessage(String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty || _typing) return;
     _inputController.clear();
@@ -157,31 +173,45 @@ class _AhviStylistChatSheetState extends State<_AhviStylistChatSheet> {
       _showPrompts = false;
       _typing = true;
       _messages.add(_SheetMessage(text: trimmed, isUser: true));
+      _chatHistory.add({'role': 'user', 'content': trimmed});
     });
     _scrollToBottom();
+    try {
+      final backend = Provider.of<BackendService>(context, listen: false);
+      final response = await backend.sendChatQuery(
+        trimmed,
+        _userId,
+        List<Map<String, String>>.from(_chatHistory),
+        _runningMemory,
+        moduleContext: 'style',
+      );
 
-    Timer(const Duration(milliseconds: 700), () {
       if (!mounted) return;
+      if (response['updated_memory'] != null) {
+        _runningMemory = response['updated_memory'].toString();
+      }
+
+      final aiText =
+          response['message']?['content']?.toString().trim() ??
+          response['content']?.toString().trim() ??
+          response['error']?.toString().trim() ??
+          "I couldn't reach AHVI backend right now.";
+
+      _chatHistory.add({'role': 'assistant', 'content': aiText});
       setState(() {
         _typing = false;
-        _messages.add(_SheetMessage(text: _buildReply(trimmed), isUser: false));
+        _messages.add(_SheetMessage(text: aiText, isUser: false));
       });
-      _scrollToBottom();
-    });
-  }
-
-  String _buildReply(String query) {
-    final q = query.toLowerCase();
-    if (q.contains('wear') || q.contains('outfit')) {
-      return 'Go for a clean base and one accent layer. Keep colors coordinated and match footwear to the occasion.';
+    } catch (_) {
+      if (!mounted) return;
+      const fallback = "I couldn't reach AHVI backend right now.";
+      _chatHistory.add({'role': 'assistant', 'content': fallback});
+      setState(() {
+        _typing = false;
+        _messages.add(_SheetMessage(text: fallback, isUser: false));
+      });
     }
-    if (q.contains('routine') || q.contains('skin')) {
-      return 'Keep it simple and consistent: cleanse, targeted treatment, moisturize, and SPF in daytime.';
-    }
-    if (q.contains('plan') || q.contains('meal') || q.contains('workout')) {
-      return 'Start with your top 3 priorities today, then build around time blocks so your plan stays realistic.';
-    }
-    return 'Great question. Tell me your goal and context, and I will give you a concise personalized recommendation.';
+    _scrollToBottom();
   }
 
   @override

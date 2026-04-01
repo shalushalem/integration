@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/widgets/ahvi_stylist_chat.dart';
 import 'package:myapp/widgets/ahvi_lens_sheet.dart';
@@ -78,6 +79,9 @@ class _BillsScreenState extends State<BillsScreen>
     },
   ];
   final TextEditingController _chatInputCtrl = TextEditingController();
+  final List<Map<String, String>> _chatHistory = [];
+  String _chatMemory = '';
+  String _chatUserId = 'user_1';
 
   // ── DB DATA LISTS ──────────────────────────────────────────────────
   List<Map<String, dynamic>> _bills = [];
@@ -148,6 +152,7 @@ class _BillsScreenState extends State<BillsScreen>
   void initState() {
     super.initState();
     _fetchData();
+    _initChatIdentity();
 
     _pulseCtrl = AnimationController(
       vsync: this,
@@ -177,6 +182,15 @@ class _BillsScreenState extends State<BillsScreen>
       vsync: this,
       duration: Duration(milliseconds: 300),
     );
+  }
+
+  Future<void> _initChatIdentity() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final user = await appwrite.getCurrentUser();
+      if (!mounted || user == null || user.$id.isEmpty) return;
+      setState(() => _chatUserId = user.$id);
+    } catch (_) {}
   }
 
   @override
@@ -1206,16 +1220,53 @@ class _BillsScreenState extends State<BillsScreen>
     );
   }
 
-  void _sendChatMsg(String text) {
-    if (text.trim().isEmpty) return;
-    setState(() {
-      _chatMessages.add({'from': 'user', 'text': text.trim()});
-      _chatMessages.add({
-        'from': 'ahvi',
-        'text': 'Got it! I\'m reviewing your bills now… ✦',
-      });
-    });
+  Future<void> _sendChatMsg(String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
     _chatInputCtrl.clear();
+
+    setState(() {
+      _chatMessages.add({'from': 'user', 'text': trimmed});
+      _chatHistory.add({'role': 'user', 'content': trimmed});
+    });
+
+    try {
+      final backend = Provider.of<BackendService>(context, listen: false);
+      final historyForBackend = _chatHistory.length > 1
+          ? List<Map<String, String>>.from(
+              _chatHistory.sublist(0, _chatHistory.length - 1),
+            )
+          : <Map<String, String>>[];
+      final response = await backend.sendChatQuery(
+        trimmed,
+        _chatUserId,
+        historyForBackend,
+        _chatMemory,
+        moduleContext: 'bills',
+      );
+
+      if (!mounted) return;
+      if (response['updated_memory'] != null) {
+        _chatMemory = response['updated_memory'].toString();
+      }
+      final aiText =
+          response['message']?['content']?.toString().trim() ??
+          response['content']?.toString().trim() ??
+          response['error']?.toString().trim() ??
+          "I couldn't reach AHVI backend right now.";
+
+      setState(() {
+        _chatMessages.add({'from': 'ahvi', 'text': aiText});
+        _chatHistory.add({'role': 'assistant', 'content': aiText});
+      });
+    } catch (_) {
+      if (!mounted) return;
+      const fallback = "I couldn't reach AHVI backend right now.";
+      setState(() {
+        _chatMessages.add({'from': 'ahvi', 'text': fallback});
+        _chatHistory.add({'role': 'assistant', 'content': fallback});
+      });
+    }
   }
 
   Widget _buildOverlayBackdrop() {
@@ -3172,3 +3223,4 @@ class _PerforationPainter extends CustomPainter {
   @override
   bool shouldRepaint(_) => false;
 }
+

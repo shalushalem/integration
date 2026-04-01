@@ -24,10 +24,10 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// ── Color tokens ──────────────────────────────────────────────────────────────
+// â”€â”€ Color tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Colors are resolved from theme tokens in widget builds.
 
-// ── Data Models ───────────────────────────────────────────────────────────────
+// â”€â”€ Data Models â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class MealPlan {
   final String id; // [CHANGED] from int to String for Appwrite IDs
   final String name, desc, planType;
@@ -54,13 +54,18 @@ class MealItem {
   );
 }
 
-// [F5] Blur helper ──────────────────────────────────────────────────────────
+// [F5] Blur helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ImageFilter _buildBlur(double sigma) =>
     ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Root Screen
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+class MainScreen extends Screen4 {
+  const MainScreen({super.key});
+}
+
 class Screen4 extends StatefulWidget {
   const Screen4({super.key});
   @override
@@ -124,7 +129,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     })..start();
 
     _messages.add(_ChatMsg(isBot: true,
-        text: 'Hey! 😊 Ask for a Mediterranean, High Protein, Vegan, Low Carb or Balanced plan — and say daily, weekly or monthly!'));
+        text: 'Hey! ðŸ˜Š Ask for a Mediterranean, High Protein, Vegan, Low Carb or Balanced plan â€” and say daily, weekly or monthly!'));
   }
 
   // [ADDED] DB Fetch Logic
@@ -241,10 +246,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     if (name.isEmpty) { setState(() => _planNameError = true); return; }
     setState(() => _planNameError = false);
     final meals = <MealItem>[];
-    if (_bNameCtrl.text.trim().isNotEmpty) meals.add(MealItem(type:'Breakfast',icon:'🌅',cls:'breakfast',name:_bNameCtrl.text.trim(),desc:_bDescCtrl.text.trim(),cal:int.tryParse(_bCalCtrl.text)??0));
-    if (_lNameCtrl.text.trim().isNotEmpty) meals.add(MealItem(type:'Lunch',icon:'☀️',cls:'lunch',name:_lNameCtrl.text.trim(),desc:_lDescCtrl.text.trim(),cal:int.tryParse(_lCalCtrl.text)??0));
-    if (_dNameCtrl.text.trim().isNotEmpty) meals.add(MealItem(type:'Dinner',icon:'🌙',cls:'dinner',name:_dNameCtrl.text.trim(),desc:_dDescCtrl.text.trim(),cal:int.tryParse(_dCalCtrl.text)??0));
-    if (_sNameCtrl.text.trim().isNotEmpty) meals.add(MealItem(type:'Snack',icon:'🍎',cls:'snack',name:_sNameCtrl.text.trim(),desc:_sDescCtrl.text.trim(),cal:int.tryParse(_sCalCtrl.text)??0));
+    if (_bNameCtrl.text.trim().isNotEmpty) meals.add(MealItem(type:'Breakfast',icon:'ðŸŒ…',cls:'breakfast',name:_bNameCtrl.text.trim(),desc:_bDescCtrl.text.trim(),cal:int.tryParse(_bCalCtrl.text)??0));
+    if (_lNameCtrl.text.trim().isNotEmpty) meals.add(MealItem(type:'Lunch',icon:'â˜€ï¸',cls:'lunch',name:_lNameCtrl.text.trim(),desc:_lDescCtrl.text.trim(),cal:int.tryParse(_lCalCtrl.text)??0));
+    if (_dNameCtrl.text.trim().isNotEmpty) meals.add(MealItem(type:'Dinner',icon:'ðŸŒ™',cls:'dinner',name:_dNameCtrl.text.trim(),desc:_dDescCtrl.text.trim(),cal:int.tryParse(_dCalCtrl.text)??0));
+    if (_sNameCtrl.text.trim().isNotEmpty) meals.add(MealItem(type:'Snack',icon:'ðŸŽ',cls:'snack',name:_sNameCtrl.text.trim(),desc:_sDescCtrl.text.trim(),cal:int.tryParse(_sCalCtrl.text)??0));
     if (meals.isEmpty) return;
     
     final totalCal = meals.fold(0, (a, m) => a + m.cal);
@@ -293,7 +298,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
   _ChatMsg _getBotReply(String t) {
     if (t.contains('hi') || t.contains('hello') || t.contains('hey')) {
-      return _ChatMsg(isBot: true, text: "Hey! 😊 Ask for a Mediterranean, High Protein, Vegan, Low Carb or Balanced plan — and say daily, weekly or monthly!");
+      return _ChatMsg(isBot: true, text: "Hey! ðŸ˜Š Ask for a Mediterranean, High Protein, Vegan, Low Carb or Balanced plan â€” and say daily, weekly or monthly!");
     }
     String style = '';
     if (t.contains('mediterr'))                   { style = 'mediterranean'; }
@@ -301,7 +306,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     else if (t.contains('vegan') || t.contains('plant'))    { style = 'vegan'; }
     else if (t.contains('low carb') || t.contains('keto'))  { style = 'lowcarb'; }
     else if (t.contains('balance') || t.contains('normal')) { style = 'balanced'; }
-    else { return _ChatMsg(isBot: true, text: "I'd love to help! Try: Mediterranean weekly, High Protein monthly, Vegan daily, Low Carb weekly, or Balanced monthly 🥗"); }
+    else { return _ChatMsg(isBot: true, text: "I'd love to help! Try: Mediterranean weekly, High Protein monthly, Vegan daily, Low Carb weekly, or Balanced monthly ðŸ¥—"); }
 
     String planType = 'daily';
     if (t.contains('week')) { planType = 'weekly'; }
@@ -311,17 +316,17 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     final cap = '${planType[0].toUpperCase()}${planType.substring(1)}';
     
     return _ChatMsg(isBot: true,
-      text: "Here's your $styleName $cap Plan! 🎉",
+      text: "Here's your $styleName $cap Plan! ðŸŽ‰",
       suggestedPlan: MealPlan(
         id: DateTime.now().millisecondsSinceEpoch.toString(), // Temporary string ID
         name: '$styleName $cap Plan',
         desc: 'AI-suggested $styleName meal plan',
         planType: planType, totalCal: 1580,
         meals: [
-          MealItem(type:'Breakfast',icon:'🌅',cls:'breakfast',name:'Nutritious breakfast bowl',desc:'Seasonal fruits, nuts & seeds',cal:380),
-          MealItem(type:'Lunch',icon:'☀️',cls:'lunch',name:'Protein-packed lunch',desc:'Fresh vegetables, whole grains',cal:520),
-          MealItem(type:'Dinner',icon:'🌙',cls:'dinner',name:'Light & filling dinner',desc:'Lean protein, roasted veggies',cal:540),
-          MealItem(type:'Snack',icon:'🍎',cls:'snack',name:'Healthy snack',desc:'Nuts, fruit, yogurt',cal:140),
+          MealItem(type:'Breakfast',icon:'ðŸŒ…',cls:'breakfast',name:'Nutritious breakfast bowl',desc:'Seasonal fruits, nuts & seeds',cal:380),
+          MealItem(type:'Lunch',icon:'â˜€ï¸',cls:'lunch',name:'Protein-packed lunch',desc:'Fresh vegetables, whole grains',cal:520),
+          MealItem(type:'Dinner',icon:'ðŸŒ™',cls:'dinner',name:'Light & filling dinner',desc:'Lean protein, roasted veggies',cal:540),
+          MealItem(type:'Snack',icon:'ðŸŽ',cls:'snack',name:'Healthy snack',desc:'Nuts, fruit, yogurt',cal:140),
         ],
       ),
     );
@@ -383,9 +388,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                         _ViewTabs(currentView: _currentView, onTabChanged: (v) => setState(() => _currentView = v)),
                         const SizedBox(height: 18),
                         if (filtered.isEmpty && _plans.isEmpty)
-                          const _EmptyState(icon: '🍽', message: 'No meal plans yet.\nAdd a custom plan or chat with the assistant!')
+                          const _EmptyState(icon: 'ðŸ½', message: 'No meal plans yet.\nAdd a custom plan or chat with the assistant!')
                         else if (filtered.isEmpty)
-                          const _EmptyState(icon: '🔍', message: 'No plans for this view yet. Add one!')
+                          const _EmptyState(icon: 'ðŸ”', message: 'No plans for this view yet. Add one!')
                         else
                           Column(
                             children: filtered.map((plan) {
@@ -472,7 +477,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                   });
                   _fetchData(); // Reload DB list
                   Future.delayed(const Duration(milliseconds: 150), () {
-                    if (mounted) setState(() => _messages.add(_ChatMsg(isBot: true, text: '✅ "${plan.name}" has been saved to your Meal Plans!')));
+                    if (mounted) setState(() => _messages.add(_ChatMsg(isBot: true, text: 'âœ… "${plan.name}" has been saved to your Meal Plans!')));
                   });
                 } catch(e) {
                    debugPrint("Error saving bot plan: $e");
@@ -486,9 +491,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F2] Background Orbs — drift @keyframes
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// [F2] Background Orbs â€” drift @keyframes
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _BgOrbs extends StatefulWidget {
   const _BgOrbs();
   @override
@@ -581,9 +586,9 @@ class _AnimatedOrb extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F1] Live clock · [F3] Back btn hover lift · [F6] Add btn hover lift
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// [F1] Live clock Â· [F3] Back btn hover lift Â· [F6] Add btn hover lift
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _TopSection extends StatefulWidget {
   final String dateStr, liveTimeStr;
   final VoidCallback onAddTap;
@@ -664,7 +669,7 @@ class _TopSectionState extends State<_TopSection> {
                   const SizedBox(width: 5),
                   Text(
                     widget.liveTimeStr.isNotEmpty
-                        ? '${widget.dateStr}  ·  ${widget.liveTimeStr}'
+                        ? '${widget.dateStr}  Â·  ${widget.liveTimeStr}'
                         : widget.dateStr,
                     style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: t.tileText),
                   ),
@@ -706,9 +711,9 @@ class _TopSectionState extends State<_TopSection> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F8] View Tabs — hover opacity 0.85
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// [F8] View Tabs â€” hover opacity 0.85
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _ViewTabs extends StatelessWidget {
   final String currentView;
   final Function(String) onTabChanged;
@@ -782,9 +787,9 @@ class _ViewTabBtnState extends State<_ViewTabBtn> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Empty State
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _EmptyState extends StatelessWidget {
   final String icon, message;
   const _EmptyState({required this.icon, required this.message});
@@ -803,12 +808,12 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // [F9]  Card shadow hover
 // [F10] Edit button (was missing) + gradient hover
 // [F11] Delete button red hover + scale(1.08)
 // [F12] Pop-in animation on card appear
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _VisualPlanCard extends StatefulWidget {
   final MealPlan plan;
   final int colorIndex;
@@ -825,7 +830,7 @@ class _VisualPlanCardState extends State<_VisualPlanCard> with SingleTickerProvi
   bool _delHovered    = false;
   bool _editHovered   = false;
 
-  // [F12] pop-in: opacity 0→1, scale 0.96→1 in 300ms
+  // [F12] pop-in: opacity 0â†’1, scale 0.96â†’1 in 300ms
   late AnimationController _popCtrl;
   late Animation<double> _popAnim;
 
@@ -912,7 +917,7 @@ class _VisualPlanCardState extends State<_VisualPlanCard> with SingleTickerProvi
                       ),
                       const SizedBox(width: 6),
 
-                      // [F10] Edit button — was missing; gradient bg + scale(1.08) on hover
+                      // [F10] Edit button â€” was missing; gradient bg + scale(1.08) on hover
                       MouseRegion(
                         onEnter: (_) => setState(() => _editHovered = true),
                         onExit:  (_) => setState(() => _editHovered = false),
@@ -1007,9 +1012,9 @@ class _VisualPlanCardState extends State<_VisualPlanCard> with SingleTickerProvi
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Expanded Body
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _ExpandedBody extends StatelessWidget {
   final MealPlan plan;
   final Color accentColor;
@@ -1072,7 +1077,7 @@ class _ExpandedBody extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('🔥 Total Calories', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700, color: t.textPrimary, letterSpacing: 0.4)),
+                Text('ðŸ”¥ Total Calories', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700, color: t.textPrimary, letterSpacing: 0.4)),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                   decoration: BoxDecoration(color: accentColor, borderRadius: BorderRadius.circular(100),
@@ -1148,7 +1153,7 @@ class _MealBlock extends StatelessWidget {
                     children: [
                       Text(m.name, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: t.textPrimary)),
                       if (m.desc.isNotEmpty) ...[
-                        Text(' · ', style: TextStyle(fontSize: 10.5, color: t.textPrimary)),
+                        Text(' Â· ', style: TextStyle(fontSize: 10.5, color: t.textPrimary)),
                         Text(m.desc, style: TextStyle(fontSize: 10.5, color: t.mutedText)),
                       ],
                       if (m.cal > 0)
@@ -1165,9 +1170,9 @@ class _MealBlock extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [F4] Chat FAB — scale(1.04) + accent3 shadow on hover
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// [F4] Chat FAB â€” scale(1.04) + accent3 shadow on hover
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _ChatFab extends StatefulWidget {
   final VoidCallback onTap;
   const _ChatFab({required this.onTap});
@@ -1214,9 +1219,9 @@ class _ChatFabState extends State<_ChatFab> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Add Meal Modal — [F13] submit hover · [F14] X btn hover · [F15] type-sel hover
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Add Meal Modal â€” [F13] submit hover Â· [F14] X btn hover Â· [F15] type-sel hover
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _AddMealModal extends StatelessWidget {
   final AnimationController animation;
   final TextEditingController planNameCtrl, planDescCtrl;
@@ -1810,13 +1815,13 @@ class _ChatDrawerState extends State<_ChatDrawer> {
               child: Wrap(
                 spacing: 6, runSpacing: 6,
                 children: [
-                  _QuickBtn(label:'🫒 Mediterranean',         onTap:() => widget.onSend('Mediterranean daily plan')),
-                  _QuickBtn(label:'💪 High Protein',          onTap:() => widget.onSend('High protein daily plan')),
-                  _QuickBtn(label:'🌱 Vegan',                 onTap:() => widget.onSend('Vegan daily plan')),
-                  _QuickBtn(label:'🥑 Low Carb Weekly',       onTap:() => widget.onSend('Low carb weekly plan')),
-                  _QuickBtn(label:'⚖️ Balanced Weekly',       onTap:() => widget.onSend('Balanced weekly plan')),
-                  _QuickBtn(label:'📅 Mediterranean Monthly', onTap:() => widget.onSend('Mediterranean monthly plan')),
-                  _QuickBtn(label:'🏋️ Protein Monthly',       onTap:() => widget.onSend('High protein monthly plan')),
+                  _QuickBtn(label:'ðŸ«’ Mediterranean',         onTap:() => widget.onSend('Mediterranean daily plan')),
+                  _QuickBtn(label:'ðŸ’ª High Protein',          onTap:() => widget.onSend('High protein daily plan')),
+                  _QuickBtn(label:'ðŸŒ± Vegan',                 onTap:() => widget.onSend('Vegan daily plan')),
+                  _QuickBtn(label:'ðŸ¥‘ Low Carb Weekly',       onTap:() => widget.onSend('Low carb weekly plan')),
+                  _QuickBtn(label:'âš–ï¸ Balanced Weekly',       onTap:() => widget.onSend('Balanced weekly plan')),
+                  _QuickBtn(label:'ðŸ“… Mediterranean Monthly', onTap:() => widget.onSend('Mediterranean monthly plan')),
+                  _QuickBtn(label:'ðŸ‹ï¸ Protein Monthly',       onTap:() => widget.onSend('High protein monthly plan')),
                 ],
               ),
             ),
@@ -1833,7 +1838,7 @@ class _ChatDrawerState extends State<_ChatDrawer> {
                       style: TextStyle(fontSize: 13.5, color: t.textPrimary),
                       onSubmitted: widget.onSend,
                       decoration: InputDecoration(
-                        hintText: 'Ask for a meal plan…',
+                        hintText: 'Ask for a meal planâ€¦',
                         hintStyle: TextStyle(color: t.mutedText, fontSize: 13.5),
                         filled: true, fillColor: t.backgroundSecondary,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -2114,7 +2119,7 @@ class _SuggestedPlanCardState extends State<_SuggestedPlanCard> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('🔥 Total', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: t.mutedText)),
+                Text('ðŸ”¥ Total', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: t.mutedText)),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                   decoration: BoxDecoration(color: accent.secondary, borderRadius: BorderRadius.circular(100)),
@@ -2184,3 +2189,4 @@ class _PlusCirclePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _PlusCirclePainter old) => old.color != color;
 }
+
