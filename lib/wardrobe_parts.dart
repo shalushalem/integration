@@ -464,18 +464,7 @@ class _AddItemModalState extends State<_AddItemModal>
   String _processStatus = '';
   Map<String, dynamic>? _aiData;
 
-  static const _cats = [
-    'Tops',
-    'Bottoms',
-    'Outerwear',
-    'Footwear',
-    'Dresses',
-    'Accessories',
-    'Bags',
-    'Jewelry',
-    'Makeup',
-    'Skincare',
-  ];
+  final List<String> _cats = <String>[];
 
   @override
   void initState() {
@@ -562,8 +551,11 @@ class _AddItemModalState extends State<_AddItemModal>
 
           _nameCtrl.text = payload['name']?.toString() ?? 'New Item';
           
-          String aiCat = payload['category']?.toString() ?? '';
-          if (_cats.contains(aiCat)) {
+          final aiCat = payload['category']?.toString().trim() ?? '';
+          if (aiCat.isNotEmpty) {
+            if (!_cats.any((c) => c.toLowerCase() == aiCat.toLowerCase())) {
+              _cats.add(aiCat);
+            }
             _selectedCat = aiCat;
           }
           

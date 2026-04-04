@@ -97,6 +97,26 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   AppThemeTokens get t => context.themeTokens;
   final FocusNode _keyboardFocusNode = FocusNode();
 
+  List<String> _extractCategories(Iterable<WardrobeItem> items) {
+    final seen = <String>{};
+    final ordered = <String>[];
+    for (final item in items) {
+      final cat = item.cat.trim();
+      if (cat.isEmpty) continue;
+      final key = cat.toLowerCase();
+      if (key == 'all') continue;
+      if (seen.add(key)) ordered.add(cat);
+    }
+    return ordered;
+  }
+
+  bool _containsCategory(List<String> categories, String category) {
+    final key = category.trim().toLowerCase();
+    return categories.any((c) => c.trim().toLowerCase() == key);
+  }
+
+  List<String> get _dynamicCategories => _extractCategories(_wardrobe);
+
   @override
   void initState() {
     super.initState();
@@ -126,9 +146,13 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       }).toList();
 
       if (mounted) {
+        final categories = _extractCategories(fetchedItems);
         setState(() {
           _wardrobe.clear();
           _wardrobe.addAll(fetchedItems);
+          if (_activeCat != 'All' && !_containsCategory(categories, _activeCat)) {
+            _activeCat = 'All';
+          }
           _isLoading = false;
         });
       }
@@ -741,6 +765,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       context: context,
       barrierColor: t.backgroundPrimary.withValues(alpha: 0.7),
       builder: (_) => _AddItemModal(
+        categories: _dynamicCategories,
         onSave: (item) async {
           await _saveNewItem(item);
         },
@@ -751,7 +776,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   List<WardrobeItem> get _filtered {
     final q = _searchQuery.toLowerCase();
     return _wardrobe.where((item) {
-      final matchCat = _activeCat == 'All' || item.cat == _activeCat;
+      final matchCat =
+          _activeCat == 'All' || item.cat.toLowerCase() == _activeCat.toLowerCase();
       final matchQ =
           q.isEmpty ||
           item.name.toLowerCase().contains(q) ||
@@ -952,7 +978,11 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               onSearch: (q) => setState(() => _searchQuery = q),
             ),
             if (_activeTab == 0)
-              _FilterBar(activeCat: _activeCat, onCatTap: _setCat),
+            _FilterBar(
+              activeCat: _activeCat,
+              categories: _dynamicCategories,
+              onCatTap: _setCat,
+            ),
             Expanded(
               child: _isLoading
                   ? Center(
@@ -1471,35 +1501,8 @@ class _DetectedItem {
   });
 
   static String mapCategory(String raw) {
-    final s = raw.toLowerCase();
-    if (s.contains('top') || s.contains('shirt') || s.contains('blouse') ||
-        s.contains('tee') || s.contains('sweater') || s.contains('hoodie')) {
-      return 'Tops';
-    }
-    if (s.contains('pant') || s.contains('trouser') || s.contains('jean') ||
-        s.contains('short') || s.contains('skirt')) {
-      return 'Bottoms';
-    }
-    if (s.contains('jacket') || s.contains('coat') || s.contains('blazer') ||
-        s.contains('outer') || s.contains('cardigan')) {
-      return 'Outerwear';
-    }
-    if (s.contains('shoe') || s.contains('boot') || s.contains('sneaker') ||
-        s.contains('sandal') || s.contains('heel')) {
-      return 'Footwear';
-    }
-    if (s.contains('dress') || s.contains('gown') || s.contains('jumpsuit')) return 'Dresses';
-    if (s.contains('bag') || s.contains('purse') || s.contains('clutch') ||
-        s.contains('backpack')) {
-      return 'Bags';
-    }
-    if (s.contains('jewelry') || s.contains('necklace') || s.contains('ring') ||
-        s.contains('bracelet') || s.contains('earring') || s.contains('watch')) {
-      return 'Jewelry';
-    }
-    if (s.contains('makeup') || s.contains('lipstick')) return 'Makeup';
-    if (s.contains('skincare') || s.contains('moisturizer')) return 'Skincare';
-    return 'Accessories';
+    final value = raw.trim();
+    return value.isEmpty ? 'Uncategorized' : value;
   }
 
   static String catEmoji(String cat) =>
@@ -1515,8 +1518,9 @@ enum _ModalStep { camera, detecting, results, editing }
 
 // â”€â”€ ADD ITEM MODAL â€” Camera embedded inside â”€â”€
 class _AddItemModal extends StatefulWidget {
+  final List<String> categories;
   final Future<void> Function(Map<String, dynamic> item) onSave;
-  const _AddItemModal({required this.onSave});
+  const _AddItemModal({required this.categories, required this.onSave});
 
   @override
   State<_AddItemModal> createState() => _AddItemModalState();
@@ -1552,10 +1556,26 @@ class _AddItemModalState extends State<_AddItemModal>
   final List<String> _selectedOccs = [];
   int? _editingIndex;
 
-  static const _cats = [
-    'Tops', 'Bottoms', 'Outerwear', 'Footwear', 'Dresses',
-    'Accessories', 'Bags', 'Jewelry', 'Makeup', 'Skincare',
-  ];
+  List<String> get _cats {
+    final seen = <String>{};
+    final out = <String>[];
+    void addCategory(String value) {
+      final cat = value.trim();
+      if (cat.isEmpty) return;
+      final key = cat.toLowerCase();
+      if (seen.add(key)) out.add(cat);
+    }
+
+    for (final cat in widget.categories) {
+      addCategory(cat);
+    }
+    for (final item in _detected) {
+      addCategory(item.category);
+    }
+    addCategory(_selectedCat);
+    if (out.isEmpty) out.add('Uncategorized');
+    return out;
+  }
   static const _occs = ['Casual', 'Work', 'Dinner', 'Sport', 'Travel'];
 
   AppThemeTokens get t => context.themeTokens;
@@ -3025,20 +3045,57 @@ class _HoverScaleButtonState extends State<_HoverScaleButton> {
 // â”€â”€ FILTER BAR â”€â”€
 class _FilterBar extends StatelessWidget {
   final String activeCat;
+  final List<String> categories;
   final ValueChanged<String> onCatTap;
-  const _FilterBar({required this.activeCat, required this.onCatTap});
+  const _FilterBar({
+    required this.activeCat,
+    required this.categories,
+    required this.onCatTap,
+  });
+
+  static IconData _iconForCategory(String category) {
+    final value = category.toLowerCase();
+    if (value.contains('top') || value.contains('shirt') || value.contains('tee')) {
+      return Icons.checkroom_outlined;
+    }
+    if (value.contains('bottom') || value.contains('pant') || value.contains('jean')) {
+      return Icons.format_align_justify;
+    }
+    if (value.contains('outer') || value.contains('jacket') || value.contains('coat')) {
+      return Icons.umbrella_outlined;
+    }
+    if (value.contains('shoe') || value.contains('foot') || value.contains('sneaker')) {
+      return Icons.directions_walk;
+    }
+    if (value.contains('dress')) return Icons.dry_cleaning_outlined;
+    if (value.contains('bag')) return Icons.shopping_bag_outlined;
+    if (value.contains('jewel') || value.contains('watch')) return Icons.diamond_outlined;
+    if (value.contains('makeup') || value.contains('beauty')) {
+      return Icons.face_retouching_natural;
+    }
+    if (value.contains('skin')) return Icons.spa_outlined;
+    if (value.contains('accessor')) return Icons.watch_outlined;
+    return Icons.category_outlined;
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
     final accent4 = _accent4(t);
     final accent5 = _accent5(t);
-    final bags = _bagsChip(t);
-    final jewelry = _jewelryChip(t);
-    final makeup = _makeupChip(t);
-    final skincare = _skincareChip(t);
+    final palette = <Color>[
+      t.accent.primary,
+      t.accent.secondary,
+      t.accent.tertiary,
+      accent4,
+      accent5,
+      _bagsChip(t),
+      _jewelryChip(t),
+      _makeupChip(t),
+      _skincareChip(t),
+    ];
 
-    final chips = [
+    final chips = <_ChipData>[
       _ChipData(
         label: 'All',
         icon: Icons.grid_view_rounded,
@@ -3052,117 +3109,24 @@ class _FilterBar extends StatelessWidget {
         inactiveText: t.mutedText,
         activeText: t.textPrimary,
       ),
-      _ChipData(
-        label: 'Tops',
-        icon: Icons.checkroom_outlined,
-        activeBg: t.accent.primary.withValues(alpha: 0.28),
-        activeBorder: t.accent.primary,
-        activeShadow: t.accent.primary.withValues(alpha: 0.25),
-        inactiveBg: t.accent.primary.withValues(alpha: 0.12),
-        inactiveBorder: t.accent.primary.withValues(alpha: 0.30),
-        inactiveText: t.accent.primary,
-        activeText: t.textPrimary,
-      ),
-      _ChipData(
-        label: 'Bottoms',
-        icon: Icons.format_align_justify,
-        activeBg: t.accent.secondary.withValues(alpha: 0.28),
-        activeBorder: t.accent.secondary,
-        activeShadow: t.accent.secondary.withValues(alpha: 0.25),
-        inactiveBg: t.accent.secondary.withValues(alpha: 0.12),
-        inactiveBorder: t.accent.secondary.withValues(alpha: 0.30),
-        inactiveText: t.accent.secondary,
-        activeText: t.textPrimary,
-      ),
-      _ChipData(
-        label: 'Outerwear',
-        icon: Icons.umbrella_outlined,
-        activeBg: t.accent.tertiary.withValues(alpha: 0.22),
-        activeBorder: t.accent.tertiary,
-        activeShadow: t.accent.tertiary.withValues(alpha: 0.20),
-        inactiveBg: t.accent.tertiary.withValues(alpha: 0.10),
-        inactiveBorder: t.accent.tertiary.withValues(alpha: 0.30),
-        inactiveText: t.accent.tertiary,
-        activeText: t.textPrimary,
-      ),
-      _ChipData(
-        label: 'Footwear',
-        icon: Icons.directions_walk,
-        activeBg: accent5.withValues(alpha: 0.22),
-        activeBorder: accent5,
-        activeShadow: accent5.withValues(alpha: 0.20),
-        inactiveBg: accent5.withValues(alpha: 0.10),
-        inactiveBorder: accent5.withValues(alpha: 0.30),
-        inactiveText: accent5,
-        activeText: t.textPrimary,
-      ),
-      _ChipData(
-        label: 'Dresses',
-        icon: Icons.dry_cleaning_outlined,
-        activeBg: accent4.withValues(alpha: 0.22),
-        activeBorder: accent4,
-        activeShadow: accent4.withValues(alpha: 0.20),
-        inactiveBg: accent4.withValues(alpha: 0.10),
-        inactiveBorder: accent4.withValues(alpha: 0.30),
-        inactiveText: accent4,
-        activeText: t.textPrimary,
-      ),
-      _ChipData(
-        label: 'Accessories',
-        icon: Icons.watch_outlined,
-        activeBg: t.accent.secondary.withValues(alpha: 0.24),
-        activeBorder: t.accent.secondary,
-        activeShadow: t.accent.secondary.withValues(alpha: 0.20),
-        inactiveBg: t.accent.secondary.withValues(alpha: 0.10),
-        inactiveBorder: t.accent.secondary.withValues(alpha: 0.28),
-        inactiveText: t.accent.secondary,
-        activeText: t.textPrimary,
-      ),
-      _ChipData(
-        label: 'Bags',
-        icon: Icons.shopping_bag_outlined,
-        activeBg: bags.withValues(alpha: 0.22),
-        activeBorder: bags,
-        activeShadow: bags.withValues(alpha: 0.25),
-        inactiveBg: bags.withValues(alpha: 0.12),
-        inactiveBorder: bags.withValues(alpha: 0.30),
-        inactiveText: bags,
-        activeText: t.textPrimary,
-      ),
-      _ChipData(
-        label: 'Jewelry',
-        icon: Icons.diamond_outlined,
-        activeBg: jewelry.withValues(alpha: 0.22),
-        activeBorder: jewelry,
-        activeShadow: jewelry.withValues(alpha: 0.25),
-        inactiveBg: jewelry.withValues(alpha: 0.12),
-        inactiveBorder: jewelry.withValues(alpha: 0.30),
-        inactiveText: jewelry,
-        activeText: t.textPrimary,
-      ),
-      _ChipData(
-        label: 'Makeup',
-        icon: Icons.face_retouching_natural,
-        activeBg: makeup.withValues(alpha: 0.22),
-        activeBorder: makeup,
-        activeShadow: makeup.withValues(alpha: 0.25),
-        inactiveBg: makeup.withValues(alpha: 0.12),
-        inactiveBorder: makeup.withValues(alpha: 0.30),
-        inactiveText: makeup,
-        activeText: t.textPrimary,
-      ),
-      _ChipData(
-        label: 'Skincare',
-        icon: Icons.spa_outlined,
-        activeBg: skincare.withValues(alpha: 0.22),
-        activeBorder: skincare,
-        activeShadow: skincare.withValues(alpha: 0.25),
-        inactiveBg: skincare.withValues(alpha: 0.12),
-        inactiveBorder: skincare.withValues(alpha: 0.30),
-        inactiveText: skincare,
-        activeText: t.textPrimary,
-      ),
     ];
+    for (int i = 0; i < categories.length; i++) {
+      final base = palette[i % palette.length];
+      final category = categories[i];
+      chips.add(
+        _ChipData(
+          label: category,
+          icon: _iconForCategory(category),
+          activeBg: base.withValues(alpha: 0.26),
+          activeBorder: base,
+          activeShadow: base.withValues(alpha: 0.22),
+          inactiveBg: base.withValues(alpha: 0.11),
+          inactiveBorder: base.withValues(alpha: 0.30),
+          inactiveText: base,
+          activeText: t.textPrimary,
+        ),
+      );
+    }
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
