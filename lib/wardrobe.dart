@@ -1,0 +1,5279 @@
+﻿// ============================================================
+// WARDROBE.DART - DUAL R2 UPLOAD + APPWRITE FETCH/SAVE
+// ============================================================
+
+import 'dart:convert';
+import 'dart:io';
+import 'package:camera/camera.dart';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'package:myapp/chat.dart';
+import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/services/backend_service.dart';
+import 'package:provider/provider.dart';
+import 'package:myapp/theme/theme_tokens.dart';
+import 'package:myapp/widgets/ahvi_stylist_chat.dart';
+
+// ðŸš€ Backend & Providers
+
+// ðŸš€ Appwrite & Minio S3
+
+// ðŸš€ Environment Variables
+
+// â”€â”€ COLORS â”€â”€
+
+Color _accent4(AppThemeTokens t) =>
+    Color.lerp(t.accent.primary, t.accent.secondary, 0.55)!;
+Color _accent5(AppThemeTokens t) =>
+    Color.lerp(t.accent.secondary, t.accent.tertiary, 0.55)!;
+
+Color _bagsChip(AppThemeTokens t) =>
+    Color.lerp(t.accent.primary, t.accent.secondary, 0.35)!;
+Color _jewelryChip(AppThemeTokens t) =>
+    Color.lerp(t.accent.secondary, t.accent.tertiary, 0.35)!;
+Color _makeupChip(AppThemeTokens t) =>
+    Color.lerp(t.accent.primary, t.accent.tertiary, 0.35)!;
+Color _skincareChip(AppThemeTokens t) =>
+    Color.lerp(t.accent.tertiary, t.accent.secondary, 0.55)!;
+
+Uint8List _decodeBase64ToBytes(String value) => base64Decode(value);
+String _encodeBytes(Uint8List bytes) => base64Encode(bytes);
+
+const Color kTransparent = Colors.transparent;
+
+// â”€â”€ DATA MODEL â”€â”€
+class WardrobeItem {
+  final String id;
+  String name;
+  String cat;
+  String? subCategory;
+  List<String> occasions;
+  String notes;
+  int worn;
+  bool liked;
+  Uint8List? imageBytes;
+
+  // Dual URLs to match your Database
+  String? imageUrl; // Raw image URL
+  String? maskedUrl; // Processed PNG URL
+
+  WardrobeItem({
+    required this.id,
+    required this.name,
+    required this.cat,
+    this.subCategory,
+    required this.occasions,
+    this.notes = '',
+    this.worn = 0,
+    this.liked = false,
+    this.imageBytes,
+    this.imageUrl,
+    this.maskedUrl,
+  });
+
+  // Helper to always show the processed image first, falling back to raw
+  String? get displayUrl => maskedUrl ?? imageUrl;
+}
+
+// â”€â”€ WARDROBE SCREEN â”€â”€
+class WardrobeScreen extends StatefulWidget {
+  const WardrobeScreen({super.key});
+
+  @override
+  State<WardrobeScreen> createState() => _WardrobeScreenState();
+}
+
+class _WardrobeScreenState extends State<WardrobeScreen> {
+  String _activeCat = 'All';
+  int _activeTab = 0;
+  String _searchQuery = '';
+  final List<WardrobeItem> _wardrobe = [];
+
+  bool _isLoading = true; // âœ… Loader state for initial fetch
+
+  AppThemeTokens get t => context.themeTokens;
+  final FocusNode _keyboardFocusNode = FocusNode();
+  static const List<String> _defaultCategories = <String>[
+    'Tops',
+    'Bottoms',
+    'Footwear',
+    'Outerwear',
+    'Dresses',
+    'Bags',
+    'Accessories',
+    'Jewelry',
+    'Indian Wear',
+  ];
+
+  List<String> _extractCategories(Iterable<WardrobeItem> items) {
+    final seen = <String>{};
+    final ordered = <String>[];
+    for (final item in items) {
+      final cat = item.cat.trim();
+      if (cat.isEmpty) continue;
+      final key = cat.toLowerCase();
+      if (key == 'all') continue;
+      if (seen.add(key)) ordered.add(cat);
+    }
+    return ordered;
+  }
+
+  bool _containsCategory(List<String> categories, String category) {
+    final key = category.trim().toLowerCase();
+    return categories.any((c) => c.trim().toLowerCase() == key);
+  }
+
+  List<String> get _dynamicCategories {
+    final fromItems = _extractCategories(_wardrobe);
+    final seen = <String>{};
+    final out = <String>[];
+    void addCategory(String value) {
+      final cat = value.trim();
+      if (cat.isEmpty) return;
+      final key = cat.toLowerCase();
+      if (seen.add(key)) out.add(cat);
+    }
+    for (final cat in _defaultCategories) {
+      addCategory(cat);
+    }
+    for (final cat in fromItems) {
+      addCategory(cat);
+    }
+    return out;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchWardrobeItems();
+  }
+
+  // ðŸš€ Fetch from Appwrite
+  Future<void> _fetchWardrobeItems() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final docs = await appwrite.getWardrobeItems();
+
+      final fetchedItems = docs.map((doc) {
+        return WardrobeItem(
+          id: (doc['\$id'] ?? doc['id'] ?? '').toString(),
+          name: (doc['name'] ?? '').toString(),
+          cat: (doc['category'] ?? '').toString(),
+          subCategory: (doc['sub_category'] ?? doc['subCategory'])?.toString(),
+          occasions: doc['occasions'] != null
+              ? List<String>.from(doc['occasions'])
+              : [],
+          notes: (doc['notes'] ?? '').toString(),
+          worn: (doc['worn'] ?? 0) as int,
+          liked: (doc['liked'] ?? false) as bool,
+          imageUrl: (doc['image_url'] ?? doc['imageUrl'])?.toString(),
+          maskedUrl: (doc['masked_url'] ?? doc['maskedUrl'])?.toString(),
+        );
+      }).toList();
+
+      if (mounted) {
+        final categories = _extractCategories(fetchedItems);
+        setState(() {
+          _wardrobe.clear();
+          _wardrobe.addAll(fetchedItems);
+          if (_activeCat != 'All' && !_containsCategory(categories, _activeCat)) {
+            _activeCat = 'All';
+          }
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Failed to fetch wardrobe: $e");
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _keyboardFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _setCat(String cat) {
+    HapticFeedback.selectionClick();
+    setState(() => _activeCat = cat);
+  }
+
+  void _setTab(int index) {
+    HapticFeedback.selectionClick();
+    setState(() => _activeTab = index);
+  }
+
+  Future<void> _saveNewItem(Map<String, dynamic> item) async {
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    final backend = Provider.of<BackendService>(context, listen: false);
+
+    final name = (item['name'] ?? '').toString().trim();
+    final cat = (item['cat'] ?? '').toString().trim();
+    final subCategory = (item['sub_category'] ?? item['subCategory'] ?? '')
+        .toString()
+        .trim();
+    final notes = (item['notes'] ?? '').toString();
+    final occasions = List<String>.from(item['occasions'] as List? ?? const <String>[]);
+    final rawImageBytes = item['rawImageBytes'] as Uint8List?;
+    final imageBytes = item['imageBytes'] as Uint8List?;
+
+    String? imageUrl = item['imageUrl'] as String?;
+    String? maskedUrl = item['maskedUrl'] as String?;
+    bool forceSave = false;
+
+    try {
+      final duplicateProbePayload = _buildWardrobePayload(
+        name: name,
+        category: cat,
+        subCategory: subCategory,
+        notes: notes,
+        occasions: occasions,
+      );
+      if (imageBytes != null) {
+        duplicateProbePayload['processed_image_base64'] = _encodeBytes(imageBytes);
+        duplicateProbePayload['image_base64'] = _encodeBytes(rawImageBytes ?? imageBytes);
+      }
+
+      _showToast('Searching duplicate items...');
+      final precheckDuplicate = await appwrite.checkWardrobeDuplicate(duplicateProbePayload);
+      if (precheckDuplicate != null) {
+        if (!mounted) return;
+        final proceed = await _confirmDuplicateProceed(
+          appwrite: appwrite,
+          dup: precheckDuplicate,
+          incomingName: name,
+          incomingBytes: imageBytes ?? rawImageBytes,
+          incomingUrl: maskedUrl ?? imageUrl,
+        );
+        if (!proceed) {
+          _showToast('Duplicate skipped');
+          return;
+        }
+        forceSave = true;
+      }
+    } catch (e) {
+      debugPrint('Duplicate precheck warning: $e');
+    }
+
+    if (imageBytes != null) {
+      try {
+        final upload = await _uploadWardrobeImages(
+          backend: backend,
+          rawBytes: rawImageBytes ?? imageBytes,
+          maskedBytes: imageBytes,
+          prefix: 'wardrobe',
+        );
+        imageUrl = upload['raw_image_url'] ?? imageUrl;
+        maskedUrl = upload['masked_image_url'] ?? maskedUrl;
+      } catch (e) {
+        debugPrint('Wardrobe upload warning: $e');
+      }
+    }
+
+    try {
+      final payload = _buildWardrobePayload(
+        name: name,
+        category: cat,
+        subCategory: subCategory,
+        notes: notes,
+        occasions: occasions,
+        imageUrl: imageUrl,
+        maskedUrl: maskedUrl,
+      );
+      final doc = await appwrite.createWardrobeItem(
+        payload,
+        forceSave: forceSave,
+      );
+
+      if (!mounted) return;
+      _insertWardrobeFromDoc(
+        doc: doc,
+        fallbackId: item['id']?.toString(),
+        fallbackName: name,
+        fallbackCategory: cat,
+        fallbackSubCategory: subCategory,
+        fallbackOccasions: occasions,
+        fallbackNotes: notes,
+        fallbackImageBytes: imageBytes,
+        fallbackImageUrl: imageUrl,
+        fallbackMaskedUrl: maskedUrl,
+      );
+      _showToast('âœ“ "${name.isEmpty ? "Item" : name}" saved to wardrobe');
+    } on DuplicateOutfitException catch (dup) {
+      if (!mounted) return;
+      final useForceSave = await _confirmDuplicateProceed(
+        appwrite: appwrite,
+        dup: dup,
+        incomingName: name,
+        incomingBytes: imageBytes ?? rawImageBytes,
+        incomingUrl: maskedUrl ?? imageUrl,
+      );
+      if (!useForceSave) {
+        _showToast('Duplicate skipped');
+        return;
+      }
+
+      String? forceImageUrl = imageUrl;
+      String? forceMaskedUrl = maskedUrl;
+
+      if (imageBytes != null) {
+        try {
+          final upload = await _uploadWardrobeImages(
+            backend: backend,
+            rawBytes: rawImageBytes ?? imageBytes,
+            maskedBytes: imageBytes,
+            prefix: 'wardrobe_force',
+          );
+          forceImageUrl = upload['raw_image_url'] ?? forceImageUrl;
+          forceMaskedUrl = upload['masked_image_url'] ?? forceMaskedUrl;
+        } catch (e) {
+          debugPrint('Force upload warning: $e');
+        }
+      }
+
+      final forcedPayload = _buildWardrobePayload(
+        name: name,
+        category: cat,
+        subCategory: subCategory,
+        notes: notes,
+        occasions: occasions,
+        imageUrl: forceImageUrl,
+        maskedUrl: forceMaskedUrl,
+      );
+      try {
+        final forcedDoc = await appwrite.createWardrobeItem(
+          forcedPayload,
+          forceSave: true,
+        );
+        if (!mounted) return;
+        _insertWardrobeFromDoc(
+          doc: forcedDoc,
+          fallbackId: item['id']?.toString(),
+          fallbackName: name,
+          fallbackCategory: cat,
+          fallbackSubCategory: subCategory,
+          fallbackOccasions: occasions,
+          fallbackNotes: notes,
+          fallbackImageBytes: imageBytes,
+          fallbackImageUrl: forceImageUrl,
+          fallbackMaskedUrl: forceMaskedUrl,
+        );
+        _showToast('Duplicate uploaded by your choice');
+      } on DuplicateOutfitException catch (forceDup) {
+        debugPrint('Force-save still conflicted: ${forceDup.rawBody}');
+        _showToast('Still blocked by duplicate check. Please try once more.');
+      }
+    } catch (e) {
+      debugPrint('Save wardrobe item failed: $e');
+      _showToast('Could not save item');
+    }
+  }
+
+  Future<bool> _confirmDuplicateProceed({
+    required AppwriteService appwrite,
+    required DuplicateOutfitException dup,
+    required String incomingName,
+    Uint8List? incomingBytes,
+    String? incomingUrl,
+  }) async {
+    final existing = dup.existingDocument;
+    final duplicateMeta = dup.duplicate;
+    final existingId =
+        (existing[r'$id'] ?? existing['id'] ?? duplicateMeta['point_id'] ?? duplicateMeta['id'] ?? '')
+            .toString()
+            .trim();
+    String duplicateName = (existing['name'] ?? existingId).toString();
+    String? existingImageUrl = dup.existingPreviewUrl ?? _pickBestImageUrl(existing);
+    if ((existingImageUrl == null || existingImageUrl.isEmpty) &&
+        existingId.isNotEmpty) {
+      final fetched = await appwrite.getWardrobeItemById(existingId);
+      if (fetched != null) {
+        existingImageUrl = _pickBestImageUrl(fetched);
+        final fetchedName = (fetched['name'] ?? '').toString().trim();
+        if (fetchedName.isNotEmpty) {
+          duplicateName = fetchedName;
+        }
+      }
+    }
+    if (existingImageUrl == null || existingImageUrl.isEmpty) {
+      try {
+        final allItems = await appwrite.getWardrobeItems();
+        Map<String, dynamic>? match;
+        final duplicatePointId = (duplicateMeta['point_id'] ?? duplicateMeta['id'] ?? '')
+            .toString()
+            .trim();
+        if (duplicatePointId.isNotEmpty) {
+          for (final row in allItems) {
+            final rowPointId =
+                (row['qdrant_point_id'] ?? row['qdrantPointId'] ?? '')
+                    .toString()
+                    .trim();
+            final rowId = (row['id'] ?? '').toString().trim();
+            if (rowPointId == duplicatePointId || rowId == duplicatePointId) {
+              match = row;
+              break;
+            }
+          }
+        }
+        if (match == null) {
+          final wantedCategory =
+              (existing['category'] ?? existing['cat'] ?? '').toString().trim().toLowerCase();
+          final wantedColor =
+              (existing['color_code'] ?? '').toString().trim().toLowerCase();
+          for (final row in allItems) {
+            final rowCategory = (row['category'] ?? '').toString().trim().toLowerCase();
+            final rowColor = (row['color_code'] ?? '').toString().trim().toLowerCase();
+            if (wantedCategory.isNotEmpty && rowCategory != wantedCategory) {
+              continue;
+            }
+            if (wantedColor.isNotEmpty && rowColor.isNotEmpty && rowColor != wantedColor) {
+              continue;
+            }
+            match = row;
+            break;
+          }
+        }
+        if (match != null) {
+          existingImageUrl = _pickBestImageUrl(match);
+          final matchName = (match['name'] ?? '').toString().trim();
+          if (matchName.isNotEmpty) {
+            duplicateName = matchName;
+          }
+        }
+      } catch (_) {}
+    }
+    if (duplicateName.trim().isEmpty) {
+      duplicateName = existingId;
+    }
+    if (existingImageUrl == null || existingImageUrl.isEmpty) {
+      debugPrint(
+        'Duplicate preview missing. existingId=$existingId reason=${duplicateMeta['reason']} raw=${dup.rawBody}',
+      );
+    }
+    final duplicateBytes = await _downloadImageBytes(existingImageUrl);
+    final useForceSave = await _showDuplicateDecisionDialog(
+      incomingName: incomingName,
+      incomingBytes: incomingBytes,
+      incomingUrl: incomingUrl,
+      duplicateName: duplicateName,
+      duplicateUrl: existingImageUrl,
+      duplicateBytes: duplicateBytes,
+    );
+    return useForceSave == true;
+  }
+
+  Future<Uint8List?> _downloadImageBytes(String? url) async {
+    final value = (url ?? '').trim();
+    if (value.isEmpty) return null;
+    final lower = value.toLowerCase();
+    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+      return null;
+    }
+    try {
+      final response = await http.get(Uri.parse(value));
+      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+        return response.bodyBytes;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, dynamic> _buildWardrobePayload({
+    required String name,
+    required String category,
+    String? subCategory,
+    required String notes,
+    required List<String> occasions,
+    String? imageUrl,
+    String? maskedUrl,
+  }) {
+    return {
+      'name': name,
+      'category': category,
+      if (subCategory != null && subCategory.trim().isNotEmpty)
+        'sub_category': subCategory.trim(),
+      'occasions': occasions,
+      'notes': notes,
+      'worn': 0,
+      'liked': false,
+      if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
+      if (maskedUrl != null && maskedUrl.isNotEmpty) 'masked_url': maskedUrl,
+    };
+  }
+
+  String? _pickBestImageUrl(Map<String, dynamic>? source) {
+    if (source == null || source.isEmpty) return null;
+    bool isRenderableImageUrl(String value) {
+      final text = value.trim().toLowerCase();
+      return text.startsWith('http://') ||
+          text.startsWith('https://') ||
+          text.startsWith('data:image/');
+    }
+    for (final key in const [
+      'existing_preview_data_url',
+      'existing_preview_url',
+      'masked_url',
+      'maskedUrl',
+      'image_masked_url',
+      'maskedImageUrl',
+      'image_url',
+      'imageUrl',
+    ]) {
+      final value = (source[key] ?? '').toString().trim();
+      if (value.isNotEmpty && isRenderableImageUrl(value)) return value;
+    }
+    return null;
+  }
+
+  Future<Map<String, String>> _uploadWardrobeImages({
+    required BackendService backend,
+    required Uint8List rawBytes,
+    required Uint8List maskedBytes,
+    required String prefix,
+  }) async {
+    final upload = await backend.uploadWardrobeImages(
+      fileId: '${prefix}_${DateTime.now().millisecondsSinceEpoch}',
+      rawImageBytes: rawBytes,
+      maskedImageBytes: maskedBytes,
+    );
+    if (upload == null) return <String, String>{};
+    return <String, String>{
+      'raw_image_url': (upload['raw_image_url'] ?? '').toString(),
+      'masked_image_url': (upload['masked_image_url'] ?? '').toString(),
+    };
+  }
+
+  void _insertWardrobeFromDoc({
+    required ProxyDocument doc,
+    required String fallbackName,
+    required String fallbackCategory,
+    String? fallbackSubCategory,
+    required List<String> fallbackOccasions,
+    required String fallbackNotes,
+    String? fallbackId,
+    Uint8List? fallbackImageBytes,
+    String? fallbackImageUrl,
+    String? fallbackMaskedUrl,
+  }) {
+    setState(() {
+      _wardrobe.insert(
+        0,
+        WardrobeItem(
+          id: (doc[r'$id'] ?? doc['id'] ?? fallbackId ?? '').toString(),
+          name: (doc['name'] ?? fallbackName).toString(),
+          cat: (doc['category'] ?? fallbackCategory).toString(),
+          subCategory: (doc['sub_category'] ??
+                  doc['subCategory'] ??
+                  fallbackSubCategory)
+              ?.toString(),
+          occasions: doc['occasions'] != null
+              ? List<String>.from(doc['occasions'])
+              : fallbackOccasions,
+          notes: (doc['notes'] ?? fallbackNotes).toString(),
+          imageBytes: fallbackImageBytes,
+          imageUrl: (doc['image_url'] ?? doc['imageUrl'] ?? fallbackImageUrl)
+              ?.toString(),
+          maskedUrl:
+              (doc['masked_url'] ?? doc['maskedUrl'] ?? fallbackMaskedUrl)
+                  ?.toString(),
+          worn: ((doc['worn'] ?? 0) as num).toInt(),
+          liked: (doc['liked'] ?? false) as bool,
+        ),
+      );
+    });
+  }
+
+  Future<bool?> _showDuplicateDecisionDialog({
+    required String incomingName,
+    Uint8List? incomingBytes,
+    String? incomingUrl,
+    required String duplicateName,
+    String? duplicateUrl,
+    Uint8List? duplicateBytes,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) {
+        final tokens = context.themeTokens;
+        final titleIncoming = incomingName.trim().isEmpty ? 'New upload' : incomingName;
+        final titleDuplicate =
+            duplicateName.trim().isEmpty ? 'Existing item' : duplicateName;
+
+        Widget preview(String? url, Uint8List? bytes) {
+          final normalizedUrl = (url ?? '').trim();
+          final hasDataUrl = normalizedUrl.toLowerCase().startsWith('data:image/');
+          final dataPayload = hasDataUrl
+              ? (normalizedUrl.contains(',')
+                  ? normalizedUrl.substring(normalizedUrl.indexOf(',') + 1)
+                  : normalizedUrl)
+              : '';
+          Uint8List? dataBytes;
+          if (hasDataUrl && dataPayload.isNotEmpty) {
+            try {
+              dataBytes = base64Decode(dataPayload);
+            } catch (_) {
+              dataBytes = null;
+            }
+          }
+          final hasNetworkUrl = (() {
+            final text = (url ?? '').trim().toLowerCase();
+            return text.startsWith('http://') || text.startsWith('https://');
+          })();
+          return Container(
+            height: 150,
+            decoration: BoxDecoration(
+              color: tokens.panel,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: tokens.cardBorder),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: (dataBytes != null)
+                ? Image.memory(
+                    dataBytes,
+                    fit: BoxFit.cover,
+                  )
+                : hasNetworkUrl
+                ? Image.network(
+                    normalizedUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) {
+                      if (bytes != null) {
+                        return Image.memory(bytes, fit: BoxFit.cover);
+                      }
+                      return Center(
+                        child: Text(
+                          'No preview',
+                          style: TextStyle(color: tokens.mutedText),
+                        ),
+                      );
+                    },
+                  )
+                : (bytes != null
+                    ? Image.memory(bytes, fit: BoxFit.cover)
+                    : Center(
+                        child: Text(
+                          'No preview',
+                          style: TextStyle(color: tokens.mutedText),
+                        ),
+                      )),
+          );
+        }
+
+        return AlertDialog(
+          backgroundColor: tokens.backgroundSecondary,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(
+            'Duplicate Found',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              color: tokens.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          content: SizedBox(
+            width: 320,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'A similar outfit already exists. Upload anyway?',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    color: tokens.mutedText,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Uploaded image',
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              color: tokens.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          preview(incomingUrl, incomingBytes),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Duplicate',
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              color: tokens.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          preview(duplicateUrl, duplicateBytes),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '$titleIncoming vs $titleDuplicate',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    color: tokens.mutedText,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(
+                'Skip',
+                style: TextStyle(fontFamily: 'Inter', color: tokens.mutedText),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: tokens.accent.primary,
+                foregroundColor: tokens.textPrimary,
+              ),
+              child: const Text('Upload anyway'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _toggleLikePersist(String id) async {
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    final index = _wardrobe.indexWhere((e) => e.id == id);
+    if (index < 0) return;
+    final item = _wardrobe[index];
+    final previous = item.liked;
+    setState(() => item.liked = !item.liked);
+    _showToast(
+      item.liked
+          ? 'â™¥ Added "${item.name}" to favourites'
+          : 'â™¡ Removed from favourites',
+    );
+    try {
+      await appwrite.updateWardrobeItem(id, {'liked': item.liked});
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => item.liked = previous);
+      _showToast('Could not save like state');
+    }
+  }
+
+  Future<void> _logWearPersist(String id) async {
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    final index = _wardrobe.indexWhere((e) => e.id == id);
+    if (index < 0) return;
+    final item = _wardrobe[index];
+    final previous = item.worn;
+    setState(() => item.worn = previous + 1);
+    _showToast('âœ“ Logged a wear for "${item.name}"');
+    try {
+      await appwrite.updateWardrobeItem(id, {'worn': item.worn});
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => item.worn = previous);
+      _showToast('Could not save wear count');
+    }
+  }
+
+  void _openAddModal() {
+    HapticFeedback.lightImpact();
+    showDialog(
+      context: context,
+      barrierColor: t.backgroundPrimary.withValues(alpha: 0.7),
+      builder: (_) => _AddItemModal(
+        categories: _dynamicCategories,
+        onSave: (item) async {
+          await _saveNewItem(item);
+        },
+      ),
+    );
+  }
+
+  List<WardrobeItem> get _filtered {
+    final q = _searchQuery.toLowerCase();
+    return _wardrobe.where((item) {
+      final matchCat =
+          _activeCat == 'All' || item.cat.toLowerCase() == _activeCat.toLowerCase();
+      final matchQ =
+          q.isEmpty ||
+          item.name.toLowerCase().contains(q) ||
+          item.cat.toLowerCase().contains(q);
+      return matchCat && matchQ;
+    }).toList();
+  }
+
+  void _openItemDetail(String id) {
+    final t = context.themeTokens;
+    final index = _wardrobe.indexWhere((i) => i.id == id);
+    if (index < 0) {
+      _showToast('Item no longer available');
+      return;
+    }
+    final item = _wardrobe[index];
+    showDialog(
+      context: context,
+      barrierColor: t.backgroundPrimary.withValues(alpha: 0.55),
+      builder: (_) => _ItemDetailPanel(
+        item: item,
+        onWore: () {
+          _logWearPersist(id);
+          Navigator.of(context).pop();
+          _openItemDetail(id);
+        },
+        onToggleLike: () {
+          _toggleLikePersist(id);
+        },
+        onDelete: () {
+          Navigator.of(context).pop();
+          _showDeleteConfirm(id);
+        },
+        onShare: () => _shareItem(item),
+      ),
+    );
+  }
+
+  void _showToast(String msg) {
+    final t = context.themeTokens;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          msg,
+          style: TextStyle(fontFamily: 'Inter', color: t.textPrimary),
+        ),
+        backgroundColor: t.backgroundSecondary,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(milliseconds: 2400),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  void _shareItem(WardrobeItem item) {
+    final text =
+        'ðŸ‘— ${item.name}\nðŸ“‚ ${item.cat}${item.occasions.isNotEmpty ? ' Â· ${item.occasions.join(', ')}' : ''}'
+        '${item.notes.isNotEmpty ? '\nðŸ“ ${item.notes}' : ''}';
+    Clipboard.setData(ClipboardData(text: text));
+    _showToast('ðŸ“‹ Copied to clipboard!');
+  }
+
+  void _showDeleteConfirm(String id) {
+    final t = context.themeTokens;
+    final accent4 = _accent4(t);
+    final index = _wardrobe.indexWhere((i) => i.id == id);
+    if (index < 0) {
+      _showToast('Item no longer available');
+      return;
+    }
+    final item = _wardrobe[index];
+    showDialog(
+      context: context,
+      barrierColor: t.backgroundPrimary.withValues(alpha: 0.7),
+      builder: (_) => AlertDialog(
+        backgroundColor: t.backgroundSecondary,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Remove item?',
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontWeight: FontWeight.w600,
+            color: t.textPrimary,
+          ),
+        ),
+        content: Text(
+          'Remove "${item.name}" from your wardrobe?',
+          style: TextStyle(fontFamily: 'Inter', color: t.mutedText),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(
+              'Cancel',
+              style: TextStyle(fontFamily: 'Inter', color: t.mutedText),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              setState(() => _wardrobe.removeWhere((i) => i.id == id));
+              _showToast('🗑 "${item.name}" removed');
+              try {
+                final appwrite = Provider.of<AppwriteService>(context, listen: false);
+                await appwrite.deleteWardrobeItem(id);
+              } catch (_) {
+                if (!mounted) return;
+                setState(() => _wardrobe.insert(0, item));
+                _showToast('Could not remove item');
+              }
+            },
+            child: Text(
+              'Remove',
+              style: TextStyle(fontFamily: 'Inter', color: accent4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAskAhviFab() {
+    return GestureDetector(
+      onTap: () => showAhviStylistChatSheet(context),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 10, 22, 10),
+        decoration: BoxDecoration(
+          color: Colors.black,
+          borderRadius: BorderRadius.circular(50),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.55),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 14,
+              backgroundColor: Color(0x24FFFFFF),
+              child: Text('âœ¦', style: TextStyle(color: Colors.white)),
+            ),
+            SizedBox(width: 10),
+            Text(
+              'Ask AHVI',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openLensSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _WardrobeLensSheet(t: t),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return KeyboardListener(
+      focusNode: _keyboardFocusNode,
+      autofocus: true,
+      onKeyEvent: (KeyEvent event) {
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.escape) {
+          final nav = Navigator.of(context, rootNavigator: true);
+          if (nav.canPop()) nav.pop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: t.backgroundPrimary,
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        floatingActionButton: Padding(
+          padding: const EdgeInsets.only(right: 6, bottom: 96),
+          child: _buildAskAhviFab(),
+        ),
+        body: Column(
+          children: [
+            _AppHeader(
+              title: _activeTab == 0 ? 'My Wardrobe' : 'Insights',
+              activeTab: _activeTab,
+              onTabTap: _setTab,
+              onAddTap: _openAddModal,
+              onLensTap: _openLensSheet,
+              onSearch: (q) => setState(() => _searchQuery = q),
+            ),
+            if (_activeTab == 0)
+            _FilterBar(
+              activeCat: _activeCat,
+              categories: _dynamicCategories,
+              onCatTap: _setCat,
+            ),
+            Expanded(
+              child: _isLoading
+                  ? Center(
+                      child: CircularProgressIndicator(color: t.accent.primary),
+                    )
+                  : _activeTab == 0
+                  ? _WardrobePanel(
+                      items: _filtered,
+                      allEmpty: _wardrobe.isEmpty,
+                      onAddTap: _openAddModal,
+                      wardrobe: _wardrobe,
+                      onDelete: (id) => _showDeleteConfirm(id),
+                      onToggleLike: (id) {
+                        HapticFeedback.selectionClick();
+                        _toggleLikePersist(id);
+                      },
+                      onWore: (id) {
+                        _logWearPersist(id);
+                      },
+                      onShare: (id) {
+                        final index = _wardrobe.indexWhere((e) => e.id == id);
+                        if (index < 0) {
+                          _showToast('Item no longer available');
+                          return;
+                        }
+                        _shareItem(_wardrobe[index]);
+                      },
+                      onTapCard: _openItemDetail,
+                    )
+                  : _StatsPanel(wardrobe: _wardrobe),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// â”€â”€ ITEM DETAIL PANEL â”€â”€
+class _ItemDetailPanel extends StatefulWidget {
+  final WardrobeItem item;
+  final VoidCallback onWore;
+  final VoidCallback onToggleLike;
+  final VoidCallback onDelete;
+  final VoidCallback onShare;
+
+  const _ItemDetailPanel({
+    required this.item,
+    required this.onWore,
+    required this.onToggleLike,
+    required this.onDelete,
+    required this.onShare,
+  });
+
+  @override
+  State<_ItemDetailPanel> createState() => _ItemDetailPanelState();
+}
+
+class _ItemDetailPanelState extends State<_ItemDetailPanel>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _slideCtrl;
+  late Animation<Offset> _slideAnim;
+  late Animation<double> _fadeAnim;
+  late Animation<double> _scaleAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _slideCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    );
+    _slideAnim = Tween<Offset>(begin: const Offset(0, 0.06), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _slideCtrl,
+            curve: const Cubic(0.2, 0.8, 0.3, 1.0),
+          ),
+        );
+    _fadeAnim = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut));
+    _scaleAnim = Tween<double>(begin: 0.96, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _slideCtrl,
+        curve: const Cubic(0.2, 0.8, 0.3, 1.0),
+      ),
+    );
+    _slideCtrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _slideCtrl.dispose();
+    super.dispose();
+  }
+
+  static String _catEmoji(String cat) {
+    final lower = cat.toLowerCase();
+    if (lower.contains('top')) return '\u{1F455}';
+    if (lower.contains('bottom')) return '\u{1F456}';
+    if (lower.contains('outer') || lower.contains('jacket')) return '\u{1F9E5}';
+    if (lower.contains('foot') || lower.contains('shoe') || lower.contains('sneaker')) return '\u{1F45E}';
+    if (lower.contains('dress')) return '\u{1F457}';
+    if (lower.contains('bag')) return '\u{1F45C}';
+    if (lower.contains('jewel') || lower.contains('watch')) return '\u{1F48D}';
+    if (lower.contains('indian') || lower.contains('traditional') || lower.contains('ethnic')) return '\u{1F97B}';
+    if (lower.contains('makeup')) return '\u{1F484}';
+    if (lower.contains('skin')) return '\u{1F9F4}';
+    if (lower.contains('accessor')) return '\u{1F576}\u{FE0F}';
+    return '\u{2728}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    final accent4 = _accent4(t);
+    final item = widget.item;
+    return FadeTransition(
+      opacity: _fadeAnim,
+      child: Dialog(
+        backgroundColor: kTransparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
+        child: SlideTransition(
+          position: _slideAnim,
+          child: ScaleTransition(
+            scale: _scaleAnim,
+            child: Container(
+              decoration: BoxDecoration(
+                color: t.backgroundSecondary,
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: t.cardBorder),
+                boxShadow: [
+                  BoxShadow(
+                    color: t.backgroundPrimary.withValues(alpha: 0.5),
+                    blurRadius: 80,
+                    offset: const Offset(0, 40),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // â”€â”€ Close row â”€â”€
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 20, 20, 0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        GestureDetector(
+                          onTap: () => Navigator.of(context).pop(),
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: t.panel,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: t.cardBorder),
+                            ),
+                            child: Icon(
+                              Icons.close,
+                              size: 16,
+                              color: t.mutedText,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // â”€â”€ Title â”€â”€
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 10, 24, 4),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        item.name,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                          color: t.textPrimary,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                    ),
+                  ),
+                  // â”€â”€ Meta row â”€â”€
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 4,
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: t.accent.secondary.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            item.cat,
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 12,
+                              color: t.accent.secondary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          item.worn == 0 ? 'Never worn' : 'Worn ${item.worn}Ã—',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 13,
+                            color: t.mutedText,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // â”€â”€ Body â”€â”€
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Container(
+                                  height: 180,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                      colors: [
+                                        t.accent.primary.withValues(
+                                          alpha: 0.15,
+                                        ),
+                                        t.accent.secondary.withValues(
+                                          alpha: 0.12,
+                                        ),
+                                      ],
+                                    ),
+                                    borderRadius: BorderRadius.circular(16),
+                                    image: item.displayUrl != null
+                                        ? DecorationImage(
+                                            image: NetworkImage(
+                                              item.displayUrl!,
+                                            ),
+                                            fit: BoxFit.cover,
+                                          )
+                                        : (item.imageBytes != null
+                                              ? DecorationImage(
+                                                  image: MemoryImage(
+                                                    item.imageBytes!,
+                                                  ),
+                                                  fit: BoxFit.cover,
+                                                )
+                                              : null),
+                                  ),
+                                  child:
+                                      (item.displayUrl == null &&
+                                          item.imageBytes == null)
+                                      ? Center(
+                                          child: Text(
+                                            _catEmoji(item.cat),
+                                            style: const TextStyle(
+                                              fontSize: 56,
+                                            ),
+                                          ),
+                                        )
+                                      : null,
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: t.panel,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _DetailInfoRow(
+                                        label: 'Category',
+                                        value: item.cat,
+                                      ),
+                                      const SizedBox(height: 10),
+                                      _DetailInfoRow(
+                                        label: 'Times worn',
+                                        value: '${item.worn}',
+                                      ),
+                                      if (item.notes.isNotEmpty) ...[
+                                        const SizedBox(height: 10),
+                                        _DetailInfoRow(
+                                          label: 'Notes',
+                                          value: item.notes,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (item.occasions.isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: item.occasions
+                                  .map(
+                                    (o) => Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 5,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: t.panel,
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(color: t.cardBorder),
+                                      ),
+                                      child: Text(
+                                        o,
+                                        style: TextStyle(
+                                          fontFamily: 'Inter',
+                                          fontSize: 12,
+                                          color: t.mutedText,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          ],
+                          const SizedBox(height: 18),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // â”€â”€ Action buttons â”€â”€
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: t.cardBorder)),
+                    ),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _HoverTintButton(
+                          label: '+ Wore it today',
+                          bgColor: t.accent.tertiary.withValues(alpha: 0.12),
+                          hoverBgColor: t.accent.tertiary.withValues(
+                            alpha: 0.22,
+                          ),
+                          fgColor: t.accent.tertiary,
+                          onTap: widget.onWore,
+                        ),
+                        StatefulBuilder(
+                          builder: (ctx, setSt) => _HoverTintButton(
+                            label: item.liked ? 'â™¥ Liked' : 'â™¡ Like',
+                            bgColor: item.liked
+                                ? accent4.withValues(alpha: 0.12)
+                                : t.panel,
+                            hoverBgColor: item.liked
+                                ? accent4.withValues(alpha: 0.22)
+                                : t.panelBorder,
+                            fgColor: item.liked ? accent4 : t.mutedText,
+                            onTap: () {
+                              widget.onToggleLike();
+                              setSt(() {});
+                            },
+                          ),
+                        ),
+                        _HoverTintButton(
+                          label: 'â†— Share',
+                          bgColor: t.panel,
+                          hoverBgColor: t.panelBorder,
+                          fgColor: t.textPrimary,
+                          onTap: widget.onShare,
+                        ),
+                        _HoverTintButton(
+                          label: 'Remove',
+                          bgColor: accent4.withValues(alpha: 0.08),
+                          hoverBgColor: accent4.withValues(alpha: 0.18),
+                          fgColor: accent4,
+                          onTap: widget.onDelete,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HoverTintButton extends StatefulWidget {
+  final String label;
+  final Color bgColor;
+  final Color hoverBgColor;
+  final Color fgColor;
+  final VoidCallback onTap;
+
+  const _HoverTintButton({
+    required this.label,
+    required this.bgColor,
+    required this.hoverBgColor,
+    required this.fgColor,
+    required this.onTap,
+  });
+
+  @override
+  State<_HoverTintButton> createState() => _HoverTintButtonState();
+}
+
+class _HoverTintButtonState extends State<_HoverTintButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: _hovered ? widget.hoverBgColor : widget.bgColor,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            widget.label,
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: widget.fgColor,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailInfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _DetailInfoRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label.toUpperCase(),
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: t.mutedText,
+            letterSpacing: 0.6,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 14,
+            color: t.textPrimary,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// â”€â”€ DETECTED ITEM MODEL â”€â”€
+class _DetectedItem {
+  final String id;
+  String name;
+  String category;
+  String? subCategory;
+  final String? color;
+  final String? pattern;
+  List<String> occasions;
+  bool selected;
+
+  _DetectedItem({
+    required this.id,
+    required this.name,
+    required this.category,
+    this.subCategory,
+    this.color,
+    this.pattern,
+    this.occasions = const [],
+    this.selected = true,
+  });
+
+  static String mapCategory(String raw) {
+    final value = raw.trim();
+    return value.isEmpty ? 'Uncategorized' : value;
+  }
+
+  static String catEmoji(String cat) =>
+      const {
+        'Tops': 'ðŸ‘•', 'Bottoms': 'ðŸ‘–', 'Outerwear': 'ðŸ§¥',
+        'Footwear': 'ðŸ‘Ÿ', 'Dresses': 'ðŸ‘—', 'Accessories': 'ðŸ‘œ',
+        'Bags': 'ðŸ‘›', 'Jewelry': 'ðŸ’', 'Makeup': 'ðŸ’„', 'Skincare': 'ðŸ§´',
+      }[cat] ?? 'âœ¨';
+}
+
+// â”€â”€ MODAL STEP ENUM â”€â”€
+enum _ModalStep { camera, detecting, results, editing }
+
+// â”€â”€ ADD ITEM MODAL â€” Camera embedded inside â”€â”€
+class _AddItemModal extends StatefulWidget {
+  final List<String> categories;
+  final Future<void> Function(Map<String, dynamic> item) onSave;
+  const _AddItemModal({required this.categories, required this.onSave});
+
+  @override
+  State<_AddItemModal> createState() => _AddItemModalState();
+}
+
+class _AddItemModalState extends State<_AddItemModal>
+    with TickerProviderStateMixin {
+
+  // â”€â”€ Modal entry animations â”€â”€
+  late AnimationController _slideCtrl;
+  late Animation<Offset> _slideAnim;
+  late Animation<double> _fadeAnim;
+  late Animation<double> _scaleAnim;
+
+  // â”€â”€ Camera â”€â”€
+  CameraController? _camCtrl;
+  List<CameraDescription> _cameras = [];
+  bool _camReady = false;
+  bool _isFront = false;
+  FlashMode _flash = FlashMode.off;
+
+  // â”€â”€ Flow state â”€â”€
+  _ModalStep _step = _ModalStep.camera;
+  Uint8List? _capturedBytes;
+  Uint8List? _capturedRawBytes;
+  List<_DetectedItem> _detected = [];
+  String? _detectError;
+
+  // â”€â”€ Edit form â”€â”€
+  final _nameCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
+  String _selectedCat = '';
+  final List<String> _selectedOccs = [];
+  int? _editingIndex;
+
+  List<String> get _cats {
+    final seen = <String>{};
+    final out = <String>[];
+    void addCategory(String value) {
+      final cat = value.trim();
+      if (cat.isEmpty) return;
+      final key = cat.toLowerCase();
+      if (seen.add(key)) out.add(cat);
+    }
+
+    for (final cat in const <String>[
+      'Tops',
+      'Bottoms',
+      'Footwear',
+      'Outerwear',
+      'Dresses',
+      'Bags',
+      'Accessories',
+      'Jewelry',
+      'Indian Wear',
+    ]) {
+      addCategory(cat);
+    }
+    for (final cat in widget.categories) {
+      addCategory(cat);
+    }
+    for (final item in _detected) {
+      addCategory(item.category);
+    }
+    addCategory(_selectedCat);
+    if (out.isEmpty) out.add('Uncategorized');
+    return out;
+  }
+  List<String> get _occasionSuggestions {
+    final seen = <String>{};
+    final out = <String>[];
+    void push(String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return;
+      final key = trimmed.toLowerCase();
+      if (seen.add(key)) out.add(trimmed);
+    }
+
+    for (final occ in _selectedOccs) {
+      push(occ);
+    }
+    for (final item in _detected) {
+      for (final occ in item.occasions) {
+        push(occ);
+      }
+    }
+    return out;
+  }
+
+  AppThemeTokens get t => context.themeTokens;
+
+  @override
+  void initState() {
+    super.initState();
+    _initSlideAnim();
+    _initCamera();
+  }
+
+  void _initSlideAnim() {
+    _slideCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 380));
+    _slideAnim = Tween<Offset>(begin: const Offset(0, 0.08), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _slideCtrl, curve: const Cubic(0.22, 1, 0.36, 1)));
+    _fadeAnim = Tween<double>(begin: 0, end: 1)
+        .animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut));
+    _scaleAnim = Tween<double>(begin: 0.96, end: 1.0)
+        .animate(CurvedAnimation(parent: _slideCtrl, curve: const Cubic(0.22, 1, 0.36, 1)));
+    _slideCtrl.forward();
+  }
+
+  Future<void> _initCamera() async {
+    try {
+      _cameras = await availableCameras();
+      if (_cameras.isEmpty) return;
+      final cam = _isFront && _cameras.length > 1 ? _cameras[1] : _cameras[0];
+      _camCtrl = CameraController(cam, ResolutionPreset.high, enableAudio: false);
+      await _camCtrl!.initialize();
+      await _camCtrl!.setFlashMode(_flash);
+      if (mounted) setState(() => _camReady = true);
+    } catch (_) {}
+  }
+
+  Future<void> _flipCamera() async {
+    setState(() { _camReady = false; _isFront = !_isFront; });
+    await _camCtrl?.dispose();
+    await _initCamera();
+  }
+
+  Future<void> _toggleFlash() async {
+    setState(() => _flash = _flash == FlashMode.off ? FlashMode.torch : FlashMode.off);
+    await _camCtrl?.setFlashMode(_flash);
+  }
+
+  Future<void> _captureAndDetect() async {
+    if (!_camReady) return;
+    HapticFeedback.mediumImpact();
+    try {
+      final xfile = await _camCtrl!.takePicture();
+      final bytes = await File(xfile.path).readAsBytes();
+      setState(() {
+        _capturedBytes = bytes;
+        _capturedRawBytes = bytes;
+        _step = _ModalStep.detecting;
+        _detectError = null;
+      });
+      await _runDetection(bytes);
+    } catch (_) {
+      setState(() => _step = _ModalStep.camera);
+    }
+  }
+
+  Future<void> _pickGallery() async {
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
+      if (file == null) return;
+      // XFile.readAsBytes() works on iOS & Android without dart:io File
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _capturedBytes = bytes;
+        _capturedRawBytes = bytes;
+        _step = _ModalStep.detecting;
+        _detectError = null;
+      });
+      await _runDetection(bytes);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _detectError = 'Could not load image. Please try again.';
+        _step = _ModalStep.results;
+        _detected = [];
+      });
+    }
+  }
+
+  Future<void> _runDetection(Uint8List bytes) async {
+    try {
+      final backend = Provider.of<BackendService>(context, listen: false);
+      final originalBase64 = base64Encode(bytes);
+      final bgInfo = await backend.removeBackgroundDetailed(originalBase64);
+      final bgRemovedBase64 = bgInfo?['image_base64']?.toString();
+      final bgRemoved = bgInfo?['bg_removed'] == true;
+      final bgReason = bgInfo?['fallback_reason']?.toString();
+      if (!bgRemoved || bgRemovedBase64 == null || bgRemovedBase64.isEmpty) {
+        throw Exception('Background removal failed before analyze-image: ${bgReason ?? 'unknown'}');
+      }
+      final removedBytes = base64Decode(bgRemovedBase64);
+      if (mounted) {
+        setState(() {
+          _capturedBytes = removedBytes;
+          _capturedRawBytes = bytes;
+        });
+      }
+
+      final analysis = await backend.analyzeImageFromBase64(bgRemovedBase64);
+      if (analysis == null) {
+        throw Exception('Backend returned null for analyze-image');
+      }
+
+      dynamic payload = analysis['items'] ??
+          analysis['detected_items'] ??
+          analysis['garments'] ??
+          analysis['results'] ??
+          analysis['data'] ??
+          analysis;
+
+      if (payload is Map<String, dynamic>) {
+        payload = payload['items'] ??
+            payload['detected_items'] ??
+            payload['garments'] ??
+            payload['results'] ??
+            [payload];
+      }
+
+      if (payload is! List) {
+        throw Exception('Unexpected analyze-image response shape');
+      }
+
+      final List<dynamic> raw = payload;
+      final items = raw
+          .whereType<Map>()
+          .map((r) => Map<String, dynamic>.from(r))
+          .map((r) => _DetectedItem(
+                id: r['id']?.toString() ?? UniqueKey().toString(),
+                name: (r['name'] ?? 'Unknown').toString(),
+                category: _DetectedItem.mapCategory((r['category'] ?? '').toString()),
+                subCategory: (r['sub_category'] ?? r['subCategory'])?.toString(),
+                color: (r['color'] ?? r['color_code'])?.toString(),
+                pattern: r['pattern']?.toString(),
+                occasions: (r['occasions'] is List)
+                    ? List<String>.from(
+                        (r['occasions'] as List)
+                            .map((e) => e.toString().trim())
+                            .where((e) => e.isNotEmpty),
+                      )
+                    : const <String>[],
+                selected: true,
+              ))
+          .toList();
+
+      if (mounted) {
+        setState(() {
+          _detected = items;
+          _step = _ModalStep.results;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        final err = e.toString();
+        final msg = err.contains('Background removal failed')
+            ? err.replaceFirst('Exception: ', '')
+            : 'Detection failed. Please retake with better lighting.';
+        setState(() {
+        _detectError = msg;
+        _step = _ModalStep.results;
+        _detected = [];
+      });
+      }
+    }
+  }
+
+  void _retake() => setState(() {
+    _step = _ModalStep.camera;
+    _capturedBytes = null;
+    _capturedRawBytes = null;
+    _detected = [];
+    _detectError = null;
+  });
+
+  void _editItem(int index) {
+    final item = _detected[index];
+    _nameCtrl.text = item.name;
+    _notesCtrl.text = [item.color, item.pattern]
+        .where((v) => v != null && v.isNotEmpty && v != 'null').join(', ');
+    _selectedCat = item.category;
+    _selectedOccs
+      ..clear()
+      ..addAll(item.occasions);
+    setState(() { _editingIndex = index; _step = _ModalStep.editing; });
+  }
+
+  void _saveEditedItem() {
+    if (_nameCtrl.text.trim().isEmpty || _selectedCat.isEmpty) {
+      _toast('Name and category are required');
+      return;
+    }
+    if (_editingIndex != null) {
+      setState(() {
+        _detected[_editingIndex!].name = _nameCtrl.text.trim();
+        _detected[_editingIndex!].category = _selectedCat;
+        _detected[_editingIndex!].occasions = List<String>.from(_selectedOccs);
+        _editingIndex = null;
+        _step = _ModalStep.results;
+      });
+    }
+  }
+
+  Future<void> _confirmAndSave() async {
+    final selected = _detected.where((i) => i.selected).toList();
+    if (selected.isEmpty) { _toast('Select at least one item'); return; }
+    HapticFeedback.lightImpact();
+    Navigator.of(context).pop();
+    for (final item in selected) {
+      await widget.onSave({
+        'id': DateTime.now().millisecondsSinceEpoch.toString(),
+        'name': item.name,
+        'cat': item.category,
+        'sub_category': item.subCategory,
+        'occasions': item.occasions,
+        'notes': [item.color, item.pattern]
+            .where((v) => v != null && v.isNotEmpty && v != 'null').join(', '),
+        'rawImageBytes': _capturedRawBytes ?? _capturedBytes,
+        'imageBytes': _capturedBytes,
+        'imageUrl': null,
+        'maskedUrl': null,
+        'worn': 0,
+        'liked': false,
+      });
+    }
+  }
+
+  Future<void> _manualSave() async {
+    if (_nameCtrl.text.trim().isEmpty || _selectedCat.isEmpty) {
+      _toast('Name and category are required');
+      return;
+    }
+    Navigator.of(context).pop();
+    await widget.onSave({
+      'id': DateTime.now().millisecondsSinceEpoch.toString(),
+      'name': _nameCtrl.text.trim(),
+      'cat': _selectedCat,
+      if (_editingIndex != null)
+        'sub_category': _detected[_editingIndex!].subCategory,
+      'occasions': List<String>.from(_selectedOccs),
+      'notes': _notesCtrl.text.trim(),
+      'rawImageBytes': _capturedRawBytes ?? _capturedBytes,
+      'imageBytes': _capturedBytes,
+      'imageUrl': null,
+      'maskedUrl': null,
+      'worn': 0,
+      'liked': false,
+    });
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, style: TextStyle(fontFamily: 'Inter', color: t.textPrimary)),
+      backgroundColor: t.backgroundSecondary,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
+  }
+
+  @override
+  void dispose() {
+    _slideCtrl.dispose();
+    _camCtrl?.dispose();
+    _nameCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isFullScreen =
+        _step == _ModalStep.camera || _step == _ModalStep.detecting;
+
+    return FadeTransition(
+      opacity: _fadeAnim,
+      child: Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: isFullScreen
+            ? EdgeInsets.zero
+            : const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
+        child: isFullScreen
+            // â”€â”€ Full-screen camera / detecting â”€â”€
+            ? AnnotatedRegion<SystemUiOverlayStyle>(
+                value: SystemUiOverlayStyle.light,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.zero,
+                  child: Material(
+                    color: Colors.black,
+                    child: SafeArea(
+                      child: Stack(fit: StackFit.expand, children: [
+                        _buildBody(),
+                        // Close button top-right
+                        Positioned(
+                          top: 12, right: 16,
+                          child: GestureDetector(
+                            onTap: () => Navigator.of(context).pop(),
+                            child: Container(
+                              width: 36, height: 36,
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.45),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: Colors.white.withOpacity(0.20)),
+                              ),
+                              child: const Icon(Icons.close,
+                                  color: Colors.white, size: 18),
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+              )
+            // â”€â”€ Card modal for results / editing â”€â”€
+            : SlideTransition(
+                position: _slideAnim,
+                child: ScaleTransition(
+                  scale: _scaleAnim,
+                  child: Container(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.92,
+                    ),
+                    decoration: BoxDecoration(
+                      color: t.backgroundSecondary.withValues(alpha: 0.97),
+                      borderRadius: BorderRadius.circular(32),
+                      border: Border.all(color: t.cardBorder),
+                      boxShadow: [
+                        BoxShadow(
+                            color: t.backgroundPrimary.withValues(alpha: 0.5),
+                            blurRadius: 80,
+                            offset: const Offset(0, 40)),
+                        BoxShadow(
+                            color: t.accent.primary.withValues(alpha: 0.15),
+                            blurRadius: 24,
+                            offset: const Offset(0, 8)),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(32),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildHeader(),
+                          Flexible(child: _buildBody()),
+                          _buildFooter(),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    final titles = {
+      _ModalStep.camera:    'Scan outfit',
+      _ModalStep.detecting: 'Detectingâ€¦',
+      _ModalStep.results:   'Tap to select items',
+      _ModalStep.editing:   _editingIndex != null ? 'Edit item' : 'AI Detected',
+    };
+    final subtitles = {
+      _ModalStep.camera:    'Point camera at your outfit',
+      _ModalStep.detecting: 'AI is analysing your photo',
+      _ModalStep.results:   'Tap to select Â· Long-press to edit',
+      _ModalStep.editing:   _editingIndex != null
+          ? 'Review and confirm item details'
+          : 'AI filled details â€” review & save',
+    };
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 14, 14),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: t.cardBorder.withValues(alpha: 0.6))),
+      ),
+      child: Row(children: [
+        if (_step == _ModalStep.results || _step == _ModalStep.editing)
+          GestureDetector(
+            onTap: _step == _ModalStep.editing
+                ? (_editingIndex != null
+                    // editing an existing detected item â†’ back to results
+                    ? () => setState(() { _editingIndex = null; _step = _ModalStep.results; })
+                    // editing single AI-detected item â†’ back to camera
+                    : (_detected.length > 1
+                        ? () => setState(() { _editingIndex = null; _step = _ModalStep.results; })
+                        : _retake))
+                : _retake,
+            child: Container(
+              width: 34, height: 34,
+              margin: const EdgeInsets.only(right: 10),
+              decoration: BoxDecoration(
+                color: t.panel, borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: t.cardBorder),
+              ),
+              child: Icon(Icons.arrow_back_ios_new, size: 13, color: t.mutedText),
+            ),
+          ),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(titles[_step]!, style: TextStyle(fontFamily: 'Inter', fontSize: 16,
+              fontWeight: FontWeight.w700, color: t.textPrimary, letterSpacing: -0.3)),
+          Text(subtitles[_step]!, style: TextStyle(fontFamily: 'Inter', fontSize: 11, color: t.mutedText)),
+        ])),
+        GestureDetector(
+          onTap: () => Navigator.of(context).pop(),
+          child: Container(
+            width: 30, height: 30,
+            decoration: BoxDecoration(color: t.panel, shape: BoxShape.circle,
+                border: Border.all(color: t.cardBorder)),
+            child: Icon(Icons.close, size: 14, color: t.mutedText),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildBody() {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 240),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+      child: switch (_step) {
+        _ModalStep.camera    => _buildCameraBody(),
+        _ModalStep.detecting => _buildDetectingBody(),
+        _ModalStep.results   => _buildResultsBody(),
+        _ModalStep.editing   => _buildEditingBody(),
+      },
+    );
+  }
+
+  // â”€â”€ STEP 1: Live camera feed â€” full screen â”€â”€
+  Widget _buildCameraBody() {
+    return Stack(
+      key: const ValueKey('camera'),
+      fit: StackFit.expand,
+      children: [
+        // â”€â”€ Live camera or loading â”€â”€
+        _camReady && _camCtrl != null
+            ? CameraPreview(_camCtrl!)
+            : Container(
+                color: Colors.black,
+                child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  CircularProgressIndicator(color: t.accent.primary, strokeWidth: 2),
+                  const SizedBox(height: 12),
+                  Text('Starting cameraâ€¦',
+                      style: TextStyle(fontFamily: 'Inter', fontSize: 13, color: Colors.white60)),
+                ])),
+              ),
+        // â”€â”€ Corner frame guides â”€â”€
+        if (_camReady)
+          Positioned.fill(child: CustomPaint(painter: _FramePainter(t.accent.primary))),
+        // â”€â”€ Top controls: flip (left) + flash (right) â”€â”€
+        Positioned(top: 14, left: 14, right: 66,
+          child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            GestureDetector(
+              onTap: _flipCamera,
+              child: _CamControlBtn(icon: Icons.flip_camera_ios_outlined),
+            ),
+            GestureDetector(
+              onTap: _toggleFlash,
+              child: _CamControlBtn(
+                icon: _flash == FlashMode.off ? Icons.flash_off : Icons.flash_on,
+                iconColor: _flash == FlashMode.off ? Colors.white60 : Colors.amber,
+              ),
+            ),
+          ]),
+        ),
+        // â”€â”€ Bottom bar: gallery | shutter â”€â”€
+        Positioned(bottom: 0, left: 0, right: 0,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(32, 24, 32, 40),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                colors: [Colors.transparent, Colors.black.withOpacity(0.75)],
+              ),
+            ),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              // Gallery pill
+              GestureDetector(
+                onTap: _pickGallery,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(40),
+                    border: Border.all(color: Colors.white.withOpacity(0.25)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.photo_library_outlined, size: 16, color: Colors.white),
+                    const SizedBox(width: 7),
+                    const Text('Gallery', style: TextStyle(fontFamily: 'Inter',
+                        fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white)),
+                  ]),
+                ),
+              ),
+              // Shutter â€” centred
+              Expanded(child: Center(
+                child: GestureDetector(
+                  onTap: _captureAndDetect,
+                  child: Container(
+                    width: 78, height: 78,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                          colors: [t.accent.primary, t.accent.tertiary],
+                          begin: Alignment.topLeft, end: Alignment.bottomRight),
+                      boxShadow: [
+                        BoxShadow(color: t.accent.primary.withValues(alpha: 0.55),
+                            blurRadius: 26, spreadRadius: 3),
+                      ],
+                    ),
+                    child: Icon(Icons.camera_alt_rounded, color: t.textPrimary, size: 32),
+                  ),
+                ),
+              )),
+              // Right spacer mirrors gallery width
+              const SizedBox(width: 102),
+            ]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // â”€â”€ STEP 2: AI scanning â€” full screen with photo bg â”€â”€
+  Widget _buildDetectingBody() {
+    return Stack(
+      key: const ValueKey('detecting'),
+      fit: StackFit.expand,
+      children: [
+        // Captured photo background
+        if (_capturedBytes != null)
+          Image.memory(_capturedBytes!, fit: BoxFit.cover),
+        // Dark overlay
+        Container(color: Colors.black.withOpacity(0.60)),
+        // Scan animation + text
+        Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          _ScanPulse(color: t.accent.primary),
+          const SizedBox(height: 24),
+          Text('Scanning outfitâ€¦', style: TextStyle(fontFamily: 'Inter', fontSize: 20,
+              fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: -0.3)),
+          const SizedBox(height: 8),
+          Text('AI is detecting your items',
+              style: TextStyle(fontFamily: 'Inter', fontSize: 13,
+                  color: Colors.white54, fontWeight: FontWeight.w400)),
+        ])),
+      ],
+    );
+  }
+
+  // â”€â”€ STEP 3: Results â€” Essemble style â”€â”€
+  Widget _buildResultsBody() {
+    return Column(
+      key: const ValueKey('results'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // â”€â”€ Captured photo strip â”€â”€
+        if (_capturedBytes != null)
+          Stack(children: [
+            SizedBox(
+              height: 130,
+              width: double.infinity,
+              child: Image.memory(_capturedBytes!, fit: BoxFit.cover),
+            ),
+            // Gradient fade bottom
+            Positioned(bottom: 0, left: 0, right: 0,
+              child: Container(height: 48,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, t.backgroundSecondary],
+                  ),
+                ),
+              ),
+            ),
+            // Retake button
+            Positioned(bottom: 10, right: 14,
+              child: GestureDetector(
+                onTap: _retake,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.60),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.refresh, color: Colors.white, size: 13),
+                    SizedBox(width: 5),
+                    Text('Retake', style: TextStyle(fontFamily: 'Inter',
+                        fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+            ),
+          ]),
+
+        // â”€â”€ Error banner â”€â”€
+        if (_detectError != null)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: t.accent.primary.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: t.accent.primary.withValues(alpha: 0.2)),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Icon(Icons.info_outline, size: 15, color: t.accent.primary),
+                const SizedBox(width: 8),
+                Expanded(child: Text(_detectError!, style: TextStyle(
+                    fontFamily: 'Inter', fontSize: 12, color: t.mutedText))),
+              ]),
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: _retake,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [t.accent.primary, t.accent.tertiary]),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text('Try again', style: TextStyle(fontFamily: 'Inter',
+                      fontSize: 12, fontWeight: FontWeight.w600, color: t.textPrimary)),
+                ),
+              ),
+            ]),
+          ),
+
+        // â”€â”€ Detected items â”€â”€
+        if (_detected.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+            child: Row(children: [
+              // AI badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: t.accent.primary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: t.accent.primary.withValues(alpha: 0.3)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text('âœ¦', style: TextStyle(fontSize: 9, color: t.accent.primary)),
+                  const SizedBox(width: 4),
+                  Text('${_detected.length} detected',
+                      style: TextStyle(fontFamily: 'Inter', fontSize: 11,
+                          fontWeight: FontWeight.w700, color: t.accent.primary)),
+                ]),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () {
+                  final all = _detected.every((i) => i.selected);
+                  setState(() { for (final i in _detected) {
+                    i.selected = !all;
+                  } });
+                },
+                child: Text(
+                  _detected.every((i) => i.selected) ? 'Deselect all' : 'Select all',
+                  style: TextStyle(fontFamily: 'Inter', fontSize: 12,
+                      color: t.accent.primary, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ]),
+          ),
+          Flexible(
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _detected.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (_, i) {
+                final item = _detected[i];
+                return GestureDetector(
+                  onTap: () => setState(() => item.selected = !item.selected),
+                  onLongPress: () => _editItem(i),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+                    decoration: BoxDecoration(
+                      color: item.selected ? t.accent.primary.withValues(alpha: 0.09) : t.panel,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: item.selected ? t.accent.primary.withValues(alpha: 0.5) : t.cardBorder,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(children: [
+                      // Emoji icon box
+                      Container(
+                        width: 42, height: 42,
+                        decoration: BoxDecoration(
+                          color: item.selected
+                              ? t.accent.primary.withValues(alpha: 0.14)
+                              : t.backgroundSecondary,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Center(child: Text(_DetectedItem.catEmoji(item.category),
+                            style: const TextStyle(fontSize: 20))),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(item.name, style: TextStyle(fontFamily: 'Inter', fontSize: 14,
+                            fontWeight: FontWeight.w600, color: t.textPrimary)),
+                        const SizedBox(height: 5),
+                        Wrap(spacing: 5, runSpacing: 4, children: [
+                          _SmallPill(item.category, t.accent.secondary),
+                          if (item.color != null && item.color!.isNotEmpty && item.color != 'null')
+                            _SmallPill(item.color!, t.accent.tertiary),
+                          if (item.pattern != null && item.pattern!.isNotEmpty && item.pattern != 'null')
+                            _SmallPill(item.pattern!, t.accent.primary),
+                        ]),
+                      ])),
+                      // Edit hint
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Icon(Icons.edit_outlined, size: 13,
+                            color: t.mutedText.withValues(alpha: 0.5)),
+                      ),
+                      // Checkbox
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: 26, height: 26,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: item.selected
+                              ? LinearGradient(colors: [t.accent.primary, t.accent.tertiary])
+                              : null,
+                          color: item.selected ? null : t.backgroundSecondary,
+                          border: Border.all(
+                              color: item.selected ? t.accent.primary : t.cardBorder, width: 1.5),
+                        ),
+                        child: item.selected
+                            ? Icon(Icons.check, color: t.textPrimary, size: 14) : null,
+                      ),
+                    ]),
+                  ),
+                );
+              },
+            ),
+          ),
+        ] else if (_detectError == null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 28),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text('ðŸ”', style: TextStyle(fontSize: 40)),
+              const SizedBox(height: 12),
+              Text('No items detected', style: TextStyle(fontFamily: 'Inter', fontSize: 15,
+                  fontWeight: FontWeight.w600, color: t.textPrimary)),
+              const SizedBox(height: 4),
+              Text('Try better lighting or a clearer angle.',
+                  style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: t.mutedText)),
+              const SizedBox(height: 16),
+              GestureDetector(
+                onTap: _retake,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 11),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [t.accent.primary, t.accent.tertiary]),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text('Retake photo', style: TextStyle(fontFamily: 'Inter',
+                      fontSize: 13, fontWeight: FontWeight.w600, color: t.textPrimary)),
+                ),
+              ),
+            ]),
+          ),
+      ],
+    );
+  }
+
+  // â”€â”€ STEP 4: Confirm / Edit detected item form â”€â”€
+  Widget _buildEditingBody() {
+    final bool isAiFilled = _detected.isNotEmpty && _editingIndex == null;
+    return SingleChildScrollView(
+      key: const ValueKey('editing'),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // â”€â”€ Photo banner (full-width, taller) â”€â”€
+        if (_capturedBytes != null)
+          Stack(children: [
+            SizedBox(
+              height: 160,
+              width: double.infinity,
+              child: Image.memory(_capturedBytes!, fit: BoxFit.cover),
+            ),
+            // Gradient fade bottom
+            Positioned(bottom: 0, left: 0, right: 0,
+              child: Container(height: 60,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, t.backgroundSecondary],
+                  ),
+                ),
+              ),
+            ),
+            // AI-detected badge (only when auto-filled)
+            if (isAiFilled)
+              Positioned(bottom: 14, left: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [t.accent.primary, t.accent.tertiary]),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [BoxShadow(color: t.accent.primary.withValues(alpha: 0.35),
+                        blurRadius: 10, offset: const Offset(0, 3))],
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('âœ¦', style: TextStyle(fontSize: 9, color: t.textPrimary)),
+                    const SizedBox(width: 5),
+                    Text('AI Auto-filled', style: TextStyle(fontFamily: 'Inter',
+                        fontSize: 11, fontWeight: FontWeight.w700, color: t.textPrimary)),
+                  ]),
+                ),
+              ),
+          ]),
+
+        // â”€â”€ Form fields â”€â”€
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _ModalField(label: 'Item name *',
+                child: _StyledInput(controller: _nameCtrl, hint: 'e.g. White linen shirt')),
+            const SizedBox(height: 14),
+            _ModalField(label: 'Category *',
+                child: _CategoryDropdown(value: _selectedCat, categories: _cats,
+                    onChanged: (v) => setState(() => _selectedCat = v ?? ''))),
+            const SizedBox(height: 14),
+            _ModalField(
+              label: 'Occasions',
+              child: _occasionSuggestions.isEmpty
+                  ? Text(
+                      'No AI occasion suggestions available for this item.',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 12,
+                        color: t.mutedText,
+                      ),
+                    )
+                  : Wrap(
+                      spacing: 7,
+                      runSpacing: 7,
+                      children: _occasionSuggestions.map((occ) {
+                        final active = _selectedOccs.contains(occ);
+                        return GestureDetector(
+                          onTap: () => setState(() => active
+                              ? _selectedOccs.remove(occ)
+                              : _selectedOccs.add(occ)),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 7),
+                            decoration: BoxDecoration(
+                              gradient: active
+                                  ? LinearGradient(
+                                      colors: [
+                                        t.accent.primary,
+                                        t.accent.tertiary
+                                      ],
+                                    )
+                                  : null,
+                              color: active ? null : t.panel,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: active
+                                    ? t.accent.primary
+                                    : t.cardBorder,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Text(
+                              occ,
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: active
+                                    ? t.textPrimary
+                                    : t.mutedText,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+            ),
+            const SizedBox(height: 14),
+            _ModalField(label: 'Notes (optional)',
+                child: _StyledInput(controller: _notesCtrl,
+                    hint: 'Colour, material, where you got itâ€¦', maxLines: 3)),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildFooter() {
+    final int selCount = _detected.where((i) => i.selected).length;
+
+    // Camera step â€” only Cancel, no manual option
+    if (_step == _ModalStep.camera) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: t.cardBorder)),
+          color: t.backgroundSecondary.withValues(alpha: 0.97),
+        ),
+        child: SizedBox(
+          width: double.infinity,
+          child: GestureDetector(
+            onTap: () => Navigator.of(context).pop(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              decoration: BoxDecoration(color: t.panel, borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: t.cardBorder, width: 1.5)),
+              alignment: Alignment.center,
+              child: Text('Cancel', style: TextStyle(fontFamily: 'Inter', fontSize: 14, color: t.mutedText)),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // No items selected OR error state â€” hide primary button, show only Cancel
+    if (_step == _ModalStep.results && (_detected.where((i) => i.selected).isEmpty)) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 20),
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: t.cardBorder)),
+          color: t.backgroundSecondary.withValues(alpha: 0.97),
+        ),
+        child: SizedBox(
+          width: double.infinity,
+          child: GestureDetector(
+            onTap: () => Navigator.of(context).pop(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              decoration: BoxDecoration(
+                color: t.panel,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: t.cardBorder, width: 1.5),
+              ),
+              alignment: Alignment.center,
+              child: Text('Cancel', style: TextStyle(
+                  fontFamily: 'Inter', fontSize: 14, color: t.mutedText)),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final String primaryLabel = switch (_step) {
+      _ModalStep.camera    => '',
+      _ModalStep.detecting => 'âœ¦  Detectingâ€¦',
+      _ModalStep.results   => selCount == 0
+          ? 'Select items'
+          : 'Add $selCount item${selCount != 1 ? 's' : ''} to Wardrobe â†’',
+      _ModalStep.editing   => _editingIndex != null ? 'Save changes' : 'Save to wardrobe âœ¦',
+    };
+    final bool primaryDisabled = (_step == _ModalStep.results && selCount == 0) || _step == _ModalStep.detecting;
+    final VoidCallback? primaryAction = switch (_step) {
+      _ModalStep.camera    => null,
+      _ModalStep.detecting => null,
+      _ModalStep.results   => (selCount == 0 || _detected.isEmpty) ? null : () { _confirmAndSave(); },
+      _ModalStep.editing   => _editingIndex != null ? _saveEditedItem : () { _manualSave(); },
+    };
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 20),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: t.cardBorder)),
+        color: t.backgroundSecondary.withValues(alpha: 0.97),
+      ),
+      child: Row(children: [
+        GestureDetector(
+          onTap: () => Navigator.of(context).pop(),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+            decoration: BoxDecoration(color: t.panel, borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: t.cardBorder, width: 1.5)),
+            child: Text('Cancel', style: TextStyle(fontFamily: 'Inter', fontSize: 14, color: t.mutedText)),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: GestureDetector(
+            onTap: primaryAction,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              decoration: BoxDecoration(
+                gradient: primaryDisabled
+                    ? LinearGradient(colors: [
+                  t.accent.primary.withValues(alpha: 0.4),
+                  t.accent.tertiary.withValues(alpha: 0.4),
+                ])
+                    : LinearGradient(colors: [t.accent.primary, t.accent.tertiary]),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              alignment: Alignment.center,
+              child: Text(primaryLabel, style: TextStyle(fontFamily: 'Inter', fontSize: 14,
+                  fontWeight: FontWeight.w700, color: t.textPrimary)),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+// â”€â”€ CAMERA CONTROL BUTTON â”€â”€
+class _CamControlBtn extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  const _CamControlBtn({required this.icon, this.iconColor = Colors.white70});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 38, height: 38,
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.45), shape: BoxShape.circle,
+        border: Border.all(color: Colors.white.withOpacity(0.20)),
+      ),
+      child: Icon(icon, color: iconColor, size: 18),
+    );
+  }
+}
+
+// â”€â”€ SCAN PULSE WIDGET â”€â”€
+class _ScanPulse extends StatefulWidget {
+  final Color color;
+  const _ScanPulse({required this.color});
+  @override
+  State<_ScanPulse> createState() => _ScanPulseState();
+}
+
+class _ScanPulseState extends State<_ScanPulse>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
+      ..repeat(reverse: true);
+    _anim = Tween<double>(begin: 0.7, end: 1.0)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+  }
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, _) => Transform.scale(
+        scale: _anim.value,
+        child: Container(
+          width: 68, height: 68,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+                colors: [widget.color, widget.color.withValues(alpha: 0.6)],
+                begin: Alignment.topLeft, end: Alignment.bottomRight),
+            boxShadow: [BoxShadow(color: widget.color.withValues(alpha: 0.4 * _anim.value),
+                blurRadius: 22, spreadRadius: 3)],
+          ),
+          child: const Center(child: Text('âœ¦', style: TextStyle(fontSize: 26, color: Colors.white))),
+        ),
+      ),
+    );
+  }
+}
+
+// â”€â”€ CAMERA FRAME GUIDE PAINTER â”€â”€
+class _FramePainter extends CustomPainter {
+  final Color color;
+  const _FramePainter(this.color);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()
+      ..color = color.withOpacity(0.55)
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    const c = 20.0, m = 16.0;
+    final l = m, r = size.width - m, t = m, b = size.height - m;
+    canvas.drawLine(Offset(l, t + c), Offset(l, t), p);
+    canvas.drawLine(Offset(l, t), Offset(l + c, t), p);
+    canvas.drawLine(Offset(r - c, t), Offset(r, t), p);
+    canvas.drawLine(Offset(r, t), Offset(r, t + c), p);
+    canvas.drawLine(Offset(l, b - c), Offset(l, b), p);
+    canvas.drawLine(Offset(l, b), Offset(l + c, b), p);
+    canvas.drawLine(Offset(r - c, b), Offset(r, b), p);
+    canvas.drawLine(Offset(r, b), Offset(r, b - c), p);
+  }
+  @override
+  bool shouldRepaint(covariant CustomPainter _) => false;
+}
+
+// â”€â”€ SMALL PILL TAG â”€â”€
+class _SmallPill extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _SmallPill(this.label, this.color);
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(color: color.withOpacity(0.14),
+          borderRadius: BorderRadius.circular(20)),
+      child: Text(label, style: TextStyle(fontFamily: 'Inter', fontSize: 10,
+          color: color, fontWeight: FontWeight.w500)),
+    );
+  }
+}
+
+class _ModalField extends StatelessWidget {
+  final String label;
+  final Widget child;
+  const _ModalField({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label.toUpperCase(),
+          style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: t.mutedText,
+              letterSpacing: 0.7),
+        ),
+        const SizedBox(height: 6),
+        child,
+      ],
+    );
+  }
+}
+
+class _UploadSourceButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _UploadSourceButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+        decoration: BoxDecoration(
+          color: t.panel,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: t.cardBorder, width: 1.5),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16, color: t.mutedText),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: t.mutedText,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StyledInput extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final int maxLines;
+  const _StyledInput(
+      {required this.controller,
+        required this.hint,
+        this.maxLines = 1});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return Container(
+      decoration: BoxDecoration(
+        color: t.panel,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: t.cardBorder, width: 1.5),
+      ),
+      child: TextField(
+        controller: controller,
+        maxLines: maxLines,
+        style: TextStyle(
+            fontFamily: 'Inter', fontSize: 14, color: t.textPrimary),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(color: t.mutedText),
+          contentPadding:
+          const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          border: InputBorder.none,
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryDropdown extends StatelessWidget {
+  final String value;
+  final List<String> categories;
+  final ValueChanged<String?> onChanged;
+  const _CategoryDropdown(
+      {required this.value,
+        required this.categories,
+        required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: t.panel,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: t.cardBorder, width: 1.5),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value.isEmpty ? null : value,
+          hint: Text('â€” Select â€”',
+              style:
+              TextStyle(color: t.mutedText, fontFamily: 'Inter')),
+          isExpanded: true,
+          dropdownColor: t.backgroundSecondary,
+          style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 14,
+              color: t.textPrimary),
+          items: categories
+              .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+              .toList(),
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+}
+
+// â”€â”€ APP HEADER â”€â”€
+class _AppHeader extends StatelessWidget {
+  final String title;
+  final int activeTab;
+  final ValueChanged<int> onTabTap;
+  final VoidCallback onAddTap;
+  final VoidCallback onLensTap;
+  final ValueChanged<String> onSearch;
+
+  const _AppHeader({
+    required this.title,
+    required this.activeTab,
+    required this.onTabTap,
+    required this.onAddTap,
+    required this.onLensTap,
+    required this.onSearch,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return Container(
+      decoration: BoxDecoration(
+        color: t.backgroundPrimary.withValues(alpha: 0.92),
+        border: Border(bottom: BorderSide(color: t.cardBorder, width: 1)),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 52, 24, 0),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const ChatScreen(),
+                            ),
+                          );
+                        },
+                        child: Text(
+                          'AHVI',
+                          style: GoogleFonts.anton(
+                            fontSize: 36,
+                            color: t.textPrimary,
+                            letterSpacing: 0.6,
+                            height: 1,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 28,
+                          fontWeight: FontWeight.w700,
+                          color: t.textPrimary,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 40),
+                  child: Row(
+                    children: [
+                      // Lens button
+                      _HoverScaleButton(
+                        scaleFactor: 1.02,
+                        duration: const Duration(milliseconds: 200),
+                        onTap: onLensTap,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: t.accent.primary.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: t.accent.primary.withValues(alpha: 0.25),
+                              width: 1,
+                            ),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.search_rounded,
+                                color: t.accent.primary,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Lens',
+                                style: TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: t.accent.primary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Add item button
+                      _HoverScaleButton(
+                        scaleFactor: 1.02,
+                        duration: const Duration(milliseconds: 200),
+                        onTap: onAddTap,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [t.accent.primary, t.accent.tertiary],
+                            ),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.add, color: t.textPrimary, size: 16),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Add item',
+                                  style: TextStyle(
+                                    fontFamily: 'Inter',
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: t.textPrimary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Container(
+              decoration: BoxDecoration(
+                color: t.panel,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(Icons.search, color: t.mutedText, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      onChanged: onSearch,
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 15,
+                        color: t.textPrimary,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Search your notes, tagsâ€¦',
+                        hintStyle: TextStyle(color: t.mutedText),
+                        isDense: true,
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// â”€â”€ HOVER SCALE BUTTON â”€â”€
+class _HoverScaleButton extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onTap;
+  final double scaleFactor;
+  final Duration duration;
+  const _HoverScaleButton({
+    required this.child,
+    required this.onTap,
+    this.scaleFactor = 0.97,
+    this.duration = const Duration(milliseconds: 150),
+  });
+
+  @override
+  State<_HoverScaleButton> createState() => _HoverScaleButtonState();
+}
+
+class _HoverScaleButtonState extends State<_HoverScaleButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _hovered ? widget.scaleFactor : 1.0,
+          duration: widget.duration,
+          curve: Curves.easeOut,
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
+// â”€â”€ FILTER BAR â”€â”€
+class _FilterBar extends StatelessWidget {
+  final String activeCat;
+  final List<String> categories;
+  final ValueChanged<String> onCatTap;
+  const _FilterBar({
+    required this.activeCat,
+    required this.categories,
+    required this.onCatTap,
+  });
+
+  static IconData _iconForCategory(String category) {
+    final value = category.toLowerCase();
+    if (value.contains('top') || value.contains('shirt') || value.contains('tee')) {
+      return Icons.checkroom_outlined;
+    }
+    if (value.contains('bottom') || value.contains('pant') || value.contains('jean')) {
+      return Icons.format_align_justify;
+    }
+    if (value.contains('outer') || value.contains('jacket') || value.contains('coat')) {
+      return Icons.umbrella_outlined;
+    }
+    if (value.contains('shoe') || value.contains('foot') || value.contains('sneaker')) {
+      return Icons.directions_walk;
+    }
+    if (value.contains('dress')) return Icons.dry_cleaning_outlined;
+    if (value.contains('bag')) return Icons.shopping_bag_outlined;
+    if (value.contains('jewel') || value.contains('watch')) return Icons.diamond_outlined;
+    if (value.contains('indian') || value.contains('traditional') || value.contains('ethnic')) {
+      return Icons.celebration_outlined;
+    }
+    if (value.contains('makeup') || value.contains('beauty')) {
+      return Icons.face_retouching_natural;
+    }
+    if (value.contains('skin')) return Icons.spa_outlined;
+    if (value.contains('accessor')) return Icons.watch_outlined;
+    return Icons.category_outlined;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    final accent4 = _accent4(t);
+    final accent5 = _accent5(t);
+    final palette = <Color>[
+      t.accent.primary,
+      t.accent.secondary,
+      t.accent.tertiary,
+      accent4,
+      accent5,
+      _bagsChip(t),
+      _jewelryChip(t),
+      _makeupChip(t),
+      _skincareChip(t),
+    ];
+
+    final chips = <_ChipData>[
+      _ChipData(
+        label: 'All',
+        icon: Icons.grid_view_rounded,
+        activeGradient: LinearGradient(
+          colors: [t.accent.primary, t.accent.secondary],
+        ),
+        activeBorder: t.accent.primary,
+        activeShadow: t.accent.primary.withValues(alpha: 0.35),
+        inactiveBg: t.panel,
+        inactiveBorder: t.cardBorder,
+        inactiveText: t.mutedText,
+        activeText: t.textPrimary,
+      ),
+    ];
+    for (int i = 0; i < categories.length; i++) {
+      final base = palette[i % palette.length];
+      final category = categories[i];
+      chips.add(
+        _ChipData(
+          label: category,
+          icon: _iconForCategory(category),
+          activeBg: base.withValues(alpha: 0.26),
+          activeBorder: base,
+          activeShadow: base.withValues(alpha: 0.22),
+          inactiveBg: base.withValues(alpha: 0.11),
+          inactiveBorder: base.withValues(alpha: 0.30),
+          inactiveText: base,
+          activeText: t.textPrimary,
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+      child: Row(
+        children: List.generate(chips.length, (i) {
+          final chip = chips[i];
+          final isActive = activeCat == chip.label;
+          return Padding(
+            padding: EdgeInsets.only(right: i < chips.length - 1 ? 8 : 0),
+            child: _FilterChip(
+              chip: chip,
+              isActive: isActive,
+              onTap: () => onCatTap(chip.label),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class _ChipData {
+  final String label;
+  final IconData icon;
+  final LinearGradient? activeGradient;
+  final Color? activeBg;
+  final Color activeBorder;
+  final Color activeShadow;
+  final Color inactiveBg;
+  final Color inactiveBorder;
+  final Color inactiveText;
+  final Color activeText;
+
+  const _ChipData({
+    required this.label,
+    required this.icon,
+    this.activeGradient,
+    this.activeBg,
+    required this.activeBorder,
+    required this.activeShadow,
+    required this.inactiveBg,
+    required this.inactiveBorder,
+    required this.inactiveText,
+    required this.activeText,
+  });
+}
+
+class _FilterChip extends StatefulWidget {
+  final _ChipData chip;
+  final bool isActive;
+  final VoidCallback onTap;
+  const _FilterChip({
+    required this.chip,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  @override
+  State<_FilterChip> createState() => _FilterChipState();
+}
+
+class _FilterChipState extends State<_FilterChip> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          transform: _hovered && !widget.isActive
+              ? Matrix4.translationValues(0.0, -1.0, 0.0)
+              : Matrix4.identity(),
+          decoration: BoxDecoration(
+            gradient: widget.isActive ? widget.chip.activeGradient : null,
+            color: widget.isActive
+                ? (widget.chip.activeGradient == null
+                      ? widget.chip.activeBg
+                      : null)
+                : (_hovered
+                      ? widget.chip.inactiveBg.withValues(alpha: 0.28)
+                      : widget.chip.inactiveBg),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: widget.isActive
+                  ? widget.chip.activeBorder
+                  : widget.chip.inactiveBorder,
+              width: 1.5,
+            ),
+            boxShadow: widget.isActive
+                ? [
+                    BoxShadow(
+                      color: widget.chip.activeShadow,
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : (_hovered
+                      ? [
+                          BoxShadow(
+                            color: t.backgroundPrimary.withValues(alpha: 0.10),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ]
+                      : null),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                widget.chip.icon,
+                size: 14,
+                color: widget.isActive
+                    ? widget.chip.activeText
+                    : widget.chip.inactiveText,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                widget.chip.label,
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: widget.isActive
+                      ? widget.chip.activeText
+                      : widget.chip.inactiveText,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// â”€â”€ WARDROBE PANEL â”€â”€
+class _WardrobePanel extends StatelessWidget {
+  final List<WardrobeItem> items;
+  final bool allEmpty;
+  final VoidCallback onAddTap;
+  final List<WardrobeItem> wardrobe;
+  final ValueChanged<String> onDelete;
+  final ValueChanged<String> onToggleLike;
+  final ValueChanged<String> onWore;
+  final ValueChanged<String> onShare;
+  final ValueChanged<String> onTapCard;
+
+  const _WardrobePanel({
+    required this.items,
+    required this.allEmpty,
+    required this.onAddTap,
+    required this.wardrobe,
+    required this.onDelete,
+    required this.onToggleLike,
+    required this.onWore,
+    required this.onShare,
+    required this.onTapCard,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 14),
+          _InlineInsightCard(wardrobe: wardrobe),
+          const SizedBox(height: 20),
+          if (allEmpty)
+            _EmptyState(onAddTap: onAddTap)
+          else if (items.isEmpty)
+            const _EmptySearch()
+          else
+            _ItemGrid(
+              items: items,
+              onDelete: onDelete,
+              onToggleLike: onToggleLike,
+              onWore: onWore,
+              onShare: onShare,
+              onTapCard: onTapCard,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// â”€â”€ INLINE AI INSIGHT CARD â”€â”€
+class _InlineInsightCard extends StatefulWidget {
+  final List<WardrobeItem> wardrobe;
+  const _InlineInsightCard({required this.wardrobe});
+
+  @override
+  State<_InlineInsightCard> createState() => _InlineInsightCardState();
+}
+
+class _InlineInsightCardState extends State<_InlineInsightCard>
+    with TickerProviderStateMixin {
+  late AnimationController _glowCtrl;
+  late AnimationController _dotCtrl;
+  late Animation<double> _glowAnim;
+  late Animation<double> _dotAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _glowCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    )..repeat(reverse: true);
+    _glowAnim = CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut);
+
+    _dotCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+    _dotAnim = Tween<double>(
+      begin: 0.6,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _dotCtrl, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _glowCtrl.dispose();
+    _dotCtrl.dispose();
+    super.dispose();
+  }
+
+  String _computeInsightText() {
+    final total = widget.wardrobe.length;
+    if (total == 0) {
+      return 'Add items to your wardrobe to unlock smart style insights.';
+    }
+    final wornItems = widget.wardrobe.where((i) => i.worn > 0).toList();
+    final unwornCount = total - wornItems.length;
+    final liked = widget.wardrobe.where((i) => i.liked).toList();
+    final sorted = [...widget.wardrobe]
+      ..sort((a, b) => b.worn.compareTo(a.worn));
+    final mostWorn = sorted.isNotEmpty ? sorted.first : null;
+
+    if (liked.isNotEmpty && mostWorn != null && mostWorn.worn > 0) {
+      final likedStr = '${liked.length} piece${liked.length != 1 ? 's' : ''}';
+      final wearStr = '${mostWorn.worn} wear${mostWorn.worn != 1 ? 's' : ''}';
+      final rotateStr = unwornCount > 0
+          ? ' â€” rotate your $unwornCount unworn piece${unwornCount != 1 ? 's' : ''}'
+          : '';
+      return 'You love $likedStr. Your ${mostWorn.name} leads with $wearStr$rotateStr.';
+    } else if (mostWorn != null && mostWorn.worn > 0) {
+      final wearStr = '${mostWorn.worn} wear${mostWorn.worn != 1 ? 's' : ''}';
+      if (unwornCount > 0) {
+        return 'Your ${mostWorn.name} leads with $wearStr. $unwornCount piece${unwornCount != 1 ? 's' : ''} still unworn â€” time to rotate!';
+      } else {
+        return 'Your ${mostWorn.name} leads with $wearStr. Great job â€” every piece has been worn! ðŸŽ‰';
+      }
+    } else if (liked.isNotEmpty) {
+      return "You've liked ${liked.length} favourite${liked.length != 1 ? 's' : ''}. Start logging wears to get deeper insights.";
+    } else {
+      return 'You have $total piece${total != 1 ? 's' : ''}. Tap â™¥ on your favourites and log wears to unlock insights.';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    final accent2 = t.accent.secondary;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accent2.withValues(alpha: 0.15), width: 1),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            accent2.withValues(alpha: 0.10),
+            t.accent.primary.withValues(alpha: 0.06),
+          ],
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AnimatedBuilder(
+            animation: _glowAnim,
+            builder: (_, _) {
+              final glowT = _glowAnim.value;
+              return Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      accent2.withValues(alpha: 0.25),
+                      t.accent.primary.withValues(alpha: 0.18),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(13),
+                  border: Border.all(
+                    color: accent2.withValues(alpha: 0.35),
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: accent2.withValues(alpha: 0.20 + glowT * 0.18),
+                      blurRadius: 10 + glowT * 6,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Text(
+                    'âœ¦',
+                    style: TextStyle(fontSize: 16, color: accent2),
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    AnimatedBuilder(
+                      animation: _dotAnim,
+                      builder: (_, _) => Opacity(
+                        opacity: _dotAnim.value,
+                        child: Container(
+                          width: 5,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: accent2,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'AI INSIGHT',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        color: accent2,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _computeInsightText(),
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 12.5,
+                    color: t.mutedText,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// â”€â”€ ITEM GRID â”€â”€
+class _ItemGrid extends StatelessWidget {
+  final List<WardrobeItem> items;
+  final ValueChanged<String> onDelete;
+  final ValueChanged<String> onToggleLike;
+  final ValueChanged<String> onWore;
+  final ValueChanged<String> onShare;
+  final ValueChanged<String> onTapCard;
+
+  const _ItemGrid({
+    required this.items,
+    required this.onDelete,
+    required this.onToggleLike,
+    required this.onWore,
+    required this.onShare,
+    required this.onTapCard,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 200,
+        mainAxisSpacing: 14,
+        crossAxisSpacing: 14,
+        childAspectRatio: 0.68,
+      ),
+      itemCount: items.length,
+      itemBuilder: (_, i) => _FadeUpItem(
+        delay: Duration(milliseconds: (i * 40).clamp(0, 400)),
+        child: RepaintBoundary(
+          child: _ItemCard(
+            item: items[i],
+            onDelete: () => onDelete(items[i].id),
+            onToggleLike: () => onToggleLike(items[i].id),
+            onWore: () => onWore(items[i].id),
+            onShare: () => onShare(items[i].id),
+            onTap: () => onTapCard(items[i].id),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FadeUpItem extends StatefulWidget {
+  final Widget child;
+  final Duration delay;
+  const _FadeUpItem({required this.child, required this.delay});
+
+  @override
+  State<_FadeUpItem> createState() => _FadeUpItemState();
+}
+
+class _FadeUpItemState extends State<_FadeUpItem>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _opacity;
+  late Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    _opacity = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.06),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    Future.delayed(widget.delay, () {
+      if (mounted) _ctrl.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _opacity,
+      child: SlideTransition(position: _slide, child: widget.child),
+    );
+  }
+}
+
+// â”€â”€ ITEM CARD â”€â”€
+class _ItemCard extends StatefulWidget {
+  final WardrobeItem item;
+  final VoidCallback onDelete;
+  final VoidCallback onToggleLike;
+  final VoidCallback onWore;
+  final VoidCallback onShare;
+  final VoidCallback onTap;
+
+  const _ItemCard({
+    required this.item,
+    required this.onDelete,
+    required this.onToggleLike,
+    required this.onWore,
+    required this.onShare,
+    required this.onTap,
+  });
+
+  @override
+  State<_ItemCard> createState() => _ItemCardState();
+}
+
+class _ItemCardState extends State<_ItemCard>
+    with SingleTickerProviderStateMixin {
+  bool _hovered = false;
+  late AnimationController _likeCtrl;
+  late Animation<double> _likeScale;
+  bool _deletePressed = false;
+  bool _likeHovered = false;
+  bool _likePressed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _likeCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+    );
+    _likeScale = TweenSequence([
+      TweenSequenceItem(
+        tween: Tween(
+          begin: 1.0,
+          end: 1.45,
+        ).chain(CurveTween(curve: const Cubic(0.34, 1.2, 0.64, 1))),
+        weight: 35,
+      ),
+      TweenSequenceItem(
+        tween: Tween(
+          begin: 1.45,
+          end: 0.9,
+        ).chain(CurveTween(curve: Curves.easeIn)),
+        weight: 25,
+      ),
+      TweenSequenceItem(
+        tween: Tween(
+          begin: 0.9,
+          end: 1.18,
+        ).chain(CurveTween(curve: Curves.easeOut)),
+        weight: 20,
+      ),
+      TweenSequenceItem(
+        tween: Tween(
+          begin: 1.18,
+          end: 1.15,
+        ).chain(CurveTween(curve: Curves.easeIn)),
+        weight: 20,
+      ),
+    ]).animate(_likeCtrl);
+  }
+
+  @override
+  void dispose() {
+    _likeCtrl.dispose();
+    super.dispose();
+  }
+
+  static String _catEmoji(String cat) {
+    final lower = cat.toLowerCase();
+    if (lower.contains('top')) return '\u{1F455}';
+    if (lower.contains('bottom')) return '\u{1F456}';
+    if (lower.contains('outer') || lower.contains('jacket')) return '\u{1F9E5}';
+    if (lower.contains('foot') || lower.contains('shoe') || lower.contains('sneaker')) return '\u{1F45E}';
+    if (lower.contains('dress')) return '\u{1F457}';
+    if (lower.contains('bag')) return '\u{1F45C}';
+    if (lower.contains('jewel') || lower.contains('watch')) return '\u{1F48D}';
+    if (lower.contains('indian') || lower.contains('traditional') || lower.contains('ethnic')) return '\u{1F97B}';
+    if (lower.contains('makeup')) return '\u{1F484}';
+    if (lower.contains('skin')) return '\u{1F9F4}';
+    if (lower.contains('accessor')) return '\u{1F576}\u{FE0F}';
+    return '\u{2728}';
+  }
+
+  void _handleLike() {
+    widget.onToggleLike();
+    _likeCtrl.forward(from: 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    final accent4 = _accent4(t);
+    final item = widget.item;
+    final wornLabel = item.worn == 0 ? 'New' : '${item.worn}Ã— worn';
+    final wornColor = item.worn > 0
+        ? t.accent.tertiary.withValues(alpha: 0.15)
+        : t.mutedText.withValues(alpha: 0.12);
+    final wornTextColor = item.worn > 0 ? t.accent.tertiary : t.mutedText;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: const Cubic(0.2, 0.8, 0.3, 1.0),
+          transform: _hovered
+              ? Matrix4.translationValues(0.0, -4.0, 0.0)
+              : Matrix4.identity(),
+          decoration: BoxDecoration(
+            color: t.card,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: t.cardBorder, width: 1),
+            boxShadow: _hovered
+                ? [
+                    BoxShadow(
+                      color: t.backgroundPrimary.withValues(alpha: 0.4),
+                      blurRadius: 40,
+                      offset: const Offset(0, 12),
+                    ),
+                  ]
+                : [],
+          ),
+          clipBehavior: Clip.hardEdge,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // â”€â”€ Main content â”€â”€
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            t.accent.primary.withValues(alpha: 0.15),
+                            t.accent.secondary.withValues(alpha: 0.12),
+                          ],
+                        ),
+                        // âœ… Prioritize Masked URL over Raw URL
+                        image: item.displayUrl != null
+                            ? DecorationImage(
+                                image: NetworkImage(item.displayUrl!),
+                                fit: BoxFit.cover,
+                              )
+                            : (item.imageBytes != null
+                                  ? DecorationImage(
+                                      image: MemoryImage(item.imageBytes!),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null),
+                      ),
+                      child:
+                          (item.displayUrl == null && item.imageBytes == null)
+                          ? Center(
+                              child: Text(
+                                _catEmoji(item.cat),
+                                style: const TextStyle(fontSize: 40),
+                              ),
+                            )
+                          : null,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.name,
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: t.textPrimary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              item.cat,
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontSize: 11,
+                                color: t.mutedText,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: wornColor,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                wornLabel,
+                                style: TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                  color: wornTextColor,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              // â”€â”€ Delete button â”€â”€
+              Positioned(
+                top: 8,
+                left: 8,
+                child: GestureDetector(
+                  onTapDown: (_) => setState(() => _deletePressed = true),
+                  onTapUp: (_) {
+                    setState(() => _deletePressed = false);
+                    widget.onDelete();
+                  },
+                  onTapCancel: () => setState(() => _deletePressed = false),
+                  child: AnimatedScale(
+                    scale: _deletePressed ? 0.88 : 1.0,
+                    duration: Duration(milliseconds: _deletePressed ? 80 : 150),
+                    child: _DeleteHoverButton(),
+                  ),
+                ),
+              ),
+
+              // â”€â”€ Like button â”€â”€
+              Positioned(
+                top: 8,
+                right: 8,
+                child: MouseRegion(
+                  onEnter: (_) => setState(() => _likeHovered = true),
+                  onExit: (_) => setState(() => _likeHovered = false),
+                  child: GestureDetector(
+                    onTapDown: (_) => setState(() => _likePressed = true),
+                    onTapUp: (_) {
+                      setState(() => _likePressed = false);
+                      _handleLike();
+                    },
+                    onTapCancel: () => setState(() => _likePressed = false),
+                    child: AnimatedBuilder(
+                      animation: _likeScale,
+                      builder: (_, child) {
+                        double scale;
+                        if (_likeCtrl.isAnimating) {
+                          scale = _likeScale.value;
+                        } else if (_likePressed) {
+                          scale = 0.88;
+                        } else if (_likeHovered) {
+                          scale = 1.12;
+                        } else {
+                          scale = item.liked ? 1.15 : 1.0;
+                        }
+                        return Transform.scale(scale: scale, child: child);
+                      },
+                      child: AnimatedContainer(
+                        duration: Duration(
+                          milliseconds: _likePressed ? 80 : 150,
+                        ),
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: item.liked
+                              ? accent4.withValues(alpha: 0.2)
+                              : (_likeHovered
+                                    ? t.backgroundSecondary.withValues(
+                                        alpha: 0.98,
+                                      )
+                                    : t.backgroundPrimary.withValues(
+                                        alpha: 0.7,
+                                      )),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: t.textPrimary.withValues(alpha: 0.15),
+                            width: 1,
+                          ),
+                          boxShadow: _likeHovered && !_likePressed
+                              ? [
+                                  BoxShadow(
+                                    color: accent4.withValues(alpha: 0.18),
+                                    blurRadius: 14,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Icon(
+                          item.liked ? Icons.favorite : Icons.favorite_border,
+                          color: item.liked
+                              ? accent4
+                              : (_likeHovered ? accent4 : t.mutedText),
+                          size: 13,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // â”€â”€ Hover overlay â”€â”€
+              AnimatedOpacity(
+                opacity: _hovered ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: IgnorePointer(
+                  ignoring: !_hovered,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          t.backgroundPrimary.withValues(alpha: 0.55),
+                          kTransparent,
+                        ],
+                        stops: const [0.0, 0.52],
+                      ),
+                    ),
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(9, 0, 9, 9),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: widget.onWore,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: t.accent.tertiary.withValues(
+                                    alpha: 0.85,
+                                  ),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  '+ Wore it',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontFamily: 'Inter',
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: t.tileText,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          GestureDetector(
+                            onTap: widget.onShare,
+                            child: Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: t.textPrimary.withValues(alpha: 0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.ios_share_rounded,
+                                color: t.accent.primary,
+                                size: 13,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DeleteHoverButton extends StatefulWidget {
+  @override
+  State<_DeleteHoverButton> createState() => _DeleteHoverButtonState();
+}
+
+class _DeleteHoverButtonState extends State<_DeleteHoverButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    final accent4 = _accent4(t);
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: _hovered
+              ? accent4.withValues(alpha: 0.12)
+              : t.backgroundPrimary.withValues(alpha: 0.7),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: _hovered
+                ? accent4.withValues(alpha: 0.28)
+                : t.textPrimary.withValues(alpha: 0.15),
+            width: 1,
+          ),
+          boxShadow: _hovered
+              ? [
+                  BoxShadow(
+                    color: accent4.withValues(alpha: 0.14),
+                    blurRadius: 14,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
+              : null,
+        ),
+        child: Icon(
+          Icons.close,
+          color: _hovered ? accent4 : t.mutedText,
+          size: 12,
+        ),
+      ),
+    );
+  }
+}
+
+// â”€â”€ EMPTY STATES â”€â”€
+class _EmptyState extends StatelessWidget {
+  final VoidCallback onAddTap;
+  const _EmptyState({required this.onAddTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 60),
+      child: Column(
+        children: [
+          const Opacity(
+            opacity: 0.4,
+            child: Text('ðŸ‘•', style: TextStyle(fontSize: 52)),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Your wardrobe is empty',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 22,
+              fontWeight: FontWeight.w600,
+              color: t.textPrimary,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Add pieces to start building your digital closet and get AI-powered outfit ideas.',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 14,
+              color: t.mutedText,
+              height: 1.7,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          GestureDetector(
+            onTap: onAddTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 13),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [t.accent.primary, t.accent.tertiary],
+                ),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                '+ Add first item',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: t.textPrimary,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptySearch extends StatelessWidget {
+  const _EmptySearch();
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 60),
+      child: Column(
+        children: [
+          const Opacity(
+            opacity: 0.4,
+            child: Text('ðŸ”', style: TextStyle(fontSize: 40)),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No results',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              color: t.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Try a different search or category.',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 14,
+              color: t.mutedText,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// â”€â”€ STATS PANEL â”€â”€
+class _StatsPanel extends StatelessWidget {
+  final List<WardrobeItem> wardrobe;
+  const _StatsPanel({required this.wardrobe});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    final accent4 = _accent4(t);
+    final total = wardrobe.length;
+    final worn = wardrobe.where((i) => i.worn > 0).length;
+    final totalWears = wardrobe.fold<int>(0, (s, i) => s + i.worn);
+    final wearRate = total > 0 ? (worn / total * 100).round() : 0;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 100),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Overview',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: t.textPrimary,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 14),
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 2,
+            crossAxisSpacing: 14,
+            mainAxisSpacing: 14,
+            childAspectRatio: 1.2,
+            children: [
+              _HoverStatCard(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    t.accent.primary.withValues(alpha: 0.20),
+                    t.accent.primary.withValues(alpha: 0.12),
+                  ],
+                ),
+                iconBg: t.accent.primary.withValues(alpha: 0.25),
+                iconChar: 'ðŸ‘•',
+                number: '$total',
+                label: 'TOTAL PIECES',
+                sub: 'in your wardrobe',
+              ),
+              _HoverStatCard(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    accent4.withValues(alpha: 0.20),
+                    accent4.withValues(alpha: 0.12),
+                  ],
+                ),
+                iconBg: accent4.withValues(alpha: 0.25),
+                iconChar: 'ðŸ‘—',
+                number: '0',
+                label: 'OUTFITS SAVED',
+                sub: 'ready to wear',
+              ),
+              _HoverStatCard(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    t.accent.tertiary.withValues(alpha: 0.20),
+                    t.accent.tertiary.withValues(alpha: 0.12),
+                  ],
+                ),
+                iconBg: t.accent.tertiary.withValues(alpha: 0.25),
+                iconChar: 'âœ“',
+                number: '$totalWears',
+                label: 'TIMES WORN',
+                sub: 'total logs',
+              ),
+              _HoverStatCard(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    t.accent.secondary.withValues(alpha: 0.20),
+                    t.accent.secondary.withValues(alpha: 0.12),
+                  ],
+                ),
+                iconBg: t.accent.secondary.withValues(alpha: 0.25),
+                iconChar: 'â˜…',
+                number: '$wearRate%',
+                label: 'WEAR RATE',
+                sub: 'items worn at least once',
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+          _buildDivider(context, 'By category'),
+          const SizedBox(height: 14),
+          _buildBars(context),
+          const SizedBox(height: 28),
+          _buildDivider(context, 'Most worn'),
+          const SizedBox(height: 14),
+          _buildMostWorn(context),
+          const SizedBox(height: 28),
+          _buildDivider(context, 'Never worn â€” time to style these'),
+          const SizedBox(height: 14),
+          _buildNeverWorn(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMostWorn(BuildContext context) {
+    final t = context.themeTokens;
+    final worn = wardrobe.where((i) => i.worn > 0).toList()
+      ..sort((a, b) => b.worn.compareTo(a.worn));
+    if (worn.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Center(
+          child: Text(
+            'No wear logs yet',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 13,
+              color: t.mutedText,
+            ),
+          ),
+        ),
+      );
+    }
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: worn
+          .take(6)
+          .map((item) => _MostWornHoverCard(item: item))
+          .toList(),
+    );
+  }
+
+  Widget _buildNeverWorn(BuildContext context) {
+    final t = context.themeTokens;
+    final accent4 = _accent4(t);
+    final neverWorn = wardrobe.where((i) => i.worn == 0).toList();
+    if (neverWorn.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Text(
+          'Everything has been worn â€” great work! ðŸŽ‰',
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 13,
+            fontStyle: FontStyle.italic,
+            color: t.mutedText,
+          ),
+        ),
+      );
+    }
+    return Column(
+      children: neverWorn
+          .map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: t.panel,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: t.cardBorder),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            t.accent.secondary.withValues(alpha: 0.12),
+                            t.accent.primary.withValues(alpha: 0.10),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Center(
+                        child: Text(
+                          _catEmoji(item.cat),
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.name,
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: t.textPrimary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            item.cat,
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 11,
+                              color: t.mutedText,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: accent4.withValues(alpha: 0.07),
+                        border: Border.all(
+                          color: accent4.withValues(alpha: 0.28),
+                        ),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        'Unworn',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: accent4,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  static String _catEmoji(String cat) {
+    final lower = cat.toLowerCase();
+    if (lower.contains('top')) return '\u{1F455}';
+    if (lower.contains('bottom')) return '\u{1F456}';
+    if (lower.contains('outer') || lower.contains('jacket')) return '\u{1F9E5}';
+    if (lower.contains('foot') || lower.contains('shoe') || lower.contains('sneaker')) return '\u{1F45E}';
+    if (lower.contains('dress')) return '\u{1F457}';
+    if (lower.contains('bag')) return '\u{1F45C}';
+    if (lower.contains('jewel') || lower.contains('watch')) return '\u{1F48D}';
+    if (lower.contains('indian') || lower.contains('traditional') || lower.contains('ethnic')) return '\u{1F97B}';
+    if (lower.contains('makeup')) return '\u{1F484}';
+    if (lower.contains('skin')) return '\u{1F9F4}';
+    if (lower.contains('accessor')) return '\u{1F576}\u{FE0F}';
+    return '\u{2728}';
+  }
+
+  Widget _buildDivider(BuildContext context, String label) => Row(
+    children: [
+      Text(
+        label,
+        style: TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: context.themeTokens.mutedText,
+          letterSpacing: 0.5,
+        ),
+      ),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Divider(color: context.themeTokens.cardBorder, thickness: 1),
+      ),
+    ],
+  );
+
+  Widget _buildBars(BuildContext context) {
+    final t = context.themeTokens;
+    final accent4 = _accent4(t);
+    final accent5 = _accent5(t);
+    final bags = _bagsChip(t);
+    final jewelry = _jewelryChip(t);
+    final makeup = _makeupChip(t);
+    final skincare = _skincareChip(t);
+
+    final cats = [
+      'Tops',
+      'Bottoms',
+      'Outerwear',
+      'Footwear',
+      'Dresses',
+      'Accessories',
+      'Bags',
+      'Jewelry',
+      'Makeup',
+      'Skincare',
+    ];
+    final colors = [
+      t.accent.primary,
+      t.accent.secondary,
+      t.accent.tertiary,
+      accent5,
+      accent4,
+      t.accent.secondary,
+      bags,
+      jewelry,
+      makeup,
+      skincare,
+    ];
+    final counts = cats
+        .map((c) => wardrobe.where((i) => i.cat == c).length)
+        .toList();
+    final max = counts.fold(0, (a, b) => a > b ? a : b);
+    return _BarSection(
+      bars: List.generate(
+        cats.length,
+        (i) => _BarItem(
+          label: cats[i],
+          color: colors[i],
+          value: max > 0 ? counts[i] / max : 0,
+        ),
+      ),
+    );
+  }
+}
+
+class _MostWornHoverCard extends StatefulWidget {
+  final WardrobeItem item;
+  const _MostWornHoverCard({required this.item});
+
+  @override
+  State<_MostWornHoverCard> createState() => _MostWornHoverCardState();
+}
+
+class _MostWornHoverCardState extends State<_MostWornHoverCard> {
+  bool _hovered = false;
+
+  static String _catEmoji(String cat) {
+    final lower = cat.toLowerCase();
+    if (lower.contains('top')) return '\u{1F455}';
+    if (lower.contains('bottom')) return '\u{1F456}';
+    if (lower.contains('outer') || lower.contains('jacket')) return '\u{1F9E5}';
+    if (lower.contains('foot') || lower.contains('shoe') || lower.contains('sneaker')) return '\u{1F45E}';
+    if (lower.contains('dress')) return '\u{1F457}';
+    if (lower.contains('bag')) return '\u{1F45C}';
+    if (lower.contains('jewel') || lower.contains('watch')) return '\u{1F48D}';
+    if (lower.contains('indian') || lower.contains('traditional') || lower.contains('ethnic')) return '\u{1F97B}';
+    if (lower.contains('makeup')) return '\u{1F484}';
+    if (lower.contains('skin')) return '\u{1F9F4}';
+    if (lower.contains('accessor')) return '\u{1F576}\u{FE0F}';
+    return '\u{2728}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: const Cubic(0.34, 1.32, 0.64, 1),
+        transform: _hovered
+            ? Matrix4.translationValues(0.0, -2.0, 0.0)
+            : Matrix4.identity(),
+        width: 100,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: t.panel,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: t.cardBorder),
+        ),
+        child: Column(
+          children: [
+            Text(
+              _catEmoji(widget.item.cat),
+              style: const TextStyle(fontSize: 28),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              widget.item.name,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: t.textPrimary,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${widget.item.worn}Ã— worn',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 10,
+                color: t.accent.secondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HoverStatCard extends StatefulWidget {
+  final LinearGradient gradient;
+  final Color iconBg;
+  final String iconChar;
+  final String number;
+  final String label;
+  final String sub;
+  const _HoverStatCard({
+    required this.gradient,
+    required this.iconBg,
+    required this.iconChar,
+    required this.number,
+    required this.label,
+    required this.sub,
+  });
+
+  @override
+  State<_HoverStatCard> createState() => _HoverStatCardState();
+}
+
+class _HoverStatCardState extends State<_HoverStatCard> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+        transform: _hovered
+            ? (Matrix4.translationValues(0.0, -2.0, 0.0)
+                ..multiply(Matrix4.diagonal3Values(1.01, 1.01, 1.0)))
+            : Matrix4.identity(),
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          gradient: widget.gradient,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: _hovered
+              ? [
+                  BoxShadow(
+                    color: t.backgroundPrimary.withValues(alpha: 0.4),
+                    blurRadius: 28,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : [
+                  BoxShadow(
+                    color: t.backgroundPrimary.withValues(alpha: 0.3),
+                    blurRadius: 16,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: widget.iconBg,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Center(
+                child: Text(
+                  widget.iconChar,
+                  style: const TextStyle(fontSize: 18),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              widget.number,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 40,
+                fontWeight: FontWeight.w700,
+                color: t.textPrimary,
+                height: 1,
+                letterSpacing: -0.5,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              widget.label,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: t.textPrimary,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              widget.sub,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 12,
+                color: t.textPrimary.withValues(alpha: 0.75),
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BarItem {
+  final String label;
+  final Color color;
+  final double value;
+  const _BarItem({
+    required this.label,
+    required this.color,
+    required this.value,
+  });
+}
+
+class _BarSection extends StatefulWidget {
+  final List<_BarItem> bars;
+  const _BarSection({required this.bars});
+
+  @override
+  State<_BarSection> createState() => _BarSectionState();
+}
+
+class _BarSectionState extends State<_BarSection>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _ctrl.forward());
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.themeTokens;
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, _) => Column(
+        children: widget.bars
+            .map(
+              (bar) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 100,
+                      child: Text(
+                        bar.label,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 13,
+                          color: t.mutedText,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Container(
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: t.panel,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: FractionallySizedBox(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: bar.value.clamp(0.0, 1.0) * _anim.value,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  bar.color.withValues(alpha: 0.7),
+                                  bar.color,
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 28,
+                      child: Text(
+                        '${(bar.value * 100).round()}',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 12,
+                          color: t.mutedText,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+}
+
+// â”€â”€ CUSTOM PAINTERS â”€â”€
+class _ChevronLeftPainter extends CustomPainter {
+  final Color color;
+  const _ChevronLeftPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    canvas.drawPath(
+      Path()
+        ..moveTo(size.width * 0.7, 0)
+        ..lineTo(size.width * 0.2, size.height / 2)
+        ..lineTo(size.width * 0.7, size.height),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter _) => false;
+}
+
+// â”€â”€ LENS SHEET â”€â”€
+class _WardrobeLensSheet extends StatelessWidget {
+  final AppThemeTokens t;
+  const _WardrobeLensSheet({required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = t.accent.primary;
+    final accentSecondary = t.accent.secondary;
+    final textHeading = t.textPrimary;
+    final textMuted = t.mutedText;
+    final panel = t.panel;
+    final surface = t.phoneShellInner;
+    final bgSecondary = t.backgroundSecondary;
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [surface, bgSecondary],
+        ),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border.all(color: accent.withValues(alpha: 0.15), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: 0.15),
+            blurRadius: 48,
+            offset: const Offset(0, -12),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 40,
+            height: 4,
+            margin: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.30),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(
+                          color: accent.withValues(alpha: 0.25),
+                          width: 1,
+                        ),
+                      ),
+                      child: Icon(Icons.search, color: accent, size: 17),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'AHVI Lens',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        color: textHeading,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: accent.withValues(alpha: 0.08),
+                      border: Border.all(
+                        color: accent.withValues(alpha: 0.20),
+                        width: 1,
+                      ),
+                    ),
+                    child: Icon(Icons.close, color: textMuted, size: 14),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: panel,
+              border: Border.all(color: accent.withValues(alpha: 0.15), width: 1),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: accent.withValues(alpha: 0.5),
+                      width: 2,
+                    ),
+                    color: accent.withValues(alpha: 0.08),
+                  ),
+                  child: Icon(Icons.circle, color: accent, size: 12),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Visual AI Search',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          color: textHeading,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Point at any item to find, save, or get styling advice.',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          color: textMuted,
+                          fontSize: 11.5,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _WardrobeLensOption(
+            icon: Icons.search,
+            name: 'Find Similar',
+            desc: 'Discover similar items with shopping links',
+            color: accent,
+            textHeading: textHeading,
+            textMuted: textMuted,
+            panel: panel,
+            accentBorder: accent,
+            onTap: () => Navigator.pop(context),
+          ),
+          _WardrobeLensOption(
+            icon: Icons.add_photo_alternate_outlined,
+            name: 'Add to Wardrobe',
+            desc: 'Save to your collection',
+            color: accentSecondary,
+            textHeading: textHeading,
+            textMuted: textMuted,
+            panel: panel,
+            accentBorder: accent,
+            onTap: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WardrobeLensOption extends StatefulWidget {
+  final IconData icon;
+  final String name;
+  final String desc;
+  final Color color;
+  final Color textHeading;
+  final Color textMuted;
+  final Color panel;
+  final Color accentBorder;
+  final VoidCallback onTap;
+
+  const _WardrobeLensOption({
+    required this.icon,
+    required this.name,
+    required this.desc,
+    required this.color,
+    required this.textHeading,
+    required this.textMuted,
+    required this.panel,
+    required this.accentBorder,
+    required this.onTap,
+  });
+
+  @override
+  State<_WardrobeLensOption> createState() => _WardrobeLensOptionState();
+}
+
+class _WardrobeLensOptionState extends State<_WardrobeLensOption> {
+  bool _hovered = false;
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() {
+        _hovered = false;
+        _pressed = false;
+      }),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTapCancel: () => setState(() => _pressed = false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.98 : 1.0,
+          duration: const Duration(milliseconds: 120),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? widget.color.withValues(alpha: 0.08)
+                  : widget.panel,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _hovered
+                    ? widget.color.withValues(alpha: 0.30)
+                    : widget.accentBorder.withValues(alpha: 0.12),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: widget.color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: widget.color.withValues(alpha: 0.25),
+                      width: 1,
+                    ),
+                  ),
+                  child: Icon(widget.icon, color: widget.color, size: 18),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.name,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          color: widget.textHeading,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        widget.desc,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          color: widget.textMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  transform: Matrix4.translationValues(
+                    _hovered ? 3.0 : 0.0, 0, 0,
+                  ),
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    color: _hovered ? widget.color : widget.textMuted,
+                    size: 20,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

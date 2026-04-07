@@ -1,0 +1,1355 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:appwrite/appwrite.dart';
+import 'package:appwrite/enums.dart';
+import 'package:appwrite/models.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:myapp/config/env.dart';
+import 'package:myapp/services/local_data_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class ProxyDocument {
+  final String $id;
+  final Map<String, dynamic> data;
+  final Map<String, dynamic> raw;
+
+  ProxyDocument({
+    required this.$id,
+    required this.data,
+    required this.raw,
+  });
+
+  factory ProxyDocument.fromApi(Map<String, dynamic> rawMap) {
+    final mapped = Map<String, dynamic>.from(rawMap);
+    final id = (mapped[r'$id'] ?? mapped['id'] ?? '').toString().trim();
+    if (id.isEmpty) {
+      throw const FormatException('Document is missing required id');
+    }
+    final data = <String, dynamic>{};
+
+    mapped.forEach((key, value) {
+      if (!key.startsWith(r'$')) {
+        data[key] = value;
+      }
+    });
+
+    return ProxyDocument(
+      $id: id,
+      data: data,
+      raw: mapped,
+    );
+  }
+
+  dynamic operator [](String key) {
+    if (key == r'$id') return $id;
+    if (key == 'id') return $id;
+    if (data.containsKey(key)) return data[key];
+    return raw[key];
+  }
+}
+
+class DuplicateOutfitException implements Exception {
+  final Map<String, dynamic> detail;
+  final String rawBody;
+
+  const DuplicateOutfitException({
+    required this.detail,
+    required this.rawBody,
+  });
+
+  static Map<String, dynamic> _asMap(dynamic value) {
+    if (value is Map<String, dynamic>) return Map<String, dynamic>.from(value);
+    if (value is Map) {
+      return value.map(
+        (key, val) => MapEntry(key.toString(), val),
+      );
+    }
+    return <String, dynamic>{};
+  }
+
+  static bool _isRenderableImageUrl(String value) {
+    final text = value.trim();
+    if (text.isEmpty || text.contains(RegExp(r'\s'))) return false;
+    final lower = text.toLowerCase();
+    if (lower.startsWith('data:image/')) {
+      return lower.contains(';base64,');
+    }
+    final uri = Uri.tryParse(text);
+    if (uri == null) return false;
+    return uri.hasScheme && (uri.scheme == 'http' || uri.scheme == 'https');
+  }
+
+  Map<String, dynamic> get _root {
+    final direct = _asMap(detail);
+    final nested = _asMap(direct['detail']);
+    return nested.isNotEmpty ? nested : direct;
+  }
+
+  Map<String, dynamic> get duplicate =>
+      _asMap(_root['duplicate']);
+
+  Map<String, dynamic> get existingDocument =>
+      _asMap(_root['existing_document']);
+
+  Map<String, dynamic> get cleanup =>
+      _asMap(_root['cleanup']);
+
+  String? get existingPreviewUrl {
+    final dataUrl = (_root['existing_preview_data_url'] ?? '').toString().trim();
+    if (dataUrl.isNotEmpty && _isRenderableImageUrl(dataUrl)) return dataUrl;
+    final fromRoot = (_root['existing_preview_url'] ?? '').toString().trim();
+    if (fromRoot.isNotEmpty && _isRenderableImageUrl(fromRoot)) return fromRoot;
+    final doc = existingDocument;
+    for (final key in const [
+      'masked_url',
+      'maskedUrl',
+      'image_masked_url',
+      'maskedImageUrl',
+      'image_url',
+      'imageUrl',
+    ]) {
+      final value = (doc[key] ?? '').toString().trim();
+      if (value.isNotEmpty && _isRenderableImageUrl(value)) return value;
+    }
+    return null;
+  }
+
+  String get message => (_root['message'] ?? 'Duplicate outfit detected').toString();
+
+  @override
+  String toString() => 'DuplicateOutfitException: $message';
+}
+
+class _HttpStatusException implements Exception {
+  final int statusCode;
+  final String body;
+
+  const _HttpStatusException(this.statusCode, this.body);
+
+  @override
+  String toString() => 'HttpStatusException($statusCode): $body';
+}
+
+class AppwriteService extends ChangeNotifier {
+  static const _lastUserIdKey = 'last_user_id';
+  late Client client;
+  late Account account;
+  late Avatars avatars;
+  late String _baseUrl;
+  final LocalDataStore _localStore = LocalDataStore();
+  bool _localReady = false;
+  static const Set<int> _retryableStatusCodes = {408, 429};
+
+  AppwriteService() {
+    client = Client()
+      ..setEndpoint(Env.appwriteEndpoint)
+      ..setProject(Env.appwriteProjectId);
+
+    account = Account(client);
+    avatars = Avatars(client);
+    _baseUrl = '${Env.backendApiUrl}/api/data';
+  }
+
+  Future<void> _ensureLocalReady() async {
+    if (_localReady) return;
+    await _localStore.init();
+    _localReady = true;
+  }
+
+  bool _isLocalId(String id) => id.startsWith('local_');
+
+  Future<void> _persistLastUserId(String userId) async {
+    if (userId.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_lastUserIdKey, userId);
+  }
+
+  Future<String?> _lastKnownUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getString(_lastUserIdKey)?.trim();
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  Future<void> _clearLastUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_lastUserIdKey);
+  }
+
+  Future<void> _syncPendingLocalChanges(String userId) async {
+    await _ensureLocalReady();
+    final pending = await _localStore.pendingOps(userId);
+    for (final op in pending) {
+      try {
+        if (op.entity == 'wardrobe' && op.op == 'create') {
+          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+          await _createDoc('outfits', data, userId: userId);
+          await _localStore.deleteWardrobeItem(userId, op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+
+        if (op.entity == 'wardrobe' && op.op == 'update') {
+          if (_isLocalId(op.refId)) {
+            await _localStore.deletePendingOp(op.id);
+            continue;
+          }
+          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+          await _updateDoc('outfits', op.refId, data);
+          await _localStore.deleteWardrobeItem(userId, op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+
+        if (op.entity == 'wardrobe' && op.op == 'delete') {
+          if (_isLocalId(op.refId)) {
+            await _localStore.deletePendingOp(op.id);
+            continue;
+          }
+          await _deleteDoc('outfits', op.refId);
+          await _localStore.deleteWardrobeItem(userId, op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+
+        if (op.entity == 'saved_board' && op.op == 'delete') {
+          await _deleteDoc('saved_boards', op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+
+        if (op.entity == 'saved_board' && op.op == 'create') {
+          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+          await _createDoc('saved_boards', data, userId: userId);
+          await _localStore.deleteBoard(userId, op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+
+        if (op.entity == 'profile' && op.op == 'upsert') {
+          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+          final response = await http.put(
+            Uri.parse('$_baseUrl/users/$userId'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(data),
+          );
+          if (response.statusCode == 200) {
+            final body = jsonDecode(response.body) as Map<String, dynamic>;
+            final doc = ProxyDocument.fromApi(
+              Map<String, dynamic>.from(body['document']),
+            );
+            await _localStore.cacheUserProfile(
+              userId,
+              data: Map<String, dynamic>.from(doc.data),
+              raw: Map<String, dynamic>.from(doc.raw),
+            );
+            await _localStore.deletePendingOp(op.id);
+            continue;
+          }
+          throw _HttpStatusException(response.statusCode, response.body);
+        }
+      } on DuplicateOutfitException catch (dup) {
+        if (op.entity == 'wardrobe' && op.op == 'create') {
+          debugPrint(
+            'Dropping duplicate pending create ${op.refId}: ${dup.message}',
+          );
+          await _localStore.deleteWardrobeItem(userId, op.refId);
+          await _localStore.deletePendingOp(op.id);
+          continue;
+        }
+        break;
+      } catch (e) {
+        if (_isPermanentSyncError(e)) {
+          debugPrint('Dropping broken offline op ${op.id}: $e');
+          await _dropBrokenPendingOp(userId, op);
+          continue;
+        }
+        break;
+      }
+    }
+
+    // Keep local cache rows for offline-read; only pending ops are drained here.
+  }
+
+  Future<User?> getCurrentUser() async {
+    try {
+      final user = await account.get();
+      await _persistLastUserId(user.$id);
+      return user;
+    } catch (e) {
+      debugPrint("No active session or error: $e");
+      return null;
+    }
+  }
+
+  Future<String?> getBackendJwtToken() async {
+    try {
+      final jwt = await account.createJWT();
+      final token = jwt.jwt.trim();
+      if (token.isEmpty) return null;
+      return token;
+    } catch (e) {
+      debugPrint('Failed to refresh backend token: $e');
+      return null;
+    }
+  }
+
+  Future<Session?> loginEmailPassword(String email, String password) async {
+    try {
+      final session = await account.createEmailPasswordSession(email: email, password: password);
+      final user = await getCurrentUser();
+      if (user != null) {
+        await _persistLastUserId(user.$id);
+      }
+      notifyListeners();
+      return session;
+    } catch (e) {
+      debugPrint("Login error: $e");
+      rethrow;
+    }
+  }
+
+  Future<bool> loginWithGoogle() async {
+    try {
+      await account.createOAuth2Session(provider: OAuthProvider.google);
+      final user = await getCurrentUser();
+      if (user != null) {
+        await _persistLastUserId(user.$id);
+      }
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint("Google login error: $e");
+      return false;
+    }
+  }
+
+  Future<User> registerEmailPassword(String email, String password, String name) async {
+    try {
+      final user = await account.create(
+        userId: ID.unique(),
+        email: email,
+        password: password,
+        name: name,
+      );
+      await _persistLastUserId(user.$id);
+      return user;
+    } catch (e) {
+      debugPrint("Register error: $e");
+      rethrow;
+    }
+  }
+
+  Future<void> logout() async {
+    try {
+      await account.deleteSession(sessionId: 'current');
+      await _clearLastUserId();
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Logout error: $e");
+    }
+  }
+
+  Future<Uint8List?> getUserAvatar(String name) async {
+    try {
+      return await avatars.getInitials(name: name);
+    } catch (e) {
+      debugPrint("Avatar error: $e");
+      return null;
+    }
+  }
+
+  Future<String> _requireUserId() async {
+    final fallbackUserId = await _lastKnownUserId();
+    if (fallbackUserId != null) {
+      return fallbackUserId;
+    }
+    final user = await getCurrentUser();
+    if (user != null) {
+      return user.$id;
+    }
+    throw Exception("User not authenticated");
+  }
+
+  bool _isConnectivityException(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('socketexception') ||
+        text.contains('failed host lookup') ||
+        text.contains('connection refused') ||
+        text.contains('timed out') ||
+        text.contains('network is unreachable') ||
+        text.contains('connection reset') ||
+        text.contains('handshakeexception');
+  }
+
+  bool _isPermanentSyncError(Object error) {
+    if (error is DuplicateOutfitException) return true;
+    if (error is FormatException) return true;
+    if (error is _HttpStatusException) {
+      final status = error.statusCode;
+      if (status >= 400 && status < 500) {
+        return !_retryableStatusCodes.contains(status);
+      }
+    }
+    return false;
+  }
+
+  Future<void> _dropBrokenPendingOp(String userId, PendingLocalOp op) async {
+    if (op.entity == 'wardrobe') {
+      await _localStore.deleteWardrobeItem(userId, op.refId);
+    } else if (op.entity == 'saved_board') {
+      await _localStore.deleteBoard(userId, op.refId);
+    }
+    await _localStore.deletePendingOp(op.id);
+  }
+
+  Uri _resourceUri(String resource, {Map<String, String>? query}) {
+    final uri = Uri.parse('$_baseUrl/$resource');
+    if (query == null || query.isEmpty) return uri;
+    return uri.replace(queryParameters: query);
+  }
+
+  Map<String, dynamic> _wardrobeDocToLocalMap(ProxyDocument doc) {
+    return {
+      "id": doc.$id,
+      "name": doc.data['name'],
+      "category": doc.data['category'],
+      "sub_category": doc.data['sub_category'],
+      "color_code": doc.data['color_code'],
+      "pattern": doc.data['pattern'],
+      "occasions": doc.data['occasions'],
+      "image_url": doc.data['image_url'],
+      "masked_url": doc.data['masked_url'],
+      "qdrant_point_id": doc.data['qdrant_point_id'],
+      "qdrantPointId": doc.data['qdrantPointId'] ?? doc.data['qdrant_point_id'],
+      "notes": doc.data['notes'],
+      "worn": doc.data['worn'] ?? 0,
+      "liked": doc.data['liked'] ?? false,
+    };
+  }
+
+  Future<List<ProxyDocument>> _listDocs(
+    String resource, {
+    String? userId,
+    String? occasion,
+    int limit = 100,
+  }) async {
+    final query = <String, String>{'limit': '$limit'};
+    if (userId != null && userId.isNotEmpty) query['user_id'] = userId;
+    if (occasion != null && occasion.isNotEmpty) query['occasion'] = occasion;
+
+    final response = await http.get(_resourceUri(resource, query: query));
+    if (response.statusCode != 200) {
+      throw Exception('Failed to fetch $resource: ${response.body}');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    final docs = List<Map<String, dynamic>>.from(body['documents'] ?? const []);
+    return docs.map(ProxyDocument.fromApi).toList();
+  }
+
+  Future<ProxyDocument> _createDoc(
+    String resource,
+    Map<String, dynamic> data, {
+    String? userId,
+    String? documentId,
+    bool forceSave = false,
+  }) async {
+    final response = await http.post(
+      Uri.parse(_baseUrl),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'resource': resource,
+        'data': data,
+        if (userId != null) 'user_id': userId,
+        if (documentId != null) 'document_id': documentId,
+        if (forceSave) 'force_save': true,
+      }),
+    );
+
+    if (response.statusCode == 409) {
+      Map<String, dynamic> detail = <String, dynamic>{};
+      try {
+        final body = jsonDecode(response.body);
+        if (body is Map<String, dynamic>) {
+          if (body['detail'] is Map<String, dynamic>) {
+            detail = Map<String, dynamic>.from(body['detail'] as Map<String, dynamic>);
+          } else {
+            detail = Map<String, dynamic>.from(body);
+          }
+        } else if (body is Map) {
+          final map = body.map((key, value) => MapEntry(key.toString(), value));
+          if (map['detail'] is Map) {
+            detail = Map<String, dynamic>.from(
+              (map['detail'] as Map).map((k, v) => MapEntry(k.toString(), v)),
+            );
+          } else {
+            detail = Map<String, dynamic>.from(map);
+          }
+        }
+      } catch (_) {}
+      throw DuplicateOutfitException(detail: detail, rawBody: response.body);
+    }
+
+    if (response.statusCode != 200) {
+      throw _HttpStatusException(response.statusCode, response.body);
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
+  }
+
+  Future<ProxyDocument> _updateDoc(
+    String resource,
+    String documentId,
+    Map<String, dynamic> data,
+  ) async {
+    final response = await http.patch(
+      Uri.parse('$_baseUrl/$documentId'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'resource': resource,
+        'data': data,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw _HttpStatusException(response.statusCode, response.body);
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
+  }
+
+  Future<void> _deleteDoc(String resource, String documentId) async {
+    final request = http.Request('DELETE', Uri.parse(_baseUrl))
+      ..headers['Content-Type'] = 'application/json'
+      ..body = jsonEncode({'resource': resource, 'document_id': documentId});
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode != 200) {
+      throw _HttpStatusException(response.statusCode, response.body);
+    }
+  }
+
+  Future<ProxyDocument> getUserProfile() async {
+    await _ensureLocalReady();
+    final userId = await _requireUserId();
+    final cached = await _localStore.loadUserProfile(userId);
+    if (cached != null) {
+      // Return instantly from local cache, then refresh in background.
+      Future<void>(() async {
+        await _refreshUserProfileFromServer(userId);
+      });
+      return ProxyDocument(
+        $id: (cached['id'] ?? userId).toString(),
+        data: Map<String, dynamic>.from(cached['data'] ?? const {}),
+        raw: Map<String, dynamic>.from(
+          cached['raw'] ??
+              {
+                r'$id': userId,
+                ...Map<String, dynamic>.from(cached['data'] ?? const {}),
+              },
+        ),
+      );
+    }
+
+    final fresh = await _refreshUserProfileFromServer(userId);
+    if (fresh != null) return fresh;
+    throw Exception('Failed to fetch profile and no cached profile found');
+  }
+
+  Future<ProxyDocument?> _refreshUserProfileFromServer(String userId) async {
+    try {
+      await _syncPendingLocalChanges(userId);
+    } catch (_) {}
+
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/users/$userId'));
+      if (response.statusCode != 200) {
+        return null;
+      }
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final doc = ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
+      await _localStore.cacheUserProfile(
+        userId,
+        data: Map<String, dynamic>.from(doc.data),
+        raw: Map<String, dynamic>.from(doc.raw),
+      );
+      return doc;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<ProxyDocument> upsertUserProfile(Map<String, dynamic> data) async {
+    await _ensureLocalReady();
+    final userId = await _requireUserId();
+    try {
+      final response = await http.put(
+        Uri.parse('$_baseUrl/users/$userId'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      );
+      if (response.statusCode != 200) {
+        throw Exception('Failed to save profile: ${response.body}');
+      }
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final doc = ProxyDocument.fromApi(Map<String, dynamic>.from(body['document']));
+      await _localStore.cacheUserProfile(
+        userId,
+        data: Map<String, dynamic>.from(doc.data),
+        raw: Map<String, dynamic>.from(doc.raw),
+      );
+      await _localStore.deletePendingOpsByRef(
+        userId: userId,
+        entity: 'profile',
+        refId: userId,
+        op: 'upsert',
+      );
+      return doc;
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
+      await _localStore.cacheUserProfile(
+        userId,
+        data: Map<String, dynamic>.from(data),
+        raw: {
+          r'$id': userId,
+          ...Map<String, dynamic>.from(data),
+          '_local_only': true,
+        },
+      );
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'profile',
+        op: 'upsert',
+        refId: userId,
+        payload: {'data': data},
+      );
+      return ProxyDocument(
+        $id: userId,
+        data: Map<String, dynamic>.from(data),
+        raw: {
+          r'$id': userId,
+          ...Map<String, dynamic>.from(data),
+          '_local_only': true,
+        },
+      );
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getWardrobeItems() async {
+    await _ensureLocalReady();
+    String? userId;
+    try {
+      userId = await _requireUserId();
+      await _syncPendingLocalChanges(userId);
+    } catch (_) {}
+
+    try {
+      userId ??= await _requireUserId();
+      final docs = await _listDocs('outfits', userId: userId, limit: 200);
+      final mapped = docs.map(_wardrobeDocToLocalMap).toList();
+      await _localStore.cacheWardrobeItems(userId, mapped);
+      return mapped;
+    } catch (e) {
+      debugPrint("Error fetching wardrobe items: $e");
+      if (userId != null) {
+        final cached = await _localStore.loadWardrobeItems(userId);
+        if (cached.isNotEmpty) return cached;
+      }
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> getWardrobeItemById(String documentId) async {
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/outfits/$documentId'));
+      if (response.statusCode != 200) return null;
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final raw = Map<String, dynamic>.from(body['document'] ?? const {});
+      if (raw.isEmpty) return null;
+      return raw;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<DuplicateOutfitException?> checkWardrobeDuplicate(
+    Map<String, dynamic> data,
+  ) async {
+    final userId = await _requireUserId();
+    final response = await http.post(
+      Uri.parse('$_baseUrl/outfits/duplicate-check'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        'data': data,
+      }),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed duplicate check: ${response.body}');
+    }
+
+    final body = jsonDecode(response.body);
+    if (body is! Map) {
+      return null;
+    }
+    final mappedBody = body.map((key, value) => MapEntry(key.toString(), value));
+    final duplicate = mappedBody['duplicate'];
+    final duplicateMap = duplicate is Map
+        ? duplicate.map((key, value) => MapEntry(key.toString(), value))
+        : const <String, dynamic>{};
+    final isDuplicate = duplicateMap['is_duplicate'] == true;
+    if (!isDuplicate) {
+      return null;
+    }
+
+    final existing = mappedBody['existing_document'];
+    final existingMap = existing is Map
+        ? existing.map((key, value) => MapEntry(key.toString(), value))
+        : const <String, dynamic>{};
+
+    final detail = <String, dynamic>{
+      'message': 'Duplicate outfit detected',
+      'duplicate': duplicateMap,
+      'existing_document': existingMap,
+      'existing_preview_url': mappedBody['existing_preview_url'],
+      'existing_preview_data_url': mappedBody['existing_preview_data_url'],
+    };
+    return DuplicateOutfitException(detail: detail, rawBody: response.body);
+  }
+
+  Future<ProxyDocument> createWardrobeItem(
+    Map<String, dynamic> data, {
+    bool forceSave = false,
+  }) async {
+    await _ensureLocalReady();
+    final userId = await _requireUserId();
+    await _syncPendingLocalChanges(userId);
+
+    try {
+      final created = await _createDoc(
+        'outfits',
+        data,
+        userId: userId,
+        forceSave: forceSave,
+      );
+      await _localStore.upsertWardrobeItem(userId, _wardrobeDocToLocalMap(created));
+      return created;
+    } on DuplicateOutfitException {
+      rethrow;
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
+      final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
+      final localMap = Map<String, dynamic>.from(data)..['id'] = localId;
+      await _localStore.upsertWardrobeItem(userId, localMap);
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'wardrobe',
+        op: 'create',
+        refId: localId,
+        payload: {'data': data},
+      );
+      return ProxyDocument(
+        $id: localId,
+        data: Map<String, dynamic>.from(data),
+        raw: {
+          r'$id': localId,
+          ...Map<String, dynamic>.from(data),
+          '_local_only': true,
+        },
+      );
+    }
+  }
+
+  Future<ProxyDocument> updateWardrobeItem(
+    String documentId,
+    Map<String, dynamic> data,
+  ) async {
+    await _ensureLocalReady();
+    final userId = await _requireUserId();
+
+    if (_isLocalId(documentId)) {
+      final cached = await _localStore.loadWardrobeItems(userId);
+      final existing = cached
+          .where((i) => (i['id'] ?? '').toString() == documentId)
+          .cast<Map<String, dynamic>>()
+          .toList();
+      final merged = existing.isNotEmpty
+          ? (Map<String, dynamic>.from(existing.first)..addAll(data))
+          : (Map<String, dynamic>.from(data)..['id'] = documentId);
+      await _localStore.upsertWardrobeItem(userId, merged);
+
+      final pending = await _localStore.pendingOps(userId);
+      final createOp = pending.where((op) =>
+          op.entity == 'wardrobe' &&
+          op.op == 'create' &&
+          op.refId == documentId);
+      if (createOp.isNotEmpty) {
+        final op = createOp.first;
+        final payload = Map<String, dynamic>.from(op.payload);
+        final payloadData = Map<String, dynamic>.from(payload['data'] ?? const {});
+        payloadData.addAll(data);
+        payload['data'] = payloadData;
+        await _localStore.updatePendingOpPayload(op.id, payload);
+      }
+      return ProxyDocument(
+        $id: documentId,
+        data: merged,
+        raw: {
+          r'$id': documentId,
+          ...merged,
+          '_local_only': true,
+        },
+      );
+    }
+
+    try {
+      final updated = await _updateDoc('outfits', documentId, data);
+      await _localStore.upsertWardrobeItem(userId, _wardrobeDocToLocalMap(updated));
+      return updated;
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
+      final cached = await _localStore.loadWardrobeItems(userId);
+      final existing = cached
+          .where((i) => (i['id'] ?? '').toString() == documentId)
+          .cast<Map<String, dynamic>>()
+          .toList();
+      final merged = existing.isNotEmpty
+          ? (Map<String, dynamic>.from(existing.first)..addAll(data))
+          : (Map<String, dynamic>.from(data)..['id'] = documentId);
+      await _localStore.upsertWardrobeItem(userId, merged);
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'wardrobe',
+        op: 'update',
+        refId: documentId,
+        payload: {'data': data},
+      );
+      return ProxyDocument(
+        $id: documentId,
+        data: merged,
+        raw: {
+          r'$id': documentId,
+          ...merged,
+          '_local_only': true,
+        },
+      );
+    }
+  }
+
+  Future<void> deleteWardrobeItem(String documentId) async {
+    await _ensureLocalReady();
+    final userId = await _requireUserId();
+    await _localStore.deleteWardrobeItem(userId, documentId);
+
+    if (_isLocalId(documentId)) {
+      await _localStore.deletePendingOpsByRef(
+        userId: userId,
+        entity: 'wardrobe',
+        refId: documentId,
+        op: 'create',
+      );
+      return;
+    }
+
+    try {
+      await _deleteDoc('outfits', documentId);
+      await _syncPendingLocalChanges(userId);
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'wardrobe',
+        op: 'delete',
+        refId: documentId,
+        payload: const <String, dynamic>{},
+      );
+    }
+  }
+
+  Future<ProxyDocument> createPlan(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('plans', data, userId: userId);
+  }
+
+  Future<List<ProxyDocument>> getUserPlans() async {
+    try {
+      final userId = await _requireUserId();
+      return await _listDocs('plans', userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching plans: $e");
+      return [];
+    }
+  }
+
+  Future<void> deletePlan(String documentId) async {
+    await _deleteDoc('plans', documentId);
+  }
+
+  Future<void> updatePlanReminder(String documentId, bool reminder) async {
+    await _updateDoc('plans', documentId, {'reminder': reminder});
+  }
+
+  Future<List<ProxyDocument>> getSavedBoardsByOccasion(String occasion) async {
+    await _ensureLocalReady();
+    String? userId;
+    try {
+      userId = await _requireUserId();
+      await _syncPendingLocalChanges(userId);
+    } catch (_) {}
+
+    try {
+      userId ??= await _requireUserId();
+      return await _listDocs('saved_boards', userId: userId, occasion: occasion);
+    } catch (e) {
+      debugPrint("Error fetching $occasion boards: $e");
+      if (userId != null) {
+        final cached = await _localStore.loadBoards(userId, occasion: occasion);
+        if (cached.isNotEmpty) {
+          return cached
+              .map(
+                (row) => ProxyDocument(
+                  $id: (row['id'] ?? '').toString(),
+                  data: Map<String, dynamic>.from(row['data'] ?? const {}),
+                  raw: Map<String, dynamic>.from(
+                    row['raw'] ??
+                        {
+                          r'$id': (row['id'] ?? '').toString(),
+                          ...Map<String, dynamic>.from(row['data'] ?? const {}),
+                        },
+                  ),
+                ),
+              )
+              .toList();
+        }
+      }
+      return [];
+    }
+  }
+
+  Future<List<ProxyDocument>> getAllSavedBoards() async {
+    await _ensureLocalReady();
+    String? userId;
+    try {
+      userId = await _requireUserId();
+      await _syncPendingLocalChanges(userId);
+    } catch (_) {}
+
+    try {
+      userId ??= await _requireUserId();
+      return await _listDocs('saved_boards', userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching all boards: $e");
+      if (userId != null) {
+        final cached = await _localStore.loadBoards(userId);
+        if (cached.isNotEmpty) {
+          return cached
+              .map(
+                (row) => ProxyDocument(
+                  $id: (row['id'] ?? '').toString(),
+                  data: Map<String, dynamic>.from(row['data'] ?? const {}),
+                  raw: Map<String, dynamic>.from(
+                    row['raw'] ??
+                        {
+                          r'$id': (row['id'] ?? '').toString(),
+                          ...Map<String, dynamic>.from(row['data'] ?? const {}),
+                        },
+                  ),
+                ),
+              )
+              .toList();
+        }
+      }
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createSavedBoard(Map<String, dynamic> data) async {
+    await _ensureLocalReady();
+    final userId = await _requireUserId();
+    await _syncPendingLocalChanges(userId);
+
+    try {
+      return await _createDoc('saved_boards', data, userId: userId);
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
+      final localId = 'local_board_${DateTime.now().millisecondsSinceEpoch}';
+      await _localStore.cacheBoards(
+        userId,
+        [
+          {
+            'id': localId,
+            'data': Map<String, dynamic>.from(data),
+            'raw': {
+              r'$id': localId,
+              ...Map<String, dynamic>.from(data),
+              '_local_only': true,
+            },
+          }
+        ],
+      );
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'saved_board',
+        op: 'create',
+        refId: localId,
+        payload: {'data': data},
+      );
+      return ProxyDocument(
+        $id: localId,
+        data: Map<String, dynamic>.from(data),
+        raw: {
+          r'$id': localId,
+          ...Map<String, dynamic>.from(data),
+          '_local_only': true,
+        },
+      );
+    }
+  }
+
+  Future<void> deleteSavedBoard(String documentId) async {
+    await _ensureLocalReady();
+    final userId = await _requireUserId();
+    await _localStore.deleteBoard(userId, documentId);
+    try {
+      await _deleteDoc('saved_boards', documentId);
+      await _syncPendingLocalChanges(userId);
+    } catch (e) {
+      if (!_isConnectivityException(e)) {
+        rethrow;
+      }
+      await _localStore.addPendingOp(
+        userId: userId,
+        entity: 'saved_board',
+        op: 'delete',
+        refId: documentId,
+        payload: const <String, dynamic>{},
+      );
+    }
+  }
+
+  Future<ProxyDocument?> getSkincareProfile() async {
+    try {
+      final userId = await _requireUserId();
+      final docs = await _listDocs('skincare', userId: userId, limit: 1);
+      if (docs.isNotEmpty) return docs.first;
+
+      return _createDoc('skincare', {
+        'skinType': '',
+        'concerns': [],
+        'daySteps': [],
+        'nightSteps': [],
+        'lastUpdated': DateTime.now().toIso8601String(),
+      }, userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching skincare profile: $e");
+      return null;
+    }
+  }
+
+  Future<void> updateSkincareProfile({
+    required String documentId,
+    String? skinType,
+    List<String>? concerns,
+    List<int>? daySteps,
+    List<int>? nightSteps,
+  }) async {
+    final updateData = <String, dynamic>{};
+    if (skinType != null) updateData['skinType'] = skinType;
+    if (concerns != null) updateData['concerns'] = concerns;
+    if (daySteps != null) updateData['daySteps'] = daySteps;
+    if (nightSteps != null) updateData['nightSteps'] = nightSteps;
+    updateData['lastUpdated'] = DateTime.now().toIso8601String();
+    await _updateDoc('skincare', documentId, updateData);
+  }
+
+  Future<List<ProxyDocument>> getContacts() async {
+    try {
+      final userId = await _requireUserId();
+      return await _listDocs('contacts', userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching contacts: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createContact(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('contacts', data, userId: userId);
+  }
+
+  Future<ProxyDocument> updateContact(
+    String documentId,
+    Map<String, dynamic> data,
+  ) async {
+    return _updateDoc('contacts', documentId, data);
+  }
+
+  Future<void> deleteContact(String documentId) async {
+    await _deleteDoc('contacts', documentId);
+  }
+
+  Future<List<ProxyDocument>> getWorkoutOutfits() async {
+    try {
+      final userId = await _requireUserId();
+      return await _listDocs('workout_outfits', userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching workout outfits: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createWorkoutOutfit(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('workout_outfits', data, userId: userId);
+  }
+
+  Future<void> deleteWorkoutOutfit(String documentId) async {
+    await _deleteDoc('workout_outfits', documentId);
+  }
+
+  Future<List<ProxyDocument>> getBills() async {
+    try {
+      final userId = await _requireUserId();
+      return await _listDocs('bills', userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching bills: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createBill(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('bills', data, userId: userId);
+  }
+
+  Future<void> deleteBill(String documentId) async {
+    await _deleteDoc('bills', documentId);
+  }
+
+  Future<List<ProxyDocument>> getCoupons() async {
+    try {
+      final userId = await _requireUserId();
+      return await _listDocs('coupons', userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching coupons: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createCoupon(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('coupons', data, userId: userId);
+  }
+
+  Future<void> deleteCoupon(String documentId) async {
+    await _deleteDoc('coupons', documentId);
+  }
+
+  Future<List<ProxyDocument>> getMeds() async {
+    try {
+      final userId = await _requireUserId();
+      return await _listDocs('meds', userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching meds: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createMed(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('meds', data, userId: userId);
+  }
+
+  Future<void> updateMed(String documentId, Map<String, dynamic> data) async {
+    await _updateDoc('meds', documentId, data);
+  }
+
+  Future<void> deleteMed(String documentId) async {
+    await _deleteDoc('meds', documentId);
+  }
+
+  Future<List<ProxyDocument>> getMedLogs() async {
+    try {
+      final userId = await _requireUserId();
+      return await _listDocs('med_logs', userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching med logs: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createMedLog(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('med_logs', data, userId: userId);
+  }
+
+  Future<List<ProxyDocument>> getMealPlans() async {
+    try {
+      final userId = await _requireUserId();
+      return await _listDocs('meal_plans', userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching meal plans: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createMealPlan(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('meal_plans', data, userId: userId);
+  }
+
+  Future<void> deleteMealPlan(String documentId) async {
+    await _deleteDoc('meal_plans', documentId);
+  }
+
+  Future<List<ProxyDocument>> getLifeGoals() async {
+    try {
+      final userId = await _requireUserId();
+      return await _listDocs('life_goals', userId: userId);
+    } catch (e) {
+      debugPrint("Error fetching life goals: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createLifeGoal(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('life_goals', data, userId: userId);
+  }
+
+  Future<void> updateLifeGoalProgress(String documentId, int progress) async {
+    await _updateDoc('life_goals', documentId, {'progress': progress});
+  }
+
+  Future<void> deleteLifeGoal(String documentId) async {
+    await _deleteDoc('life_goals', documentId);
+  }
+
+  Future<List<ProxyDocument>> getChatThreads({int limit = 50}) async {
+    try {
+      final userId = await _requireUserId();
+      final docs = await _listDocs('chat_threads', userId: userId, limit: limit);
+      await _ensureLocalReady();
+      await _localStore.cacheChatThreads(
+        userId,
+        docs
+            .map((d) => {'id': d.$id, 'data': d.data, 'raw': d.raw})
+            .toList(),
+      );
+      return docs;
+    } catch (e) {
+      debugPrint("Error fetching chat threads: $e");
+      try {
+        final userId = await _requireUserId();
+        await _ensureLocalReady();
+        final cached = await _localStore.loadChatThreads(userId, limit: limit);
+        return cached
+            .map(
+              (r) => ProxyDocument(
+                $id: (r['id'] ?? '').toString(),
+                data: Map<String, dynamic>.from(r['data'] ?? const {}),
+                raw: Map<String, dynamic>.from(r['raw'] ?? const {}),
+              ),
+            )
+            .toList();
+      } catch (_) {
+        return [];
+      }
+    }
+  }
+
+  Future<List<ProxyDocument>> getCachedChatThreads({int limit = 50}) async {
+    try {
+      final userId = await _requireUserId();
+      await _ensureLocalReady();
+      final cached = await _localStore.loadChatThreads(userId, limit: limit);
+      return cached
+          .map(
+            (r) => ProxyDocument(
+              $id: (r['id'] ?? '').toString(),
+              data: Map<String, dynamic>.from(r['data'] ?? const {}),
+              raw: Map<String, dynamic>.from(r['raw'] ?? const {}),
+            ),
+          )
+          .toList();
+    } catch (e) {
+      debugPrint("Error loading cached chat threads: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createChatThread(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    final doc = await _createDoc('chat_threads', data, userId: userId);
+    try {
+      await _ensureLocalReady();
+      await _localStore.cacheChatThreads(userId, [
+        {'id': doc.$id, 'data': doc.data, 'raw': doc.raw},
+      ]);
+    } catch (_) {}
+    return doc;
+  }
+
+  Future<ProxyDocument> updateChatThread(
+    String documentId,
+    Map<String, dynamic> data,
+  ) async {
+    final doc = await _updateDoc('chat_threads', documentId, data);
+    try {
+      final userId = await _requireUserId();
+      await _ensureLocalReady();
+      await _localStore.cacheChatThreads(userId, [
+        {'id': doc.$id, 'data': doc.data, 'raw': doc.raw},
+      ]);
+    } catch (_) {}
+    return doc;
+  }
+
+  Future<void> deleteChatThread(String documentId) async {
+    await _deleteDoc('chat_threads', documentId);
+    try {
+      final userId = await _requireUserId();
+      await _ensureLocalReady();
+      await _localStore.deleteChatThread(userId, documentId);
+    } catch (_) {}
+  }
+
+  Future<List<ProxyDocument>> getChatMessages({
+    required String threadId,
+    int limit = 500,
+  }) async {
+    try {
+      final userId = await _requireUserId();
+      final docs = await _listDocs(
+        'chat_messages',
+        userId: userId,
+        limit: limit,
+      );
+      return docs.where((d) => d.data['threadId'] == threadId).toList();
+    } catch (e) {
+      debugPrint("Error fetching chat messages: $e");
+      return [];
+    }
+  }
+
+  Future<ProxyDocument> createChatMessage(Map<String, dynamic> data) async {
+    final userId = await _requireUserId();
+    return _createDoc('chat_messages', data, userId: userId);
+  }
+
+  Future<void> deleteChatMessage(String documentId) async {
+    await _deleteDoc('chat_messages', documentId);
+  }
+}
