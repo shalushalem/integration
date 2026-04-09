@@ -306,41 +306,11 @@ class _ChatPromptPressableState extends State<_ChatPromptPressable> {
 }
 
 // ── Pulsing mic icon when listening ─────────────────────────────────────────
-class _PulsingMicIcon extends StatefulWidget {
+class _PulsingMicIcon extends StatelessWidget {
   const _PulsingMicIcon();
 
   @override
-  State<_PulsingMicIcon> createState() => _PulsingMicIconState();
-}
-
-class _PulsingMicIconState extends State<_PulsingMicIcon>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _scale;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    )..repeat(reverse: true);
-    _scale = Tween<double>(begin: 0.85, end: 1.15).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
-    );
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: _scale,
-      child: const Icon(Icons.mic_rounded, color: Colors.white, size: 18),
-    );
+    return const Icon(Icons.mic_rounded, color: Colors.white, size: 18);
   }
 }

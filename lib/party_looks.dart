@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/style_board_detail.dart';
 
 class Screen4 extends StatefulWidget {
   const Screen4({super.key});
@@ -25,10 +26,13 @@ class _Screen4State extends State<Screen4> {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
       // 🔥 Fetching specifically 'Party' occasion boards!
       final boards = await appwrite.getSavedBoardsByOccasion('Party');
+      final boardMaps = boards
+          .map((doc) => <String, dynamic>{r'$id': doc.$id, ...doc.data})
+          .toList();
       
       if (mounted) {
         setState(() {
-          _boards = boards;
+          _boards = boardMaps;
           _isLoading = false;
         });
       }
@@ -162,7 +166,13 @@ class _Screen4State extends State<Screen4> {
         
         return GestureDetector(
           onTap: () {
-            // TODO: Open a fullscreen view of the board, or show the items inside it!
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => StyleBoardDetailPage(
+                  board: Map<String, dynamic>.from(board),
+                ),
+              ),
+            );
           },
           child: Container(
             decoration: BoxDecoration(

@@ -676,6 +676,19 @@ class AppwriteService extends ChangeNotifier {
     }
   }
 
+  Future<Map<String, dynamic>?> getSavedBoardById(String documentId) async {
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/saved_boards/$documentId'));
+      if (response.statusCode != 200) return null;
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final raw = Map<String, dynamic>.from(body['document'] ?? const {});
+      if (raw.isEmpty) return null;
+      return raw;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<DuplicateOutfitException?> checkWardrobeDuplicate(
     Map<String, dynamic> data,
   ) async {

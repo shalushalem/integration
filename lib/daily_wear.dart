@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -85,10 +85,10 @@ class _DailyWearScreenState extends State<DailyWearScreen>
   String _liveTime = '00:00';
   Timer? _clockTimer;
 
-  String _weatherIcon = '☀️';
+  String _weatherIcon = 'â˜€ï¸';
   String _weatherLabel = 'Clear';
   String _weatherDetail = 'Fetching conditions';
-  String _weatherTemp = '--°';
+  String _weatherTemp = '--Â°';
   String _weatherContext = '';
   String? _suggestionBanner;
 
@@ -96,7 +96,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
     {
       'id': 'o0',
       'name': 'Linen & Air',
-      'desc': 'Breathable layers · Perfect for mild days',
+      'desc': 'Breathable layers Â· Perfect for mild days',
       'tip': 'Ideal for hot & humid weather',
       'range': [26, 99],
       'occ': ['Casual', 'Weekend', 'Travel'],
@@ -113,7 +113,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
     {
       'id': 'o1',
       'name': 'Coffee Run',
-      'desc': 'Cosy & put-together · Weekend energy',
+      'desc': 'Cosy & put-together Â· Weekend energy',
       'tip': 'Great for mild & cool days',
       'range': [15, 25],
       'occ': ['Casual', 'Weekend', 'Errands'],
@@ -130,7 +130,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
     {
       'id': 'o2',
       'name': 'Office Hours',
-      'desc': 'Sharp & confident · Boardroom ready',
+      'desc': 'Sharp & confident Â· Boardroom ready',
       'tip': 'Best in comfortable indoor weather',
       'range': [18, 28],
       'occ': ['Work', 'Meetings', 'Formal'],
@@ -147,7 +147,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
     {
       'id': 'o3',
       'name': 'Golden Hour',
-      'desc': 'Earth tones · Warm palette for evenings',
+      'desc': 'Earth tones Â· Warm palette for evenings',
       'tip': 'Perfect for warm evenings out',
       'range': [20, 30],
       'occ': ['Date Night', 'Casual', 'Dinner'],
@@ -172,7 +172,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
 
   Timer? _tryOnStageTimer;
   final List<Timer> _arTagTimers = [];
-  String _tryOnLoadingMessage = 'Requesting camera…';
+  String _tryOnLoadingMessage = 'Requesting cameraâ€¦';
 
   late AnimationController _optCard0Ctrl;
   late AnimationController _optCard1Ctrl;
@@ -213,12 +213,12 @@ class _DailyWearScreenState extends State<DailyWearScreen>
   Timer? _clockAlignTimer;
 
   final List<String> quickPrompts = [
-    'What to wear today? 🌤️',
-    'Style tips 👔',
-    'First date outfit 💫',
-    'How to style linen? 🌿',
-    'Best colours 🎨',
-    'Office outfit ideas 💼',
+    'What to wear today? ðŸŒ¤ï¸',
+    'Style tips ðŸ‘”',
+    'First date outfit ðŸ’«',
+    'How to style linen? ðŸŒ¿',
+    'Best colours ðŸŽ¨',
+    'Office outfit ideas ðŸ’¼',
   ];
 
   List<Map<String, dynamic>> get optionCards {
@@ -347,7 +347,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
     _fabPulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2500),
-    )..repeat();
+    );
     _fabPulseScale = Tween<double>(
       begin: 1.0,
       end: 1.1,
@@ -398,7 +398,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
     _scanCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 3000),
-    )..repeat();
+    );
     _scanLineY = Tween<double>(
       begin: 0.10,
       end: 0.85,
@@ -407,6 +407,29 @@ class _DailyWearScreenState extends State<DailyWearScreen>
     _startAutoPlay();
     _pageController.addListener(_onPageScroll);
     _fetchWeather();
+    _syncAmbientAnimations();
+  }
+
+  void _syncAmbientAnimations() {
+    final shouldPulseFab = !_chatOpen && !_tryOnOpen;
+    if (shouldPulseFab) {
+      if (!_fabPulseCtrl.isAnimating) {
+        _fabPulseCtrl.repeat();
+      }
+    } else {
+      if (_fabPulseCtrl.isAnimating) _fabPulseCtrl.stop();
+      _fabPulseCtrl.value = 0.0;
+    }
+
+    final shouldScan = _tryOnOpen && _tryOnStage == _TryOnStage.camera;
+    if (shouldScan) {
+      if (!_scanCtrl.isAnimating) {
+        _scanCtrl.repeat();
+      }
+    } else {
+      if (_scanCtrl.isAnimating) _scanCtrl.stop();
+      _scanCtrl.value = 0.0;
+    }
   }
 
   void _restartOptionCardAnimations() {
@@ -528,17 +551,17 @@ class _DailyWearScreenState extends State<DailyWearScreen>
 
   void _applyWeather(int temp, int feel, int code) {
     const wm = <int, List<String>>{
-      0: ['☀️', 'Clear sky', 'Great day for light, breezy outfits!'],
-      1: ['🌤️', 'Mostly clear', 'A light layer is all you need.'],
-      2: ['⛅', 'Partly cloudy', 'Perfect for light layers today.'],
-      3: ['☁️', 'Overcast', 'Layer up a little — skies are grey.'],
-      45: ['🌫️', 'Foggy', 'Keep it cosy today.'],
-      51: ['🌦️', 'Light drizzle', 'Grab a light jacket just in case.'],
-      61: ['🌧️', 'Light rain', "Don't forget an umbrella."],
-      63: ['🌧️', 'Rain', 'Waterproof shoes are a must.'],
-      65: ['⛈️', 'Heavy rain', 'Stay dry — full rain gear today.'],
-      80: ['🌦️', 'Showers', 'Pack a compact umbrella.'],
-      95: ['⛈️', 'Thunderstorm', 'Best to stay in today.'],
+      0: ['â˜€ï¸', 'Clear sky', 'Great day for light, breezy outfits!'],
+      1: ['ðŸŒ¤ï¸', 'Mostly clear', 'A light layer is all you need.'],
+      2: ['â›…', 'Partly cloudy', 'Perfect for light layers today.'],
+      3: ['â˜ï¸', 'Overcast', 'Layer up a little â€” skies are grey.'],
+      45: ['ðŸŒ«ï¸', 'Foggy', 'Keep it cosy today.'],
+      51: ['ðŸŒ¦ï¸', 'Light drizzle', 'Grab a light jacket just in case.'],
+      61: ['ðŸŒ§ï¸', 'Light rain', "Don't forget an umbrella."],
+      63: ['ðŸŒ§ï¸', 'Rain', 'Waterproof shoes are a must.'],
+      65: ['â›ˆï¸', 'Heavy rain', 'Stay dry â€” full rain gear today.'],
+      80: ['ðŸŒ¦ï¸', 'Showers', 'Pack a compact umbrella.'],
+      95: ['â›ˆï¸', 'Thunderstorm', 'Best to stay in today.'],
     };
     final feelsLike = feel >= 36
         ? 'Very Hot'
@@ -556,10 +579,10 @@ class _DailyWearScreenState extends State<DailyWearScreen>
     if (!mounted) return;
     setState(() {
       _weatherIcon = w[0];
-      _weatherLabel = '${w[1]} · $feelsLike';
+      _weatherLabel = '${w[1]} Â· $feelsLike';
       _weatherDetail = w[2];
-      _weatherTemp = '$temp°';
-      _weatherContext = '${w[1]}, $feelsLike, $temp°C';
+      _weatherTemp = '$tempÂ°';
+      _weatherContext = '${w[1]}, $feelsLike, $tempÂ°C';
     });
     _sortOutfitsForWeather(temp);
   }
@@ -582,15 +605,15 @@ class _DailyWearScreenState extends State<DailyWearScreen>
 
     final hero = sorted.first;
     final icon = temp >= 30
-        ? '🌡️'
+        ? 'ðŸŒ¡ï¸'
         : temp >= 22
-        ? '🌤️'
+        ? 'ðŸŒ¤ï¸'
         : temp >= 15
-        ? '🍃'
-        : '🧣';
+        ? 'ðŸƒ'
+        : 'ðŸ§£';
     final banner = score(hero) == 2
-        ? '$icon ${hero['name']} is a perfect fit at $temp°'
-        : '$icon Sorted for $temp° today';
+        ? '$icon ${hero['name']} is a perfect fit at $tempÂ°'
+        : '$icon Sorted for $tempÂ° today';
     setState(() {
       _displayedOutfits = sorted;
       _carouselIndex = 0;
@@ -665,7 +688,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
       if (category.isNotEmpty) category,
     ];
     final desc = descParts.isNotEmpty
-        ? '${descParts.join(' · ')} from your wardrobe'
+        ? '${descParts.join(' Â· ')} from your wardrobe'
         : 'From your wardrobe';
     final tip = occasions.isNotEmpty
         ? 'Best for ${occasions.take(2).join(' & ')}'
@@ -830,12 +853,14 @@ class _DailyWearScreenState extends State<DailyWearScreen>
       _wornOutfitId = outfitId;
       if (closeModal) _tryOnOpen = false;
     });
-    _showToast('✓ ${outfit['name']} — wearing today!', green: true);
+    _syncAmbientAnimations();
+    _showToast('âœ“ ${outfit['name']} â€” wearing today!', green: true);
   }
 
   void _openChat() {
     HapticFeedback.lightImpact();
     setState(() => _chatOpen = true);
+    _syncAmbientAnimations();
     _chatSlideCtrl.forward(from: 0);
     _chatGreetingTimer?.cancel();
     if (_messages.isEmpty) {
@@ -846,7 +871,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
             _ChatMessage(
               id: DateTime.now().microsecondsSinceEpoch,
               text:
-                  "Hi! I'm AHVI, your personal AI stylist ✦\n\nI can see today's weather and your outfit options. What would you like help with — styling tips, what to wear, or outfit advice for any occasion?",
+                  "Hi! I'm AHVI, your personal AI stylist âœ¦\n\nI can see today's weather and your outfit options. What would you like help with â€” styling tips, what to wear, or outfit advice for any occasion?",
               isUser: false,
               createdAt: DateTime.now(),
             ),
@@ -860,7 +885,10 @@ class _DailyWearScreenState extends State<DailyWearScreen>
   void _closeChat() {
     _chatGreetingTimer?.cancel();
     _chatSlideCtrl.reverse().then((_) {
-      if (mounted) setState(() => _chatOpen = false);
+      if (mounted) {
+        setState(() => _chatOpen = false);
+        _syncAmbientAnimations();
+      }
     });
   }
 
@@ -872,13 +900,17 @@ class _DailyWearScreenState extends State<DailyWearScreen>
       _tryOnOpen = true;
       _tryOnStage = _TryOnStage.preview;
     });
+    _syncAmbientAnimations();
     _tryOnSlideCtrl.forward(from: 0);
   }
 
   void _closeTryOn() {
     _resetTryOnSimulation();
     _tryOnSlideCtrl.reverse().then((_) {
-      if (mounted) setState(() => _tryOnOpen = false);
+      if (mounted) {
+        setState(() => _tryOnOpen = false);
+        _syncAmbientAnimations();
+      }
     });
   }
 
@@ -893,16 +925,17 @@ class _DailyWearScreenState extends State<DailyWearScreen>
         _visibleArTags = 0;
         _selectedSwatchIndex = 0;
         _frontCamera = true;
-        _tryOnLoadingMessage = 'Requesting camera…';
+        _tryOnLoadingMessage = 'Requesting cameraâ€¦';
         _tryOnStage = _TryOnStage.preview;
       });
     } else {
       _visibleArTags = 0;
       _selectedSwatchIndex = 0;
       _frontCamera = true;
-      _tryOnLoadingMessage = 'Requesting camera…';
+      _tryOnLoadingMessage = 'Requesting cameraâ€¦';
       _tryOnStage = _TryOnStage.preview;
     }
+    _syncAmbientAnimations();
   }
 
   void _startTryOnCamera() {
@@ -910,16 +943,19 @@ class _DailyWearScreenState extends State<DailyWearScreen>
       _tryOnStage = _TryOnStage.loading;
       _tryOnLoadingMessage = 'Requesting camera…';
     });
+    _syncAmbientAnimations();
     _tryOnStageTimer?.cancel();
     _tryOnStageTimer = Timer(const Duration(milliseconds: 700), () {
       if (!mounted) return;
       setState(() => _tryOnLoadingMessage = 'Initialising AR…');
+      _syncAmbientAnimations();
       _tryOnStageTimer = Timer(const Duration(milliseconds: 700), () {
         if (!mounted) return;
         setState(() {
           _tryOnStage = _TryOnStage.camera;
           _visibleArTags = 0;
         });
+        _syncAmbientAnimations();
         _scheduleArTags();
       });
     });
@@ -946,19 +982,20 @@ class _DailyWearScreenState extends State<DailyWearScreen>
   void _captureTryOn() {
     HapticFeedback.lightImpact();
     setState(() => _tryOnStage = _TryOnStage.captured);
+    _syncAmbientAnimations();
     _showToast('📸 Look captured!');
   }
 
   void _saveCapturedLook() {
     HapticFeedback.selectionClick();
-    _showToast('💾 Saved!', green: true);
+    _showToast('ðŸ’¾ Saved!', green: true);
   }
 
   void _toggleMic() {
     setState(() => _micActive = !_micActive);
     if (_micActive) {
       _micPulseCtrl.repeat(reverse: true);
-      _showToast('🎙 Voice mode on');
+      _showToast('ðŸŽ™ Voice mode on');
     } else {
       _micPulseCtrl.stop();
       _micPulseCtrl.reset();
@@ -1214,7 +1251,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  'CURATED FOR YOU · TODAY',
+                  'CURATED FOR YOU Â· TODAY',
                   style: TextStyle(
                     fontSize: 11,
                     color: mutedColor.withValues(alpha: 0.7),
@@ -1291,7 +1328,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
           ),
         ),
         Text(
-          ' · ',
+          ' Â· ',
           style: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.w600,
@@ -1562,7 +1599,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
               ),
               child: Center(
                 child: Text(
-                  left ? '‹' : '›',
+                  left ? 'â€¹' : 'â€º',
                   style: TextStyle(color: textColor, fontSize: 20),
                 ),
               ),
@@ -1646,7 +1683,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                   border: Border.all(color: cardBorderColor),
                 ),
                 child: Text(
-                  '✦ AHVI\'s pick',
+                  'âœ¦ AHVI\'s pick',
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
@@ -1657,12 +1694,12 @@ class _DailyWearScreenState extends State<DailyWearScreen>
               ),
               Row(
                 children: [
-                  _circleAction(saved ? '❤️' : '🤍', () {
+                  _circleAction(saved ? 'â¤ï¸' : 'ðŸ¤', () {
                     setState(() => _savedCarouselById[outfitId] = !saved);
-                    if (!saved) _showToast('Saved to wardrobe ❤️');
+                    if (!saved) _showToast('Saved to wardrobe â¤ï¸');
                   }),
                   const SizedBox(width: 8),
-                  _circleShare('${outfit['name']} · ${outfit['desc']}'),
+                  _circleShare('${outfit['name']} Â· ${outfit['desc']}'),
                 ],
               ),
             ],
@@ -1775,7 +1812,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                   ),
                   child: Center(
                     child: Text(
-                      '✦  Virtual Try‑On',
+                      'âœ¦  Virtual Tryâ€‘On',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -1813,7 +1850,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
     scaleDown: 0.92,
     onTap: () {
       Clipboard.setData(ClipboardData(text: text));
-      _showToast('🔗 Link copied!');
+      _showToast('ðŸ”— Link copied!');
     },
     child: Container(
       width: 40,
@@ -1976,7 +2013,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                   const SizedBox(height: 9),
                   Row(
                     children: [
-                      _smallIcon(saved ? '❤️' : '🤍', () {
+                      _smallIcon(saved ? 'â¤ï¸' : 'ðŸ¤', () {
                         setState(() => _savedOptionById[outfitId] = !saved);
                         if (!saved) _showToast('Outfit saved!');
                       }),
@@ -1989,7 +2026,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                     children: [
                       Expanded(
                         child: _smallButton(
-                          isWorn ? '✓ Wearing' : 'Wear',
+                          isWorn ? 'âœ“ Wearing' : 'Wear',
                           isWorn ? null : () => _wearOutfit(outfitId),
                           primary: !isWorn,
                           activeLabelColor: isWorn
@@ -2033,7 +2070,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
           icon,
           style: TextStyle(
             fontSize: 13,
-            color: icon == '❤️' ? accent4Color : mutedColor,
+            color: icon == 'â¤ï¸' ? accent4Color : mutedColor,
           ),
         ),
       ),
@@ -2044,7 +2081,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
     scaleDown: 0.92,
     onTap: () {
       Clipboard.setData(ClipboardData(text: text));
-      _showToast('🔗 Link copied!');
+      _showToast('ðŸ”— Link copied!');
     },
     child: Container(
       width: 30,
@@ -2151,7 +2188,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                                 alpha: 0.14,
                               ),
                               child: Text(
-                                '✦',
+                                'âœ¦',
                                 style: TextStyle(color: _t.backgroundPrimary),
                               ),
                             ),
@@ -2255,7 +2292,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
           ),
           child: Center(
             child: Text(
-              '✦',
+              'âœ¦',
               style: TextStyle(fontSize: 18, color: tileTextColor),
             ),
           ),
@@ -2297,7 +2334,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
               border: Border.all(color: cardBorderColor),
             ),
             child: Center(
-              child: Text('✕', style: TextStyle(color: mutedColor)),
+              child: Text('âœ•', style: TextStyle(color: mutedColor)),
             ),
           ),
         ),
@@ -2410,7 +2447,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         controller: _chatController,
         focusNode: _chatFocusNode,
-        hintText: 'Ask your stylist�',
+        hintText: 'Ask your stylistï¿½',
         hasTextListenable: _chatController,
         surface: phoneShellInnerColor,
         border: cardBorderColor,
@@ -2485,7 +2522,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                             ),
                             child: Center(
                               child: Text(
-                                '✕',
+                                'âœ•',
                                 style: TextStyle(color: mutedColor),
                               ),
                             ),
@@ -2494,7 +2531,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Virtual Try‑On',
+                        'Virtual Tryâ€‘On',
                         style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.w600,
@@ -2600,7 +2637,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            _frontCamera ? 'HD · FRONT' : 'HD · BACK',
+                            _frontCamera ? 'HD Â· FRONT' : 'HD Â· BACK',
                             style: TextStyle(fontSize: 10, color: mutedColor),
                           ),
                         ],
@@ -2701,18 +2738,18 @@ class _DailyWearScreenState extends State<DailyWearScreen>
           Row(
             children: [
               Expanded(
-                child: _actionBtn('📸 Capture', _captureTryOn, primary: true),
+                child: _actionBtn('ðŸ“¸ Capture', _captureTryOn, primary: true),
               ),
               const SizedBox(width: 10),
               SizedBox(
                 width: 56,
-                child: _actionBtn('🔄', _flipCamera, primary: false),
+                child: _actionBtn('ðŸ”„', _flipCamera, primary: false),
               ),
               const SizedBox(width: 10),
               SizedBox(
                 width: 56,
                 child: _actionBtn(
-                  '✕',
+                  'âœ•',
                   () => setState(() => _tryOnStage = _TryOnStage.preview),
                   primary: false,
                 ),
@@ -2755,7 +2792,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                       ),
                     ),
                     child: Text(
-                      '✓ CAPTURED',
+                      'âœ“ CAPTURED',
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
@@ -2775,7 +2812,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '✦ ${outfit['name']} · AHVI',
+                          'âœ¦ ${outfit['name']} Â· AHVI',
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -2801,7 +2838,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
             children: [
               Expanded(
                 child: _actionBtn(
-                  '💾  Save Look',
+                  'ðŸ’¾  Save Look',
                   _saveCapturedLook,
                   primary: true,
                 ),
@@ -2809,7 +2846,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
               const SizedBox(width: 10),
               Expanded(
                 child: _actionBtn(
-                  '🔄  Retake',
+                  'ðŸ”„  Retake',
                   _startTryOnCamera,
                   primary: false,
                 ),
@@ -2820,7 +2857,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
           SizedBox(
             width: double.infinity,
             child: _actionBtn(
-              '✓  Wear Today',
+              'âœ“  Wear Today',
               () => _wearOutfit(outfit['id'] as String, closeModal: true),
               primary: false,
             ),
@@ -2916,7 +2953,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
           ),
           child: Row(
             children: [
-              const Text('💡'),
+              const Text('ðŸ’¡'),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -2936,7 +2973,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
           children: [
             Expanded(
               child: _actionBtn(
-                '📷  Start Try‑On',
+                'ðŸ“·  Start Tryâ€‘On',
                 _startTryOnCamera,
                 primary: true,
               ),
@@ -2944,7 +2981,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
             const SizedBox(width: 10),
             Expanded(
               child: _actionBtn(
-                '✓  Wear Today',
+                'âœ“  Wear Today',
                 () => _wearOutfit(outfit['id'] as String, closeModal: true),
                 primary: false,
               ),
@@ -3091,7 +3128,7 @@ class _ChatBubble extends StatelessWidget {
             CircleAvatar(
               radius: 15,
               backgroundColor: t.accent.primary,
-              child: Text('✦', style: TextStyle(color: t.tileText)),
+              child: Text('âœ¦', style: TextStyle(color: t.tileText)),
             ),
           if (!isUser) const SizedBox(width: 9),
           ConstrainedBox(
@@ -3160,7 +3197,7 @@ class _ChatBubble extends StatelessWidget {
               radius: 15,
               backgroundColor: t.panelBorder,
               child: Text(
-                '👤',
+                'ðŸ‘¤',
                 style: TextStyle(fontSize: 12, color: t.mutedText),
               ),
             ),
@@ -3202,7 +3239,7 @@ class _TypingBubbleState extends State<_TypingBubble>
         CircleAvatar(
           radius: 15,
           backgroundColor: t.accent.primary,
-          child: Text('✦', style: TextStyle(color: t.tileText)),
+          child: Text('âœ¦', style: TextStyle(color: t.tileText)),
         ),
         const SizedBox(width: 9),
         Container(
@@ -3568,4 +3605,5 @@ class _BgGradientPainter extends CustomPainter {
       oldDelegate.secondary != secondary ||
       oldDelegate.tertiary != tertiary;
 }
+
 

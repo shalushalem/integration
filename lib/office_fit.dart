@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/style_board_detail.dart';
 
 class OfficeFitScreen extends StatefulWidget {
   const OfficeFitScreen({super.key});
@@ -25,10 +26,13 @@ class _OfficeFitScreenState extends State<OfficeFitScreen> {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
       // 🔥 Fetching specifically 'Office' occasion boards!
       final boards = await appwrite.getSavedBoardsByOccasion('Office');
+      final boardMaps = boards
+          .map((doc) => <String, dynamic>{r'$id': doc.$id, ...doc.data})
+          .toList();
       
       if (mounted) {
         setState(() {
-          _boards = boards;
+          _boards = boardMaps;
           _isLoading = false;
         });
       }
@@ -163,7 +167,13 @@ class _OfficeFitScreenState extends State<OfficeFitScreen> {
         
         return GestureDetector(
           onTap: () {
-            // TODO: Fullscreen image viewer
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => StyleBoardDetailPage(
+                  board: Map<String, dynamic>.from(board),
+                ),
+              ),
+            );
           },
           child: Container(
             decoration: BoxDecoration(

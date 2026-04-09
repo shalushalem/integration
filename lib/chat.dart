@@ -13,6 +13,7 @@ import 'package:myapp/medi_tracker.dart' as medi_tracker_page;
 import 'package:myapp/services/appwrite_service.dart';
 import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/skincare.dart' as skincare_page;
+import 'package:myapp/style_board_detail.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:provider/provider.dart';
 
@@ -56,6 +57,37 @@ class _ChatMessage {
     this.packId,
     this.local,
   });
+
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        'isMe': isMe,
+        'chips': chips,
+        'cards': cards,
+        'boardId': boardId,
+        'packId': packId,
+      };
+
+  factory _ChatMessage.fromJson(Map<String, dynamic> json) {
+    final chipsRaw = json['chips'];
+    final cardsRaw = json['cards'];
+    return _ChatMessage(
+      text: (json['text'] ?? '').toString(),
+      isMe: json['isMe'] == true,
+      chips: chipsRaw is List ? List<dynamic>.from(chipsRaw) : const [],
+      cards: cardsRaw is List
+          ? cardsRaw
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList()
+          : const <Map<String, dynamic>>[],
+      boardId: (json['boardId'] ?? '').toString().trim().isEmpty
+          ? null
+          : json['boardId'].toString(),
+      packId: (json['packId'] ?? '').toString().trim().isEmpty
+          ? null
+          : json['packId'].toString(),
+    );
+  }
 }
 
 enum _RespType { outfits, plan, card, checklist }
@@ -389,12 +421,14 @@ class _ChatSession {
   String title;
   final DateTime createdAt;
   final List<Map<String, String>> history; // [{role, content}]
+  final List<_ChatMessage> messages;
 
   _ChatSession({
     required this.id,
     required this.title,
     required this.createdAt,
     required this.history,
+    required this.messages,
   });
 
   Map<String, dynamic> toJson() => {
@@ -402,6 +436,7 @@ class _ChatSession {
         'title': title,
         'createdAt': createdAt.toIso8601String(),
         'history': history,
+        'messages': messages.map((m) => m.toJson()).toList(),
       };
 
   factory _ChatSession.fromJson(Map<String, dynamic> j) => _ChatSession(
@@ -411,6 +446,12 @@ class _ChatSession {
         history: (j['history'] as List)
             .map((e) => Map<String, String>.from(e as Map))
             .toList(),
+        messages: (j['messages'] is List)
+            ? (j['messages'] as List)
+                .whereType<Map>()
+                .map((e) => _ChatMessage.fromJson(Map<String, dynamic>.from(e)))
+                .toList()
+            : <_ChatMessage>[],
       );
 }
 
@@ -430,8 +471,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen>
-    with SingleTickerProviderStateMixin {
+class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _chatController = TextEditingController();
   final FocusNode _chatFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
@@ -696,6 +736,9 @@ class _ChatScreenState extends State<ChatScreen>
         ..clear()
         ..addAll(_chatHistory);
       _sessions[existing].title = title;
+      _sessions[existing].messages
+        ..clear()
+        ..addAll(_messages);
     } else {
       _sessions.insert(
         0,
@@ -704,6 +747,7 @@ class _ChatScreenState extends State<ChatScreen>
           title: title,
           createdAt: DateTime.now(),
           history: List.from(_chatHistory),
+          messages: List<_ChatMessage>.from(_messages),
         ),
       );
     }
@@ -747,16 +791,26 @@ class _ChatScreenState extends State<ChatScreen>
         ..clear()
         ..addAll(session.history);
       _messages.clear();
-      // Rebuild _messages from history for display
-      _messages.add(_ChatMessage(
-        text: "Hi! I'm AHVI. How can I help you style or plan your day?",
-        isMe: false,
-      ));
-      for (final h in session.history) {
+      // Prefer rich payload (cards/buttons) when available.
+      if (session.messages.isNotEmpty) {
+        _messages.addAll(session.messages);
+      } else {
+        // Backward-compatible fallback for old stored sessions.
         _messages.add(_ChatMessage(
-          text: h['content'] ?? '',
-          isMe: h['role'] == 'user',
+          text: "Hi! I'm AHVI. How can I help you style or plan your day?",
+          isMe: false,
         ));
+        for (final h in session.history) {
+          final isUser = h['role'] == 'user';
+          final content = h['content'] ?? '';
+          _messages.add(_ChatMessage(
+            text: content,
+            isMe: isUser,
+            cards: isUser
+                ? const <Map<String, dynamic>>[]
+                : _inferLegacyCardsFromAssistantText(content),
+          ));
+        }
       }
       _runningMemory = '';
     });
@@ -765,6 +819,78 @@ class _ChatScreenState extends State<ChatScreen>
 
   void _handleChipTap(String chip) {
     _sendMessage(chip);
+  }
+
+  List<Map<String, dynamic>> _inferLegacyCardsFromAssistantText(String text) {
+    final lowered = text.toLowerCase();
+    final matches = RegExp(r'outfit\s*\d+', caseSensitive: false).allMatches(text);
+    final labels = <String>{};
+    for (final m in matches) {
+      final value = (m.group(0) ?? '').trim();
+      if (value.isNotEmpty) labels.add(value);
+    }
+    if (labels.isNotEmpty) {
+      return labels
+          .map(
+            (label) => <String, dynamic>{
+              'title': label,
+              'kind': 'style',
+            },
+          )
+          .toList();
+    }
+    if (lowered.contains('style board')) {
+      return <Map<String, dynamic>>[
+        {
+          'title': 'Outfit 1',
+          'kind': 'style',
+        }
+      ];
+    }
+    return const <Map<String, dynamic>>[];
+  }
+
+  List<Map<String, dynamic>> _cardsFromBoardIds(String? boardIds) {
+    final ids = (boardIds ?? '')
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    return ids.asMap().entries.map((entry) {
+      final idx = entry.key + 1;
+      final id = entry.value;
+      return <String, dynamic>{
+        'title': 'Outfit $idx',
+        'kind': 'style',
+        'board_id': id,
+      };
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> _mergeCardsWithBoardIds(
+    List<Map<String, dynamic>> cards,
+    String? boardIds,
+  ) {
+    final fallbackCards = _cardsFromBoardIds(boardIds);
+    if (fallbackCards.isEmpty) return cards;
+    if (cards.isEmpty) return fallbackCards;
+
+    final merged = cards.map((e) => Map<String, dynamic>.from(e)).toList();
+    for (var i = 0; i < fallbackCards.length; i++) {
+      final boardId = (fallbackCards[i]['board_id'] ?? '').toString().trim();
+      if (boardId.isEmpty) continue;
+      if (i < merged.length) {
+        final existing = (merged[i]['board_id'] ?? merged[i]['saved_board_id'] ?? merged[i]['outfit_id'] ?? '')
+            .toString()
+            .trim();
+        if (existing.isEmpty) {
+          merged[i]['board_id'] = boardId;
+        }
+      } else {
+        merged.add(fallbackCards[i]);
+      }
+    }
+    return merged;
   }
 
   void _sendMessage([String? chipText]) async {
@@ -796,12 +922,17 @@ class _ChatScreenState extends State<ChatScreen>
           response['content']?.toString() ??
           response['error']?.toString() ??
           "I'm having trouble connecting.";
-      final cards = response['cards'] is List
+      final boardIds = (response['board_ids'] ?? '').toString().trim();
+      var cards = response['cards'] is List
           ? (response['cards'] as List)
                 .whereType<Map>()
                 .map((e) => Map<String, dynamic>.from(e))
                 .toList()
           : const <Map<String, dynamic>>[];
+      cards = _mergeCardsWithBoardIds(cards, boardIds);
+      debugPrint(
+        'AHVI chat payload cards=${cards.length} boardIds=${boardIds.isEmpty ? 0 : boardIds.split(",").where((e) => e.trim().isNotEmpty).length} rawBoardIds=$boardIds',
+      );
       _chatHistory.add({'role': 'assistant', 'content': aiText});
       setState(
         () => _messages.add(
@@ -810,7 +941,7 @@ class _ChatScreenState extends State<ChatScreen>
             isMe: false,
             chips: response['chips'] ?? [],
             cards: cards,
-            boardId: response['board_ids'],
+            boardId: boardIds.isEmpty ? null : boardIds,
             packId: response['pack_ids'],
           ),
         ),
@@ -1146,7 +1277,7 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       ),
       if (!m.isMe && m.local != null) _localView(m.local!, t),
-      if (!m.isMe && m.cards.isNotEmpty) _backendCardsView(m.cards, t),
+      if (!m.isMe && m.cards.isNotEmpty) _backendCardsView(m, t),
       if (!m.isMe && m.chips.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(bottom: 16, left: 4),
@@ -1166,18 +1297,205 @@ class _ChatScreenState extends State<ChatScreen>
     ],
   );
 
-  Widget _backendCardsView(List<Map<String, dynamic>> cards, AppThemeTokens t) {
+  Widget _backendCardsView(_ChatMessage message, AppThemeTokens t) {
+    final cards = _mergeCardsWithBoardIds(message.cards, message.boardId);
+    final fallbackBoardIds = (message.boardId ?? '')
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
     return Column(
-      children: cards.map((card) => _backendCard(card, t)).toList(),
+      children: cards.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final fallback = idx < fallbackBoardIds.length ? fallbackBoardIds[idx] : null;
+        return _backendCard(
+          entry.value,
+          t,
+          fallbackBoardId: fallback,
+          allCards: cards,
+          cardIndex: idx,
+          fallbackBoardIds: fallbackBoardIds,
+        );
+      }).toList(),
     );
   }
 
-  Widget _backendCard(Map<String, dynamic> card, AppThemeTokens t) {
+  Future<void> _openStyleBoardFromCard(
+    Map<String, dynamic> card, {
+    String? fallbackBoardId,
+    List<Map<String, dynamic>>? allCards,
+    int selectedIndex = 0,
+    List<String>? fallbackBoardIds,
+  }) async {
+    final preview = card['preview'] is Map
+        ? Map<String, dynamic>.from(card['preview'] as Map)
+        : const <String, dynamic>{};
+    final boardId = (card['board_id'] ??
+            card['saved_board_id'] ??
+            card['outfit_id'] ??
+            fallbackBoardId ??
+            '')
+        .toString()
+        .trim();
+
+    String pickFromPreview(Map<String, dynamic> map, List<String> keys) {
+      for (final key in keys) {
+        final value = (map[key] ?? '').toString().trim();
+        if (value.isNotEmpty) return value;
+      }
+      return '';
+    }
+
+    String imageFromPreview(Map<String, dynamic> map) {
+      final top = map['top'] is Map ? Map<String, dynamic>.from(map['top'] as Map) : const <String, dynamic>{};
+      final bottom =
+          map['bottom'] is Map ? Map<String, dynamic>.from(map['bottom'] as Map) : const <String, dynamic>{};
+      final shoes = map['shoes'] is Map ? Map<String, dynamic>.from(map['shoes'] as Map) : const <String, dynamic>{};
+
+      String img(Map<String, dynamic> p) => pickFromPreview(p, const [
+            'masked_url',
+            'image_url',
+            'imageUrl',
+            'raw_image_url',
+            'rawImageUrl',
+          ]);
+
+      final values = [img(top), img(bottom), img(shoes), img(map)];
+      for (final v in values) {
+        if (v.isNotEmpty) return v;
+      }
+      return '';
+    }
+
+    List<Map<String, String>> imageSlotsFromPreview(Map<String, dynamic> map) {
+      final top = map['top'] is Map ? Map<String, dynamic>.from(map['top'] as Map) : const <String, dynamic>{};
+      final bottom =
+          map['bottom'] is Map ? Map<String, dynamic>.from(map['bottom'] as Map) : const <String, dynamic>{};
+      final shoes = map['shoes'] is Map ? Map<String, dynamic>.from(map['shoes'] as Map) : const <String, dynamic>{};
+
+      List<String> urlCandidates(Map<String, dynamic> p) => [
+            (p['masked_url'] ?? '').toString(),
+            (p['image_url'] ?? '').toString(),
+            (p['imageUrl'] ?? '').toString(),
+            (p['raw_image_url'] ?? '').toString(),
+            (p['rawImageUrl'] ?? '').toString(),
+          ].map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+
+      String label(Map<String, dynamic> p, String fallback) => ((p['sub_category'] ??
+                  p['subCategory'] ??
+                  p['category'] ??
+                  p['name'] ??
+                  fallback)
+              .toString()
+              .trim())
+          .isEmpty
+          ? fallback
+          : (p['sub_category'] ?? p['subCategory'] ?? p['category'] ?? p['name'] ?? fallback).toString().trim();
+
+      final out = <Map<String, String>>[];
+      final seen = <String>{};
+      void addPart(Map<String, dynamic> part, String fallback) {
+        for (final u in urlCandidates(part)) {
+          if (seen.contains(u)) continue;
+          seen.add(u);
+          out.add({'url': u, 'label': label(part, fallback)});
+          return;
+        }
+      }
+
+      addPart(top, 'top');
+      addPart(bottom, 'bottom');
+      addPart(shoes, 'shoes');
+      return out;
+    }
+
+    List<String> itemIdsFromPreview(Map<String, dynamic> map) {
+      final ids = <String>[];
+      for (final key in const ['top', 'bottom', 'shoes']) {
+        final part = map[key] is Map ? Map<String, dynamic>.from(map[key] as Map) : const <String, dynamic>{};
+        final id = pickFromPreview(part, const ['\$id', 'id', 'item_id', 'itemId']);
+        if (id.isNotEmpty && !ids.contains(id)) ids.add(id);
+      }
+      return ids;
+    }
+
+    Map<String, dynamic> boardFromCard(Map<String, dynamic> src, String? fallbackId) {
+      final p = src['preview'] is Map
+          ? Map<String, dynamic>.from(src['preview'] as Map)
+          : const <String, dynamic>{};
+      final id = (src['board_id'] ?? src['saved_board_id'] ?? src['outfit_id'] ?? fallbackId ?? '').toString().trim();
+      return <String, dynamic>{
+        'title': (src['title'] ?? 'Style Board').toString(),
+        'occasion': (p['occasion'] ?? p['master_type'] ?? 'Occasion').toString(),
+        'imageUrl': imageFromPreview(p),
+        'images': imageSlotsFromPreview(p),
+        'preview': p,
+        'itemIds': itemIdsFromPreview(p),
+        if (id.isNotEmpty) '\$id': id,
+      };
+    }
+
+    final cards = allCards ?? <Map<String, dynamic>>[card];
+    final boards = cards.asMap().entries.map((entry) {
+      final i = entry.key;
+      final fb = (fallbackBoardIds != null && i < fallbackBoardIds.length) ? fallbackBoardIds[i] : null;
+      return boardFromCard(entry.value, fb);
+    }).toList();
+
+    final appwrite = Provider.of<AppwriteService>(context, listen: false);
+    final fetchJobs = <Future<void>>[];
+    for (var i = 0; i < boards.length; i++) {
+      final id = (boards[i]['\$id'] ?? '').toString().trim();
+      if (id.isEmpty || id.startsWith('preview-')) continue;
+      fetchJobs.add(() async {
+        final doc = await appwrite.getSavedBoardById(id);
+        if (doc != null && doc.isNotEmpty && i >= 0 && i < boards.length) {
+          boards[i] = doc;
+        }
+      }());
+    }
+    if (fetchJobs.isNotEmpty) {
+      await Future.wait(fetchJobs);
+    }
+
+    final safeIndex = selectedIndex.clamp(0, boards.isEmpty ? 0 : boards.length - 1).toInt();
+    final board = boards.isNotEmpty ? boards[safeIndex] : boardFromCard(card, fallbackBoardId);
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => StyleBoardDetailPage(
+          board: board,
+          boards: boards,
+          initialIndex: safeIndex,
+        ),
+      ),
+    );
+  }
+
+  Widget _backendCard(
+    Map<String, dynamic> card,
+    AppThemeTokens t, {
+    String? fallbackBoardId,
+    List<Map<String, dynamic>>? allCards,
+    int cardIndex = 0,
+    List<String>? fallbackBoardIds,
+  }) {
     final title = (card['title'] ?? 'Checklist').toString().trim();
     final subtitle = (card['subtitle'] ?? '').toString().trim();
     final kind = (card['kind'] ?? '').toString().trim().toLowerCase();
     final items = _extractCardItems(card['items']);
     final actionPageKey = _extractActionPageKey(card['action']);
+    final hasPreview = card['preview'] is Map;
+    final looksLikeOutfitCard = title.toLowerCase().startsWith('outfit');
+    final hasBoardId = ((card['board_id'] ??
+                card['saved_board_id'] ??
+                card['outfit_id'] ??
+                fallbackBoardId ??
+                '')
+            .toString()
+            .trim()
+            .isNotEmpty);
+    final canOpenStyleBoard = hasPreview || looksLikeOutfitCard || hasBoardId;
 
     return Container(
       margin: const EdgeInsets.only(left: 4, right: 28, bottom: 12),
@@ -1263,7 +1581,36 @@ class _ChatScreenState extends State<ChatScreen>
               ),
             ),
           ],
-          if (actionPageKey != null) ...[
+          if (canOpenStyleBoard) ...[
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: () => _openStyleBoardFromCard(
+                card,
+                fallbackBoardId: fallbackBoardId,
+                allCards: allCards,
+                selectedIndex: cardIndex,
+                fallbackBoardIds: fallbackBoardIds,
+              ),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: t.panel,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: t.cardBorder),
+                ),
+                child: Text(
+                  'Open Style Board',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: t.accent.primary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ] else if (actionPageKey != null) ...[
             const SizedBox(height: 8),
             GestureDetector(
               onTap: () => _openOrganizePage(actionPageKey),
@@ -2599,46 +2946,15 @@ class _LensOptionTileState extends State<_LensOptionTile> {
 }
 
 // ── Pulsing mic animation when listening ────────────────────────────────────
-class _PulsingMicIcon extends StatefulWidget {
+class _PulsingMicIcon extends StatelessWidget {
   const _PulsingMicIcon();
 
   @override
-  State<_PulsingMicIcon> createState() => _PulsingMicIconState();
-}
-
-class _PulsingMicIconState extends State<_PulsingMicIcon>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _scale;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    )..repeat(reverse: true);
-    _scale = Tween<double>(begin: 0.85, end: 1.15).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
-    );
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-      final t = context.themeTokens;
-    return ScaleTransition(
-      scale: _scale,
-      child: const Icon(
-        Icons.mic_rounded,
-        color: Colors.white,
-        size: 18,
-      ),
+    return const Icon(
+      Icons.mic_rounded,
+      color: Colors.white,
+      size: 18,
     );
   }
 }

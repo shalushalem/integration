@@ -240,6 +240,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         maskedUrl = upload['masked_image_url'] ?? maskedUrl;
       } catch (e) {
         debugPrint('Wardrobe upload warning: $e');
+        _showToast('Image upload failed. Please try again.');
+        return;
       }
     }
 
@@ -299,6 +301,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
           forceMaskedUrl = upload['masked_image_url'] ?? forceMaskedUrl;
         } catch (e) {
           debugPrint('Force upload warning: $e');
+          _showToast('Image upload failed. Please try again.');
+          return;
         }
       }
 
@@ -504,7 +508,14 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       rawImageBytes: rawBytes,
       maskedImageBytes: maskedBytes,
     );
-    if (upload == null) return <String, String>{};
+    if (upload == null) {
+      throw Exception('Wardrobe upload returned null');
+    }
+    final rawUrl = (upload['raw_image_url'] ?? '').toString().trim();
+    final maskedUrl = (upload['masked_image_url'] ?? '').toString().trim();
+    if (rawUrl.isEmpty || maskedUrl.isEmpty) {
+      throw Exception('Wardrobe upload missing image URLs');
+    }
     return <String, String>{
       'raw_image_url': (upload['raw_image_url'] ?? '').toString(),
       'masked_image_url': (upload['masked_image_url'] ?? '').toString(),
@@ -1673,18 +1684,24 @@ class _AddItemModalState extends State<_AddItemModal>
       final bgRemovedBase64 = bgInfo?['image_base64']?.toString();
       final bgRemoved = bgInfo?['bg_removed'] == true;
       final bgReason = bgInfo?['fallback_reason']?.toString();
-      if (!bgRemoved || bgRemovedBase64 == null || bgRemovedBase64.isEmpty) {
-        throw Exception('Background removal failed before analyze-image: ${bgReason ?? 'unknown'}');
-      }
-      final removedBytes = base64Decode(bgRemovedBase64);
+      final effectiveBase64 = (bgRemoved && bgRemovedBase64 != null && bgRemovedBase64.isNotEmpty)
+          ? bgRemovedBase64
+          : originalBase64;
+      final removedBytes = (bgRemoved && bgRemovedBase64 != null && bgRemovedBase64.isNotEmpty)
+          ? base64Decode(bgRemovedBase64)
+          : bytes;
       if (mounted) {
         setState(() {
           _capturedBytes = removedBytes;
           _capturedRawBytes = bytes;
         });
       }
+      if (!bgRemoved && mounted) {
+        _toast('Background removal unavailable. Continuing with original image.');
+        debugPrint('BG remove fallback used: ${bgReason ?? "unknown"}');
+      }
 
-      final analysis = await backend.analyzeImageFromBase64(bgRemovedBase64);
+      final analysis = await backend.analyzeImageFromBase64(effectiveBase64);
       if (analysis == null) {
         throw Exception('Backend returned null for analyze-image');
       }

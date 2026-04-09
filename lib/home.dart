@@ -65,6 +65,8 @@ class Screen4 extends StatefulWidget {
 }
 
 class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
+  // Keep ambient motion off by default to reduce continuous GPU/CPU drain.
+  static const bool _enableAmbientMotion = false;
   AppThemeTokens get _t => context.themeTokens;
   Color get _bgPrimary => _t.backgroundPrimary;
   Color get _bgSecondary => _t.backgroundSecondary;
@@ -100,7 +102,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   late AnimationController _aurora2Ctrl;
   late AnimationController _aurora3Ctrl;
   late AnimationController _shimmerCtrl;
-  late AnimationController _pulseCtrl;
   int _activeNavIdx = 0;
 
   late AnimationController _floatBadgeCtrl;
@@ -249,33 +250,45 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _aurora1Ctrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 14),
-    )..repeat(reverse: true);
+    );
     _aurora2Ctrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 18),
-    )..repeat(reverse: true);
+    );
     _aurora3Ctrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 22),
-    )..repeat(reverse: true);
+    );
     _shimmerCtrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
-    )..repeat();
-    _pulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2800),
-    )..repeat(reverse: true);
+    );
 
     _floatBadgeCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4000),
-    )..repeat(reverse: true);
+    );
 
     _breatheCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4000),
-    )..repeat(reverse: true);
+    );
+
+    if (_enableAmbientMotion) {
+      _aurora1Ctrl.repeat(reverse: true);
+      _aurora2Ctrl.repeat(reverse: true);
+      _aurora3Ctrl.repeat(reverse: true);
+      _shimmerCtrl.repeat();
+      _floatBadgeCtrl.repeat(reverse: true);
+      _breatheCtrl.repeat(reverse: true);
+    } else {
+      _aurora1Ctrl.value = 0.38;
+      _aurora2Ctrl.value = 0.52;
+      _aurora3Ctrl.value = 0.44;
+      _shimmerCtrl.value = 0.50;
+      _floatBadgeCtrl.value = 0.50;
+      _breatheCtrl.value = 0.50;
+    }
 
     _heartPopCtrls = List.generate(
       4,
@@ -505,7 +518,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _aurora2Ctrl.dispose();
     _aurora3Ctrl.dispose();
     _shimmerCtrl.dispose();
-    _pulseCtrl.dispose();
     _floatBadgeCtrl.dispose();
     _breatheCtrl.dispose();
     for (final c in _heartPopCtrls) {

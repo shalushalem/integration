@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart';
+import 'package:myapp/style_board_detail.dart';
 
 // ── Data model ───────────────────────────────────────────────────────────────
 class LookItem {
@@ -13,6 +14,7 @@ class LookItem {
   final String? imageUrl;
   final LookBadgeStyle badge;
   final LookBgStyle bg;
+  final Map<String, dynamic> raw;
 
   const LookItem({
     required this.id,
@@ -23,6 +25,7 @@ class LookItem {
     this.imageUrl,
     required this.badge,
     required this.bg,
+    this.raw = const <String, dynamic>{},
   });
 }
 
@@ -104,6 +107,17 @@ class _OccasionBoardState extends State<OccasionBoard> {
           imageUrl: (doc['imageUrl'] ?? doc['image_url'])?.toString(),
           badge: dynamicBadge,
           bg: dynamicBg,
+          raw: Map<String, dynamic>.from(
+            doc.raw.isNotEmpty
+                ? doc.raw
+                : {
+                    'id': docId,
+                    'title': title,
+                    'description': description,
+                    'imageUrl': (doc['imageUrl'] ?? doc['image_url'])?.toString(),
+                    'occasion': occasion,
+                  },
+          ),
         ));
       }
 
@@ -128,6 +142,14 @@ class _OccasionBoardState extends State<OccasionBoard> {
     } catch (e) {
       _showToast('Failed to delete from cloud');
     }
+  }
+
+  void _openLookDetail(LookItem look) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => StyleBoardDetailPage(board: look.raw),
+      ),
+    );
   }
 
   void _showToast(String msg) {
@@ -178,6 +200,7 @@ class _OccasionBoardState extends State<OccasionBoard> {
                               looks: _looks,
                               onDelete: _deleteLook,
                               onShare: (look) => _showToast('Copied!'),
+                              onOpen: _openLookDetail,
                             ),
                 ),
               ),
@@ -342,7 +365,13 @@ class _LooksGrid extends StatelessWidget {
   final List<LookItem> looks;
   final ValueChanged<String> onDelete;
   final ValueChanged<LookItem> onShare;
-  const _LooksGrid({required this.looks, required this.onDelete, required this.onShare});
+  final ValueChanged<LookItem> onOpen;
+  const _LooksGrid({
+    required this.looks,
+    required this.onDelete,
+    required this.onShare,
+    required this.onOpen,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -361,7 +390,13 @@ class _LooksGrid extends StatelessWidget {
       rows.add(
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: _LookCard(look: looks[0], featured: true, onDelete: onDelete, onShare: onShare),
+          child: _LookCard(
+            look: looks[0],
+            featured: true,
+            onDelete: onDelete,
+            onShare: onShare,
+            onOpen: onOpen,
+          ),
         ),
       );
       i = 1;
@@ -377,11 +412,25 @@ class _LooksGrid extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: _LookCard(look: left, featured: false, onDelete: onDelete, onShare: onShare)),
+              Expanded(
+                child: _LookCard(
+                  look: left,
+                  featured: false,
+                  onDelete: onDelete,
+                  onShare: onShare,
+                  onOpen: onOpen,
+                ),
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: right != null
-                    ? _LookCard(look: right, featured: false, onDelete: onDelete, onShare: onShare)
+                    ? _LookCard(
+                        look: right,
+                        featured: false,
+                        onDelete: onDelete,
+                        onShare: onShare,
+                        onOpen: onOpen,
+                      )
                     : const SizedBox.shrink(),
               ),
             ],
@@ -401,12 +450,14 @@ class _LookCard extends StatefulWidget {
   final bool featured;
   final ValueChanged<String> onDelete;
   final ValueChanged<LookItem> onShare;
+  final ValueChanged<LookItem> onOpen;
 
   const _LookCard({
     required this.look,
     required this.featured,
     required this.onDelete,
     required this.onShare,
+    required this.onOpen,
   });
 
   @override
@@ -498,7 +549,7 @@ class _LookCardState extends State<_LookCard> {
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
-        onTap: () {},
+        onTap: () => widget.onOpen(look),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           decoration: BoxDecoration(
@@ -626,7 +677,7 @@ class _LookCardState extends State<_LookCard> {
                 width: double.infinity,
                 margin: const EdgeInsets.fromLTRB(10, 4, 10, 10),
                 child: GestureDetector(
-                  onTap: () {},
+                  onTap: () => widget.onOpen(look),
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 9),
                     decoration: BoxDecoration(

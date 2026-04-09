@@ -4,6 +4,8 @@
         android:label="myapp"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:isGame="false"
+        android:appCategory="productivity"
         android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"

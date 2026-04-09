@@ -522,29 +522,41 @@ class _AddItemModalState extends State<_AddItemModal>
       final backend = Provider.of<BackendService>(context, listen: false);
       final base64Image = base64Encode(bytes);
 
-      // 1. Remove background first (required).
+      // 1. Remove background first (preferred; continue with original on fallback).
       final bgInfo = await backend.removeBackgroundDetailed(base64Image);
       final bgRemoved = bgInfo?['bg_removed'] == true;
       final bgResult = bgInfo?['image_base64']?.toString();
       final bgReason = bgInfo?['fallback_reason']?.toString();
-      if (!bgRemoved || bgResult == null || bgResult.isEmpty) {
-        throw Exception('Background removal failed: ${bgReason ?? 'unknown'}');
-      }
+      final effectiveBase64 =
+          (bgRemoved && bgResult != null && bgResult.isNotEmpty) ? bgResult : base64Image;
+      final effectiveBytes =
+          (bgRemoved && bgResult != null && bgResult.isNotEmpty) ? base64Decode(bgResult) : bytes;
 
       if (mounted) {
         setState(() {
-          _itemImageBytes = base64Decode(bgResult);
+          _itemImageBytes = effectiveBytes;
           _processStatus = 'Analyzing fabric & color...';
         });
       }
+      if (!bgRemoved && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Background removal unavailable (${bgReason ?? 'unknown'}). Continuing...')),
+        );
+      }
 
-      // 2. Analyze the garment using processed image.
-      final analysis = await backend.analyzeImageFromBase64(bgResult);
+      // 2. Analyze the garment using best available image.
+      final analysis = await backend.analyzeImageFromBase64(effectiveBase64);
       
-      if (analysis != null && mounted) {
-        final payload = (analysis['data'] is Map<String, dynamic>)
+      if (mounted) {
+        final payload = (analysis != null && analysis['data'] is Map<String, dynamic>)
             ? Map<String, dynamic>.from(analysis['data'] as Map)
-            : Map<String, dynamic>.from(analysis);
+            : (analysis != null
+                ? Map<String, dynamic>.from(analysis)
+                : <String, dynamic>{
+                    'name': 'New Item',
+                    'category': 'Tops',
+                    'sub_category': 'Shirt',
+                  });
 
         setState(() {
           _aiData = payload;
