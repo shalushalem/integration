@@ -1,12 +1,12 @@
 import 'dart:math';
+import 'package:vector_math/vector_math_64.dart' show Vector3;
 import 'package:flutter/material.dart';
+import 'package:myapp/app_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:myapp/services/appwrite_service.dart';
-import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/widgets/ahvi_stylist_chat.dart';
-import 'package:myapp/widgets/ahvi_lens_sheet.dart';
 
 // ── PALETTE (1:1 from CSS :root) ────────────────────────────────────
 Color kBg = Color(0xFF08111F);
@@ -24,6 +24,54 @@ Color kRed = Color(0xFFFF6B7A);
 Color kPanel = Color(0x14FFFFFF);
 Color kPanel2 = Color(0x1FFFFFFF);
 Color kBorder = Color(0x1FFFFFFF);
+
+// ════════════════════════════════════════════════════════════════════
+//  TRANSLATION HELPERS  (top-level so all widgets can use them)
+// ════════════════════════════════════════════════════════════════════
+String _translateCategory(BuildContext context, String key) {
+  switch (key.toLowerCase()) {
+    case 'shopping': return AppLocalizations.t(context, 'bills_cat_shopping');
+    case 'food':     return AppLocalizations.t(context, 'bills_cat_food');
+    case 'utility':  return AppLocalizations.t(context, 'bills_cat_utility');
+    case 'medical':  return AppLocalizations.t(context, 'bills_cat_medical');
+    default:         return AppLocalizations.t(context, 'bills_cat_other');
+  }
+}
+
+String _translatePayment(BuildContext context, String key) {
+  switch (key) {
+    case 'UPI':         return AppLocalizations.t(context, 'bills_pay_upi');
+    case 'Credit Card': return AppLocalizations.t(context, 'bills_pay_credit');
+    case 'Debit Card':  return AppLocalizations.t(context, 'bills_pay_debit');
+    case 'Cash':        return AppLocalizations.t(context, 'bills_pay_cash');
+    case 'Net Banking': return AppLocalizations.t(context, 'bills_pay_netbanking');
+    default:            return key;
+  }
+}
+
+String _categoryDbKey(BuildContext context, String localizedCat) {
+  if (localizedCat == AppLocalizations.t(context, 'bills_cat_shopping')) return 'shopping';
+  if (localizedCat == AppLocalizations.t(context, 'bills_cat_food'))     return 'food';
+  if (localizedCat == AppLocalizations.t(context, 'bills_cat_utility'))  return 'utility';
+  if (localizedCat == AppLocalizations.t(context, 'bills_cat_medical'))  return 'medical';
+  return 'other';
+}
+
+String _couponTypeDbKey(BuildContext context, String localizedType) {
+  if (localizedType == AppLocalizations.t(context, 'bills_coupon_type_percent')) return 'percent';
+  if (localizedType == AppLocalizations.t(context, 'bills_coupon_type_flat'))    return 'flat';
+  if (localizedType == AppLocalizations.t(context, 'bills_coupon_type_free'))    return 'free';
+  return localizedType.toLowerCase();
+}
+
+String _paymentDbKey(BuildContext context, String localizedPay) {
+  if (localizedPay == AppLocalizations.t(context, 'bills_pay_upi'))        return 'UPI';
+  if (localizedPay == AppLocalizations.t(context, 'bills_pay_credit'))     return 'Credit Card';
+  if (localizedPay == AppLocalizations.t(context, 'bills_pay_debit'))      return 'Debit Card';
+  if (localizedPay == AppLocalizations.t(context, 'bills_pay_cash'))       return 'Cash';
+  if (localizedPay == AppLocalizations.t(context, 'bills_pay_netbanking')) return 'Net Banking';
+  return localizedPay;
+}
 
 // ════════════════════════════════════════════════════════════════════
 //  ROOT WIDGET
@@ -49,27 +97,29 @@ class _BillsScreenState extends State<BillsScreen>
   bool _chatOpen = false;
 
   String _addMode = 'ai';
-  String _selCategory = 'Shopping';
-  String _selPayment = 'UPI';
-  String _couponTypeVal = 'Percent';
+  // These are initialized lazily in didChangeDependencies so they always
+  // match the first item in the localized dropdown lists.
+  String? _selCategory;
+  String? _selPayment;
+  String? _couponTypeVal; // Initialized in didChangeDependencies from localized list
+  DateTime _selectedDate = DateTime.now();
 
   String _toastMsg = '';
   bool _toastVisible = false;
   late AnimationController _toastAnim;
 
   late AnimationController _pulseCtrl;
-  late Animation<double> _pulseAnim;
 
   late AnimationController _chatCtrl;
   late Animation<double> _chatSlide;
 
   late AnimationController _sheetCtrl;
-  late Animation<double> _sheetSlide;
-
-  String _overlayType = '';
 
   bool _isSavingBill = false;
   bool _isSavingCoupon = false;
+
+  // Holds the StatefulBuilder's setState so the sheet rebuilds on toggle
+  StateSetter? _sheetSetState;
 
   final List<Map<String, String>> _chatMessages = [
     {
@@ -79,9 +129,7 @@ class _BillsScreenState extends State<BillsScreen>
     },
   ];
   final TextEditingController _chatInputCtrl = TextEditingController();
-  final List<Map<String, String>> _chatHistory = [];
-  String _chatMemory = '';
-  String _chatUserId = 'user_1';
+  OverlayEntry? _overlay;
 
   // ── DB DATA LISTS ──────────────────────────────────────────────────
   List<Map<String, dynamic>> _bills = [];
@@ -148,20 +196,58 @@ class _BillsScreenState extends State<BillsScreen>
   }
 
   // ── LIFECYCLE ─────────────────────────────────────────────────────
+
+  /// Called once after first build (when context has Localizations).
+  /// Re-initializes dropdown values whenever the locale changes so that
+  /// the selected value always matches one of the localized items.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final firstCat = AppLocalizations.t(context, 'bills_cat_shopping');
+    final firstPay = AppLocalizations.t(context, 'bills_pay_upi');
+    // Only reset when unset or when the locale-generated value has changed
+    // (i.e. the user switched language mid-session).
+    final catItems = [
+      AppLocalizations.t(context, 'bills_cat_shopping'),
+      AppLocalizations.t(context, 'bills_cat_food'),
+      AppLocalizations.t(context, 'bills_cat_utility'),
+      AppLocalizations.t(context, 'bills_cat_medical'),
+      AppLocalizations.t(context, 'bills_cat_other'),
+    ];
+    final payItems = [
+      AppLocalizations.t(context, 'bills_pay_upi'),
+      AppLocalizations.t(context, 'bills_pay_credit'),
+      AppLocalizations.t(context, 'bills_pay_debit'),
+      AppLocalizations.t(context, 'bills_pay_cash'),
+      AppLocalizations.t(context, 'bills_pay_netbanking'),
+    ];
+    if (_selCategory == null || !catItems.contains(_selCategory)) {
+      _selCategory = firstCat;
+    }
+    if (_selPayment == null || !payItems.contains(_selPayment)) {
+      _selPayment = firstPay;
+    }
+
+    final couponItems = [
+      AppLocalizations.t(context, 'bills_coupon_type_percent'),
+      AppLocalizations.t(context, 'bills_coupon_type_flat'),
+      AppLocalizations.t(context, 'bills_coupon_type_free'),
+    ];
+    if (_couponTypeVal == null || !couponItems.contains(_couponTypeVal)) {
+      _couponTypeVal = couponItems[0];
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _fetchData();
-    _initChatIdentity();
 
     _pulseCtrl = AnimationController(
       vsync: this,
       duration: Duration(seconds: 2),
     )..repeat(reverse: true);
-    _pulseAnim = Tween<double>(
-      begin: 1.0,
-      end: 1.35,
-    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
+
 
     _chatCtrl = AnimationController(
       vsync: this,
@@ -173,10 +259,6 @@ class _BillsScreenState extends State<BillsScreen>
       vsync: this,
       duration: Duration(milliseconds: 450),
     );
-    _sheetSlide = CurvedAnimation(
-      parent: _sheetCtrl,
-      curve: Cubic(0.34, 1.2, 0.64, 1),
-    );
 
     _toastAnim = AnimationController(
       vsync: this,
@@ -184,24 +266,11 @@ class _BillsScreenState extends State<BillsScreen>
     );
   }
 
-  Future<void> _initChatIdentity() async {
-    try {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      final user = await appwrite.getCurrentUser();
-      if (!mounted || user == null || user.$id.isEmpty) return;
-      setState(() => _chatUserId = user.$id);
-    } catch (_) {}
+  void _removeOverlay() {
+    _overlay?.remove();
+    _overlay = null;
   }
 
-  @override
-  void dispose() {
-    _pulseCtrl.dispose();
-    _chatCtrl.dispose();
-    _sheetCtrl.dispose();
-    _toastAnim.dispose();
-    _chatInputCtrl.dispose();
-    super.dispose();
-  }
 
   // ── APPWRITE ACTIONS ──────────────────────────────────────────────
 
@@ -240,14 +309,17 @@ class _BillsScreenState extends State<BillsScreen>
           _bills = billsDocs
               .map(
                 (d) => {
-                  'id': d['\$id'] ?? d['id'],
-                  'store': d['store'],
-                  'amount': ((d['amount'] ?? 0) as num).toDouble(),
-                  'date': _formatFriendlyDate((d['date'] ?? '').toString()),
-                  'category': d['category'],
-                  'payment': d['payment'],
-                  'items': d['items'] ?? '',
-                  'note': d['note'] ?? '',
+                  'id': d.$id,
+                  'store': d.data['store'],
+                  'amount': (d.data['amount'] as num)
+                      .toDouble(), // Safe cast int to double for UI
+                  'date': _formatFriendlyDate(
+                    d.data['date'],
+                  ), // Convert datetime to nice string
+                  'category': d.data['category'],
+                  'payment': d.data['payment'],
+                  'items': d.data['items'] ?? '',
+                  'note': d.data['note'] ?? '',
                 },
               )
               .toList();
@@ -255,11 +327,12 @@ class _BillsScreenState extends State<BillsScreen>
           _coupons = couponsDocs
               .map(
                 (d) => {
-                  'id': d['\$id'] ?? d['id'],
-                  'code': d['code'],
-                  'type': d['type'],
-                  'value': ((d['value'] ?? 0) as num).toDouble(),
-                  'note': d['note'] ?? '',
+                  'id': d.$id,
+                  'code': d.data['code'],
+                  'type': d.data['type'],
+                  'value': (d.data['value'] as num)
+                      .toDouble(), // Safe cast int to double for UI
+                  'note': d.data['note'] ?? '',
                 },
               )
               .toList();
@@ -268,8 +341,9 @@ class _BillsScreenState extends State<BillsScreen>
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
-      _showToast('Failed to load data');
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showToast(AppLocalizations.t(context, 'bills_load_error'));
     }
   }
 
@@ -279,10 +353,10 @@ class _BillsScreenState extends State<BillsScreen>
       await appwrite.deleteBill(id);
       if (!mounted) return;
       setState(() => _bills.removeWhere((b) => b['id'] == id));
-      _showToast('Bill removed');
+      _showToast(AppLocalizations.t(context, 'bills_removed'));
     } catch (e) {
       if (!mounted) return;
-      _showToast('Error removing bill');
+      _showToast(AppLocalizations.t(context, 'bills_remove_error'));
     }
   }
 
@@ -292,10 +366,10 @@ class _BillsScreenState extends State<BillsScreen>
       await appwrite.deleteCoupon(id);
       if (!mounted) return;
       setState(() => _coupons.removeWhere((c) => c['id'] == id));
-      _showToast('Coupon removed');
+      _showToast(AppLocalizations.t(context, 'bills_coupon_removed'));
     } catch (e) {
       if (!mounted) return;
-      _showToast('Error removing coupon');
+      _showToast(AppLocalizations.t(context, 'bills_coupon_remove_error'));
     }
   }
 
@@ -309,20 +383,19 @@ class _BillsScreenState extends State<BillsScreen>
   }) async {
     final amt = double.tryParse(amount) ?? 0;
     if (store.trim().isEmpty || amt <= 0) {
-      _showToast('Please fill Store and Amount');
+      _showToast(AppLocalizations.t(context, 'bills_fill_required'));
       return;
     }
 
-    setState(() => _isSavingBill = true);
+    _setOverlayState(() => _isSavingBill = true);
     try {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
       await appwrite.createBill({
         'store': store.trim(),
         'amount': amt.toInt(), // ✅ FIXED: Appwrite expects Integer!
-        'date': DateTime.now()
-            .toIso8601String(), // ✅ FIXED: Appwrite expects ISO Datetime
-        'category': category.toLowerCase(),
-        'payment': payment,
+        'date': _selectedDate.toIso8601String(),
+        'category': _categoryDbKey(context, category),
+        'payment': _paymentDbKey(context, payment),
         'items': items.trim(),
         'note': note.trim().isEmpty ? null : note.trim(), // Send null if empty
       });
@@ -333,10 +406,10 @@ class _BillsScreenState extends State<BillsScreen>
         _showToast('✦ Bill saved!');
       }
     } catch (e) {
-      if (mounted) _showToast('Error saving bill');
+      if (mounted) _showToast(AppLocalizations.t(context, 'bills_save_error'));
       debugPrint("Bill Error: $e");
     } finally {
-      if (mounted) setState(() => _isSavingBill = false);
+      if (mounted) _setOverlayState(() => _isSavingBill = false);
     }
   }
 
@@ -346,25 +419,26 @@ class _BillsScreenState extends State<BillsScreen>
     final note = _newNoteCtrl.text.trim();
 
     if (code.isEmpty) {
-      _showToast('Enter a coupon code');
+      _showToast(AppLocalizations.t(context, 'bills_enter_coupon'));
       return;
     }
-    if (_couponTypeVal != 'Free' && value <= 0) {
-      _showToast('Enter a valid value');
+    final couponFreeKey = AppLocalizations.t(context, 'bills_coupon_type_free');
+    if (_couponTypeVal != couponFreeKey && value <= 0) {
+      _showToast(AppLocalizations.t(context, 'bills_enter_valid'));
       return;
     }
     if (_coupons.any((c) => c['code'] == code)) {
-      _showToast('Coupon already saved!');
+      _showToast(AppLocalizations.t(context, 'bills_coupon_saved'));
       return;
     }
 
-    setState(() => _isSavingCoupon = true);
+    _setOverlayState(() => _isSavingCoupon = true);
     try {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
 
       await appwrite.createCoupon({
         'code': code,
-        'type': _couponTypeVal.toLowerCase(),
+        'type': _couponTypeDbKey(context, _couponTypeVal ?? ''),
         'value': value.toInt(), // ✅ FIXED: Appwrite expects Integer!
         'note': note.isEmpty ? null : note,
       });
@@ -377,10 +451,10 @@ class _BillsScreenState extends State<BillsScreen>
         _showToast('✦ Coupon "$code" saved!');
       }
     } catch (e) {
-      if (mounted) _showToast('Error saving coupon');
+      if (mounted) _showToast(AppLocalizations.t(context, 'bills_coupon_save_error'));
       debugPrint("Coupon Error: $e");
     } finally {
-      if (mounted) setState(() => _isSavingCoupon = false);
+      if (mounted) _setOverlayState(() => _isSavingCoupon = false);
     }
   }
 
@@ -395,15 +469,52 @@ class _BillsScreenState extends State<BillsScreen>
     }
   }
 
+  /// Calls setState on both the parent and the sheet's StatefulBuilder
+  /// so that mode toggles and loading flags both rebuild the sheet UI.
+  void _setOverlayState(VoidCallback fn) {
+    setState(fn);
+    _sheetSetState?.call(fn);
+  }
+
   void _openOverlay(String type) {
-    setState(() => _overlayType = type);
-    _sheetCtrl.forward(from: 0);
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Color(0xB808111F),
+      useRootNavigator: true,
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            // Store so _setOverlayState can trigger sheet rebuilds (e.g. mode toggle)
+            _sheetSetState = setSheetState;
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: type == 'add'
+                  ? _buildAddSheet()
+                  : _buildCouponMgrSheet(),
+            );
+          },
+        );
+      },
+    ).then((_) {
+      _sheetSetState = null; // Clear stale reference after sheet closes
+      if (mounted) {
+        setState(() {
+          _selectedDate = DateTime.now();
+          _storeCtrl.clear();
+          _amountCtrl.clear();
+          _itemsCtrl.clear();
+          _notesCtrl.clear();
+        });
+      }
+    });
   }
 
   void _closeOverlay() {
-    _sheetCtrl.reverse().then((_) {
-      if (mounted) setState(() => _overlayType = '');
-    });
+    Navigator.of(context, rootNavigator: true).maybePop();
   }
 
   void _showToast(String msg) async {
@@ -415,6 +526,17 @@ class _BillsScreenState extends State<BillsScreen>
     await Future.delayed(Duration(milliseconds: 2200));
     await _toastAnim.reverse();
     if (mounted) setState(() => _toastVisible = false);
+  }
+
+  @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    _chatCtrl.dispose();
+    _sheetCtrl.dispose();
+    _toastAnim.dispose();
+    _chatInputCtrl.dispose();
+    _removeOverlay();
+    super.dispose();
   }
 
   // ── BUILD ─────────────────────────────────────────────────────────
@@ -430,6 +552,7 @@ class _BillsScreenState extends State<BillsScreen>
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
+        resizeToAvoidBottomInset: false,
         backgroundColor: _t.backgroundPrimary,
         body: Stack(
           children: [
@@ -438,18 +561,31 @@ class _BillsScreenState extends State<BillsScreen>
               glowA: _accent.withValues(alpha: 0.22),
               glowB: _accent2.withValues(alpha: 0.15),
             ),
+            Column(
+              children: [
+                _buildHeader(),
+                Expanded(child: _buildScrollArea()),
+                _buildBottomActions(),
+              ],
+            ),
             SafeArea(
-              bottom: false,
-              child: Column(
-                children: [
-                  _buildHeader(),
-                  Expanded(child: _buildScrollArea()),
-                  _buildBottomActions(),
-                ],
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 100),
+                child: Align(
+                  alignment: Alignment.bottomRight,
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 20),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildChatFab(),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
-            Positioned(bottom: 108, right: 76, child: _buildLensFab()),
-            Positioned(bottom: 108, right: 20, child: _buildChatFab()),
             AnimatedBuilder(
               animation: _chatSlide,
               builder: (_, _) {
@@ -461,8 +597,12 @@ class _BillsScreenState extends State<BillsScreen>
                     child: Transform(
                       alignment: Alignment.bottomRight,
                       transform: Matrix4.identity()
-                        ..translate(0.0, 16.0 * (1 - _chatSlide.value))
-                        ..scale(0.95 + 0.05 * _chatSlide.value),
+                        ..translateByVector3(
+                            Vector3(0.0, 16.0 * (1 - _chatSlide.value), 0.0))
+                        ..scaleByVector3(Vector3(
+                            0.95 + 0.05 * _chatSlide.value,
+                            0.95 + 0.05 * _chatSlide.value,
+                            1.0)),
                       child: IgnorePointer(
                         ignoring: !_chatOpen,
                         child: _buildChatPanel(),
@@ -472,11 +612,6 @@ class _BillsScreenState extends State<BillsScreen>
                 );
               },
             ),
-            if (_overlayType.isNotEmpty)
-              AnimatedBuilder(
-                animation: _sheetSlide,
-                builder: (_, _) => _buildOverlayBackdrop(),
-              ),
             if (_toastVisible)
               AnimatedBuilder(
                 animation: _toastAnim,
@@ -507,34 +642,66 @@ class _BillsScreenState extends State<BillsScreen>
   Widget _buildHeader() {
     return Container(
       color: _t.backgroundPrimary,
-      padding: EdgeInsets.fromLTRB(24, 22, 24, 12),
+      padding: EdgeInsets.fromLTRB(24, 4, 24, 12),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'My Bills',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w900,
-                  color: _t.textPrimary,
-                  height: 1.0,
-                  letterSpacing: -0.5,
-                ),
+          // ── Icon ──
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  _accent2.withValues(alpha: 0.22),
+                  _accent.withValues(alpha: 0.22),
+                ],
               ),
-              SizedBox(height: 4),
-              Text(
-                'BY AHVI',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 3.2,
-                  color: _t.mutedText,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _accent.withValues(alpha: 0.25)),
+            ),
+            child: Icon(Icons.receipt_long_rounded, color: _accent, size: 22),
+          ),
+          SizedBox(width: 12),
+          // ── Title ──
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.receipt_long_rounded,
+                      color: _accent,
+                      size: 18,
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      AppLocalizations.t(context, 'bills_title'),
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        color: _t.textPrimary,
+                        height: 1.0,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+                SizedBox(height: 4),
+                Text(
+                  AppLocalizations.t(context, 'bills_by_ahvi'),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 3.2,
+                    color: _t.mutedText,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -542,36 +709,50 @@ class _BillsScreenState extends State<BillsScreen>
   }
 
   Widget _buildScrollArea() {
-    return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, 110),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(height: 4),
-          _buildSpendingCard(),
-          SizedBox(height: 14),
-          _buildFilterTabs(),
-          SizedBox(height: 12),
-          Text(
-            _activeFilter == 'all'
-                ? 'Recent Bills'
-                : '${_toTitleCase(_activeFilter)} Bills',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: _t.textPrimary,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Sticky top section (spending card + filter tabs) ──
+        Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildSpendingCard(),
+              SizedBox(height: 14),
+              _buildFilterTabs(),
+              SizedBox(height: 12),
+              Text(
+                _activeFilter == 'all'
+                    ? AppLocalizations.t(context, 'bills_recent')
+                    : _translateCategory(context, _activeFilter),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: _t.textPrimary,
+                ),
+              ),
+              SizedBox(height: 10),
+            ],
+          ),
+        ),
+        // ── Scrollable bills list only ──
+        Expanded(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 160),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildBillsList(),
+                SizedBox(height: 8),
+              ],
             ),
           ),
-          SizedBox(height: 10),
-          _buildBillsList(),
-          SizedBox(height: 8),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  String _toTitleCase(String s) =>
-      s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
   Widget _buildSpendingCard() {
     final bills = _filteredBills;
@@ -628,7 +809,7 @@ class _BillsScreenState extends State<BillsScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'TOTAL SPENDING',
+                  AppLocalizations.t(context, 'bills_total_spending'),
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
@@ -670,11 +851,11 @@ class _BillsScreenState extends State<BillsScreen>
                 SizedBox(height: 14),
                 Row(
                   children: [
-                    Expanded(child: _buildStatPill('$count', 'Bills')),
+                    Expanded(child: _buildStatPill('$count', AppLocalizations.t(context, 'bills_stat_bills'))),
                     SizedBox(width: 8),
-                    Expanded(child: _buildStatPill(_avgBill, 'Avg Bill')),
+                    Expanded(child: _buildStatPill(_avgBill, AppLocalizations.t(context, 'bills_stat_avg'))),
                     SizedBox(width: 8),
-                    Expanded(child: _buildStatPill(_topCategory, 'Top Cat.')),
+                    Expanded(child: _buildStatPill(_topCategory, AppLocalizations.t(context, 'bills_stat_top'))),
                   ],
                 ),
               ],
@@ -722,34 +903,34 @@ class _BillsScreenState extends State<BillsScreen>
 
   Widget _buildFilterTabs() {
     final tabs = [
-      {'key': 'all', 'label': 'All', 'color': Colors.white, 'bg': kBg2},
+      {'key': 'all', 'label': AppLocalizations.t(context, 'bills_filter_all'), 'color': Colors.white, 'bg': kBg2},
       {
         'key': 'shopping',
-        'label': 'Shopping',
+        'label': AppLocalizations.t(context, 'bills_filter_shopping'),
         'color': _accent2,
         'bg': _accent2.withValues(alpha: 0.18),
       },
       {
         'key': 'food',
-        'label': 'Food',
+        'label': AppLocalizations.t(context, 'bills_filter_food'),
         'color': _accent5,
         'bg': _accent5.withValues(alpha: 0.18),
       },
       {
         'key': 'utility',
-        'label': 'Utility',
+        'label': AppLocalizations.t(context, 'bills_filter_utility'),
         'color': _accent3,
         'bg': _accent3.withValues(alpha: 0.18),
       },
       {
         'key': 'medical',
-        'label': 'Medical',
+        'label': AppLocalizations.t(context, 'bills_filter_medical'),
         'color': _accent4,
         'bg': _accent4.withValues(alpha: 0.18),
       },
       {
         'key': 'other',
-        'label': 'Other',
+        'label': AppLocalizations.t(context, 'bills_filter_other'),
         'color': _t.textPrimary,
         'bg': _t.backgroundSecondary,
       },
@@ -833,16 +1014,16 @@ class _BillsScreenState extends State<BillsScreen>
       width: double.infinity,
       padding: EdgeInsets.all(40),
       decoration: BoxDecoration(
-        color: kShell,
+        color: _t.panel,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: kBorder, width: 1.5),
+        border: Border.all(color: _t.cardBorder, width: 1.5),
       ),
       child: Column(
         children: [
           Text('🧾', style: TextStyle(fontSize: 56)),
           SizedBox(height: 16),
           Text(
-            'No Bills Yet',
+            AppLocalizations.t(context, 'bills_empty_title'),
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w700,
@@ -851,7 +1032,7 @@ class _BillsScreenState extends State<BillsScreen>
           ),
           SizedBox(height: 6),
           Text(
-            'Tap "Add Bill" below to scan or\nmanually enter your first bill.',
+            AppLocalizations.t(context, 'bills_empty_desc'),
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12,
@@ -877,11 +1058,15 @@ class _BillsScreenState extends State<BillsScreen>
               child: Container(
                 padding: EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
-                  color: _accent2,
+                  gradient: LinearGradient(
+                    colors: [_accent2, _accent],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
                   borderRadius: BorderRadius.circular(22),
                   boxShadow: [
                     BoxShadow(
-                      color: Color(0x668D7DFF),
+                      color: _accent2.withValues(alpha: 0.40),
                       blurRadius: 30,
                       offset: Offset(0, 10),
                     ),
@@ -897,7 +1082,7 @@ class _BillsScreenState extends State<BillsScreen>
                     ),
                     SizedBox(width: 8),
                     Text(
-                      'Add Bill',
+                      AppLocalizations.t(context, 'bills_btn_add_bill'),
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -919,11 +1104,15 @@ class _BillsScreenState extends State<BillsScreen>
                   Container(
                     padding: EdgeInsets.symmetric(vertical: 16),
                     decoration: BoxDecoration(
-                      color: _accent2,
+                      gradient: LinearGradient(
+                        colors: [_accent, _accent2],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
                       borderRadius: BorderRadius.circular(22),
                       boxShadow: [
                         BoxShadow(
-                          color: Color(0x598D7DFF),
+                          color: _accent.withValues(alpha: 0.35),
                           blurRadius: 30,
                           offset: Offset(0, 10),
                         ),
@@ -939,7 +1128,7 @@ class _BillsScreenState extends State<BillsScreen>
                         ),
                         SizedBox(width: 8),
                         Text(
-                          'My Coupons',
+                          AppLocalizations.t(context, 'bills_btn_my_coupons'),
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
@@ -985,56 +1174,23 @@ class _BillsScreenState extends State<BillsScreen>
     );
   }
 
-  Widget _buildLensFab() {
-    return GestureDetector(
-      onTap: () => showAhviLensSheet(
-        context,
-        t: _t,
-        onVisualSearch: () => _openOverlay('add'),
-        onFindSimilar: () => _openOverlay('add'),
-        onAddToWardrobe: () => _openOverlay('coupon'),
-      ),
-      child: Container(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [_accent, _accent2],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: _accent.withValues(alpha: 0.40),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: const Icon(Icons.search_rounded, color: Colors.white, size: 22),
-      ),
-    );
-  }
-
   Widget _buildChatFab() {
-    return AhviStylistFab(onTap: () => showAhviStylistChatSheet(context));
+    return AhviStylistFab(onTap: () => showAhviStylistChatSheet(context, moduleContext: 'bills'));
   }
 
   Widget _buildChatPanel() {
     return Container(
       width: 300,
       decoration: BoxDecoration(
-        color: kShell,
+        color: _t.backgroundSecondary,
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: kBorder, width: 1.5),
+        border: Border.all(color: _t.cardBorder, width: 1.5),
         boxShadow: [
           BoxShadow(
             color: Color(0x66000000),
             blurRadius: 60,
             offset: Offset(0, 20),
           ),
-          BoxShadow(color: kPanel2, blurRadius: 0, offset: Offset(0, 1)),
         ],
       ),
       child: ClipRRect(
@@ -1050,7 +1206,7 @@ class _BillsScreenState extends State<BillsScreen>
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                border: Border(bottom: BorderSide(color: kBorder, width: 1)),
+                border: Border(bottom: BorderSide(color: _t.cardBorder, width: 1)),
               ),
               child: Row(
                 children: [
@@ -1058,7 +1214,7 @@ class _BillsScreenState extends State<BillsScreen>
                     width: 36,
                     height: 36,
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(colors: [kAccent2, kAccent4]),
+                      gradient: LinearGradient(colors: [_accent2, _accent4]),
                       shape: BoxShape.circle,
                     ),
                     child: Center(
@@ -1102,7 +1258,7 @@ class _BillsScreenState extends State<BillsScreen>
                       width: 26,
                       height: 26,
                       decoration: BoxDecoration(
-                        color: kPanel,
+                        color: _t.panel,
                         borderRadius: BorderRadius.circular(13),
                       ),
                       child: Icon(
@@ -1136,15 +1292,15 @@ class _BillsScreenState extends State<BillsScreen>
                       constraints: const BoxConstraints(maxWidth: 220),
                       decoration: BoxDecoration(
                         color: isAhvi
-                            ? const Color(0xFF1E2D45)
-                            : const Color(0xFF1A2038),
+                            ? _t.panel
+                            : _accent2.withValues(alpha: 0.22),
                         borderRadius: BorderRadius.only(
                           topLeft: const Radius.circular(16),
                           topRight: const Radius.circular(16),
                           bottomLeft: Radius.circular(isAhvi ? 4 : 16),
                           bottomRight: Radius.circular(isAhvi ? 16 : 4),
                         ),
-                        border: Border.all(color: kBorder, width: 1),
+                        border: Border.all(color: _t.cardBorder, width: 1),
                       ),
                       child: Text(
                         msg['text']!,
@@ -1160,17 +1316,23 @@ class _BillsScreenState extends State<BillsScreen>
               ),
             ),
             Container(
-              padding: EdgeInsets.fromLTRB(10, 8, 10, 12),
               decoration: BoxDecoration(
-                border: Border(top: BorderSide(color: kBorder, width: 1)),
+                border: Border(top: BorderSide(color: _t.cardBorder, width: 1)),
               ),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
+                  // ── Attachment chip (shown above input row when file/search picked) ──
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(10, 8, 10, 12),
+                    child: Row(
+                children: [
+                  SizedBox(width: 8),
                   Container(
                     width: 32,
                     height: 32,
                     decoration: BoxDecoration(
-                      color: kPanel,
+                      color: _t.panel,
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Icon(
@@ -1201,8 +1363,19 @@ class _BillsScreenState extends State<BillsScreen>
                       width: 32,
                       height: 32,
                       decoration: BoxDecoration(
-                        color: kAccent2,
+                        gradient: LinearGradient(
+                          colors: [_accent2, _accent],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
                         borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _accent2.withValues(alpha: 0.35),
+                            blurRadius: 10,
+                            offset: Offset(0, 3),
+                          ),
+                        ],
                       ),
                       child: Icon(
                         Icons.send_rounded,
@@ -1213,6 +1386,9 @@ class _BillsScreenState extends State<BillsScreen>
                   ),
                 ],
               ),
+                  ),   // Padding
+                ],
+              ),   // Column
             ),
           ],
         ),
@@ -1220,81 +1396,19 @@ class _BillsScreenState extends State<BillsScreen>
     );
   }
 
-  Future<void> _sendChatMsg(String text) async {
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) return;
-    _chatInputCtrl.clear();
-
+  void _sendChatMsg(String text) {
+    if (text.trim().isEmpty) return;
     setState(() {
-      _chatMessages.add({'from': 'user', 'text': trimmed});
-      _chatHistory.add({'role': 'user', 'content': trimmed});
+      _chatMessages.add({'from': 'user', 'text': text.trim()});
+      _chatMessages.add({
+        'from': 'ahvi',
+        'text': 'Got it! I\'m reviewing your bills now… ✦',
+      });
     });
-
-    try {
-      final backend = Provider.of<BackendService>(context, listen: false);
-      final historyForBackend = _chatHistory.length > 1
-          ? List<Map<String, String>>.from(
-              _chatHistory.sublist(0, _chatHistory.length - 1),
-            )
-          : <Map<String, String>>[];
-      final response = await backend.sendChatQuery(
-        trimmed,
-        _chatUserId,
-        historyForBackend,
-        _chatMemory,
-        moduleContext: 'bills',
-      );
-
-      if (!mounted) return;
-      if (response['updated_memory'] != null) {
-        _chatMemory = response['updated_memory'].toString();
-      }
-      final aiText =
-          response['message']?['content']?.toString().trim() ??
-          response['content']?.toString().trim() ??
-          response['error']?.toString().trim() ??
-          "I couldn't reach AHVI backend right now.";
-
-      setState(() {
-        _chatMessages.add({'from': 'ahvi', 'text': aiText});
-        _chatHistory.add({'role': 'assistant', 'content': aiText});
-      });
-    } catch (_) {
-      if (!mounted) return;
-      const fallback = "I couldn't reach AHVI backend right now.";
-      setState(() {
-        _chatMessages.add({'from': 'ahvi', 'text': fallback});
-        _chatHistory.add({'role': 'assistant', 'content': fallback});
-      });
-    }
+    _chatInputCtrl.clear();
   }
 
-  Widget _buildOverlayBackdrop() {
-    return GestureDetector(
-      onTap: _closeOverlay,
-      child: Container(
-        color: Color.lerp(
-          Colors.transparent,
-          Color(0xB808111F),
-          _sheetSlide.value,
-        ),
-        child: GestureDetector(
-          onTap: () {},
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Transform.translate(
-                offset: Offset(0, (1 - _sheetSlide.value) * 600),
-                child: _overlayType == 'add'
-                    ? _buildAddSheet()
-                    : _buildCouponMgrSheet(),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+
 
   // ════════════════════════════════════════════════════════════════════
   //  ADD BILL SHEET
@@ -1307,13 +1421,10 @@ class _BillsScreenState extends State<BillsScreen>
 
   Widget _buildAddSheet() {
     return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.93,
-      ),
       decoration: BoxDecoration(
-        color: kBg2,
+        color: _t.backgroundSecondary,
         borderRadius: BorderRadius.vertical(top: Radius.circular(36)),
-        border: Border(top: BorderSide(color: kBorder, width: 1.5)),
+        border: Border(top: BorderSide(color: _t.cardBorder, width: 1.5)),
         boxShadow: [
           BoxShadow(
             color: Color(0x266B91FF),
@@ -1323,13 +1434,14 @@ class _BillsScreenState extends State<BillsScreen>
         ],
       ),
       child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(22, 16, 22, 40),
+        physics: ClampingScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(22, 0, 22, 40),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _sheetHandle(),
             Text(
-              'Add a Bill',
+              AppLocalizations.t(context, 'bills_sheet_add_title'),
               style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
@@ -1338,7 +1450,7 @@ class _BillsScreenState extends State<BillsScreen>
             ),
             SizedBox(height: 3),
             Text(
-              "Choose how you'd like to add your bill",
+              AppLocalizations.t(context, 'bills_sheet_add_sub'),
               style: TextStyle(
                 fontSize: 11,
                 color: _t.mutedText,
@@ -1361,10 +1473,10 @@ class _BillsScreenState extends State<BillsScreen>
             ],
 
             _buildFormGroup(
-              'Store / Vendor *',
+              AppLocalizations.t(context, 'bills_field_store'),
               child: _glassInput(
                 controller: _storeCtrl,
-                placeholder: 'e.g. Zara, Swiggy, Apollo…',
+                placeholder: AppLocalizations.t(context, 'bills_field_store_hint'),
               ),
             ),
             SizedBox(height: 10),
@@ -1372,7 +1484,7 @@ class _BillsScreenState extends State<BillsScreen>
               children: [
                 Expanded(
                   child: _buildFormGroup(
-                    'Amount (₹) *',
+                    AppLocalizations.t(context, 'bills_field_amount'),
                     child: _glassInput(
                       controller: _amountCtrl,
                       placeholder: '0.00',
@@ -1382,7 +1494,7 @@ class _BillsScreenState extends State<BillsScreen>
                 ),
                 SizedBox(width: 10),
                 Expanded(
-                  child: _buildFormGroup('Date *', child: _datePickerTrigger()),
+                  child: _buildFormGroup(AppLocalizations.t(context, 'bills_field_date'), child: _datePickerTrigger()),
                 ),
               ],
             ),
@@ -1391,34 +1503,34 @@ class _BillsScreenState extends State<BillsScreen>
               children: [
                 Expanded(
                   child: _buildFormGroup(
-                    'Category',
+                    AppLocalizations.t(context, 'bills_field_category'),
                     child: _buildSelectField(
-                      value: _selCategory,
+                      value: _selCategory!,
                       items: [
-                        'Shopping',
-                        'Food',
-                        'Utility',
-                        'Medical',
-                        'Other',
+                        AppLocalizations.t(context, 'bills_cat_shopping'),
+                        AppLocalizations.t(context, 'bills_cat_food'),
+                        AppLocalizations.t(context, 'bills_cat_utility'),
+                        AppLocalizations.t(context, 'bills_cat_medical'),
+                        AppLocalizations.t(context, 'bills_cat_other'),
                       ],
-                      onChanged: (v) => setState(() => _selCategory = v!),
+                      onChanged: (v) => _setOverlayState(() => _selCategory = v!),
                     ),
                   ),
                 ),
                 SizedBox(width: 10),
                 Expanded(
                   child: _buildFormGroup(
-                    'Payment',
+                    AppLocalizations.t(context, 'bills_field_payment'),
                     child: _buildSelectField(
-                      value: _selPayment,
+                      value: _selPayment!,
                       items: [
-                        'UPI',
-                        'Credit Card',
-                        'Debit Card',
-                        'Cash',
-                        'Net Banking',
+                        AppLocalizations.t(context, 'bills_pay_upi'),
+                        AppLocalizations.t(context, 'bills_pay_credit'),
+                        AppLocalizations.t(context, 'bills_pay_debit'),
+                        AppLocalizations.t(context, 'bills_pay_cash'),
+                        AppLocalizations.t(context, 'bills_pay_netbanking'),
                       ],
-                      onChanged: (v) => setState(() => _selPayment = v!),
+                      onChanged: (v) => _setOverlayState(() => _selPayment = v!),
                     ),
                   ),
                 ),
@@ -1426,24 +1538,21 @@ class _BillsScreenState extends State<BillsScreen>
             ),
             SizedBox(height: 10),
             _buildFormGroup(
-              'Items (optional)',
+              AppLocalizations.t(context, 'bills_field_items'),
               child: _glassInput(
                 controller: _itemsCtrl,
-                placeholder: 'Shirt, Shoes, Watch…',
+                placeholder: AppLocalizations.t(context, 'bills_field_items_hint'),
               ),
             ),
             SizedBox(height: 10),
             _buildFormGroup(
-              'Notes (optional)',
+              AppLocalizations.t(context, 'bills_field_notes'),
               child: _glassInput(
                 controller: _notesCtrl,
-                placeholder: 'Any extra details…',
+                placeholder: AppLocalizations.t(context, 'bills_field_notes_hint'),
                 maxLines: 3,
               ),
             ),
-            SizedBox(height: 10),
-
-            _buildCouponRow(),
             SizedBox(height: 10),
 
             Row(
@@ -1455,13 +1564,13 @@ class _BillsScreenState extends State<BillsScreen>
                     child: Container(
                       padding: EdgeInsets.symmetric(vertical: 13),
                       decoration: BoxDecoration(
-                        color: kPanel,
-                        border: Border.all(color: kBorder, width: 1.5),
+                        color: _t.panel,
+                        border: Border.all(color: _t.cardBorder, width: 1.5),
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Center(
                         child: Text(
-                          'Cancel',
+                          AppLocalizations.t(context, 'bills_btn_cancel'),
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -1481,8 +1590,8 @@ class _BillsScreenState extends State<BillsScreen>
                       _addBill(
                         store: _storeCtrl.text,
                         amount: _amountCtrl.text,
-                        category: _selCategory,
-                        payment: _selPayment,
+                        category: _selCategory ?? '',
+                        payment: _selPayment ?? '',
                         items: _itemsCtrl.text,
                         note: _notesCtrl.text,
                       );
@@ -1490,11 +1599,11 @@ class _BillsScreenState extends State<BillsScreen>
                     child: Container(
                       padding: EdgeInsets.symmetric(vertical: 13),
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(colors: [kAccent, kAccent2]),
+                        gradient: LinearGradient(colors: [_accent2, _accent]),
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: Color(0x4D6B91FF),
+                            color: _accent.withValues(alpha: 0.30),
                             blurRadius: 20,
                             offset: Offset(0, 6),
                           ),
@@ -1511,7 +1620,7 @@ class _BillsScreenState extends State<BillsScreen>
                                 ),
                               )
                             : Text(
-                                '✦ Save Bill',
+                                AppLocalizations.t(context, 'bills_btn_save'),
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w700,
@@ -1543,7 +1652,7 @@ class _BillsScreenState extends State<BillsScreen>
           final isActive = _addMode == mode;
           return Expanded(
             child: GestureDetector(
-              onTap: () => setState(() => _addMode = mode),
+              onTap: () => _setOverlayState(() => _addMode = mode),
               child: AnimatedContainer(
                 duration: Duration(milliseconds: 280),
                 padding: EdgeInsets.symmetric(vertical: 10),
@@ -1565,7 +1674,9 @@ class _BillsScreenState extends State<BillsScreen>
                     ),
                     SizedBox(width: 5),
                     Text(
-                      mode == 'ai' ? '✦ AI Autofill' : 'Enter Manually',
+                      mode == 'ai'
+                          ? AppLocalizations.t(context, 'bills_mode_ai')
+                          : AppLocalizations.t(context, 'bills_mode_manual'),
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -1585,11 +1696,12 @@ class _BillsScreenState extends State<BillsScreen>
   }
 
   Widget _buildUploadSection() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'UPLOAD BILL PHOTO',
+          AppLocalizations.t(context, 'bills_upload_photo'),
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w700,
@@ -1604,10 +1716,10 @@ class _BillsScreenState extends State<BillsScreen>
               child: _uploadOptBtn(
                 icon: Icons.camera_alt_outlined,
                 iconColor: Color(0xFFD4756E),
-                bg: Color(0x1FD4756E),
-                border: Color(0x33D4756E),
-                label: 'Camera',
-                sub: 'Take a photo',
+                bg: isDark ? Color(0x1FD4756E) : Color(0xFFD4756E).withValues(alpha: 0.08),
+                border: isDark ? Color(0x33D4756E) : Color(0xFFD4756E).withValues(alpha: 0.30),
+                label: AppLocalizations.t(context, 'bills_camera_label'),
+                sub: AppLocalizations.t(context, 'bills_camera_sub'),
               ),
             ),
             SizedBox(width: 10),
@@ -1615,10 +1727,10 @@ class _BillsScreenState extends State<BillsScreen>
               child: _uploadOptBtn(
                 icon: Icons.upload_file_outlined,
                 iconColor: Color(0xFF5A8FD8),
-                bg: Color(0x1F5A8FD8),
-                border: Color(0x335A8FD8),
-                label: 'Upload File',
-                sub: 'JPG, PNG or PDF',
+                bg: isDark ? Color(0x1F5A8FD8) : Color(0xFF5A8FD8).withValues(alpha: 0.08),
+                border: isDark ? Color(0x335A8FD8) : Color(0xFF5A8FD8).withValues(alpha: 0.30),
+                label: AppLocalizations.t(context, 'bills_upload_label'),
+                sub: AppLocalizations.t(context, 'bills_upload_sub'),
               ),
             ),
           ],
@@ -1645,6 +1757,7 @@ class _BillsScreenState extends State<BillsScreen>
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, color: iconColor, size: 22),
             SizedBox(height: 8),
@@ -1687,7 +1800,7 @@ class _BillsScreenState extends State<BillsScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Manual Entry Mode',
+                AppLocalizations.t(context, 'bills_manual_mode'),
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
@@ -1695,7 +1808,7 @@ class _BillsScreenState extends State<BillsScreen>
                 ),
               ),
               Text(
-                'Fill in the details below — all * fields required',
+                AppLocalizations.t(context, 'bills_manual_sub'),
                 style: TextStyle(
                   fontSize: 10,
                   color: _t.mutedText,
@@ -1736,12 +1849,8 @@ class _BillsScreenState extends State<BillsScreen>
   }) {
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [kShell, kShell2],
-        ),
-        border: Border.all(color: kBorder, width: 1.5),
+        color: _t.panel,
+        border: Border.all(color: _t.cardBorder, width: 1.5),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -1771,58 +1880,282 @@ class _BillsScreenState extends State<BillsScreen>
   }
 
   Widget _datePickerTrigger() {
+    final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    final d = _selectedDate;
+    final label = '${months[d.month - 1]} ${d.day}, ${d.year}';
+
     return GestureDetector(
-      onTap: () async {
-        final picked = await showDatePicker(
-          context: context,
-          initialDate: DateTime.now(),
-          firstDate: DateTime(2020),
-          lastDate: DateTime.now(),
-          builder: (ctx, child) => Theme(
-            data: ThemeData.dark().copyWith(
-              colorScheme: ColorScheme.dark(
-                primary: kAccent2,
-                onPrimary: Colors.white,
-                surface: kShell,
-                onSurface: _t.textPrimary,
-              ),
-            ),
-            child: child!,
-          ),
-        );
-      },
+      onTap: () => _showThemedCalendar(),
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          color: kShell,
-          border: Border.all(color: kBorder, width: 1.5),
+          color: _t.panel,
+          border: Border.all(color: _t.cardBorder, width: 1.5),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Row(
           children: [
-            Icon(
-              Icons.calendar_today_outlined,
-              size: 14,
-              color: Color(0xFFC4A0C8),
-            ),
+            Icon(Icons.calendar_today_outlined, size: 14, color: _accent2),
             SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Select date',
+                label,
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
-                  color: _t.mutedText,
+                  color: _t.textPrimary,
                 ),
               ),
             ),
-            Icon(
-              Icons.keyboard_arrow_down_rounded,
-              size: 16,
-              color: Color(0xFFC4A0C8),
-            ),
+            Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _accent2),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Custom themed calendar dialog — matches app's dark glass style
+  void _showThemedCalendar() {
+    DateTime _viewMonth = DateTime(_selectedDate.year, _selectedDate.month, 1);
+    DateTime _tempSelected = _selectedDate;
+    final now = DateTime.now();
+
+    showDialog(
+      context: context,
+      barrierColor: Color(0xB808111F),
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setDlgState) {
+          final daysInMonth = DateUtils.getDaysInMonth(_viewMonth.year, _viewMonth.month);
+          final firstWeekday = DateTime(_viewMonth.year, _viewMonth.month, 1).weekday % 7; // 0=Sun
+          final monthLabel = [
+            'January','February','March','April','May','June',
+            'July','August','September','October','November','December'
+          ][_viewMonth.month - 1];
+
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+            child: Container(
+              decoration: BoxDecoration(
+                color: _t.backgroundSecondary,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: _t.cardBorder, width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: _accent2.withValues(alpha: 0.18),
+                    blurRadius: 40,
+                    offset: Offset(0, 12),
+                  ),
+                ],
+              ),
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ── Month nav ─────────────────────────────────────
+                  Row(
+                    children: [
+                      _calNavBtn(
+                        icon: Icons.chevron_left_rounded,
+                        onTap: () => setDlgState(() {
+                          _viewMonth = DateTime(_viewMonth.year, _viewMonth.month - 1, 1);
+                        }),
+                      ),
+                      Expanded(
+                        child: Text(
+                          '$monthLabel ${_viewMonth.year}',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _t.textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      _calNavBtn(
+                        icon: Icons.chevron_right_rounded,
+                        onTap: () => setDlgState(() {
+                          final next = DateTime(_viewMonth.year, _viewMonth.month + 1, 1);
+                          if (!next.isAfter(DateTime(now.year, now.month + 1, 1))) {
+                            _viewMonth = next;
+                          }
+                        }),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 14),
+
+                  // ── Weekday headers ───────────────────────────────
+                  Row(
+                    children: ['Su','Mo','Tu','We','Th','Fr','Sa'].map((w) =>
+                      Expanded(
+                        child: Center(
+                          child: Text(
+                            w,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: _t.mutedText,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ).toList(),
+                  ),
+                  SizedBox(height: 8),
+
+                  // ── Day grid ──────────────────────────────────────
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: NeverScrollableScrollPhysics(),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 7,
+                      mainAxisSpacing: 4,
+                      crossAxisSpacing: 4,
+                      childAspectRatio: 1,
+                    ),
+                    itemCount: firstWeekday + daysInMonth,
+                    itemBuilder: (_, i) {
+                      if (i < firstWeekday) return SizedBox.shrink();
+                      final day = i - firstWeekday + 1;
+                      final date = DateTime(_viewMonth.year, _viewMonth.month, day);
+                      final isSelected = date.year == _tempSelected.year &&
+                          date.month == _tempSelected.month &&
+                          date.day == _tempSelected.day;
+                      final isToday = date.year == now.year &&
+                          date.month == now.month &&
+                          date.day == now.day;
+                      final isFuture = date.isAfter(now);
+
+                      return GestureDetector(
+                        onTap: isFuture ? null : () => setDlgState(() => _tempSelected = date),
+                        child: AnimatedContainer(
+                          duration: Duration(milliseconds: 180),
+                          decoration: BoxDecoration(
+                            gradient: isSelected
+                                ? LinearGradient(
+                                    colors: [_accent2, _accent],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  )
+                                : null,
+                            color: isSelected
+                                ? null
+                                : isToday
+                                    ? _accent.withValues(alpha: 0.15)
+                                    : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                            border: isToday && !isSelected
+                                ? Border.all(color: _accent.withValues(alpha: 0.50), width: 1.5)
+                                : null,
+                          ),
+                          child: Center(
+                            child: Text(
+                              '$day',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: isSelected || isToday
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                                color: isSelected
+                                    ? Colors.white
+                                    : isFuture
+                                        ? _t.mutedText.withValues(alpha: 0.35)
+                                        : _t.textPrimary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+
+                  SizedBox(height: 16),
+                  Divider(color: _t.cardBorder, height: 1),
+                  SizedBox(height: 12),
+
+                  // ── Actions ───────────────────────────────────────
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => Navigator.of(ctx).pop(),
+                          child: Container(
+                            padding: EdgeInsets.symmetric(vertical: 11),
+                            decoration: BoxDecoration(
+                              color: _t.panel,
+                              border: Border.all(color: _t.cardBorder, width: 1.5),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Center(
+                              child: Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: _t.mutedText,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            _setOverlayState(() => _selectedDate = _tempSelected);
+                            Navigator.of(ctx).pop();
+                          },
+                          child: Container(
+                            padding: EdgeInsets.symmetric(vertical: 11),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(colors: [_accent2, _accent]),
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: _accent.withValues(alpha: 0.30),
+                                  blurRadius: 14,
+                                  offset: Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: Text(
+                                'OK',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        });
+      },
+    );
+  }
+
+  Widget _calNavBtn({required IconData icon, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          color: _t.panel,
+          border: Border.all(color: _t.cardBorder, width: 1.5),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, color: _accent2, size: 18),
       ),
     );
   }
@@ -1834,18 +2167,14 @@ class _BillsScreenState extends State<BillsScreen>
   }) {
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [kShell, kShell2],
-        ),
-        border: Border.all(color: kBorder, width: 1.5),
+        color: _t.panel,
+        border: Border.all(color: _t.cardBorder, width: 1.5),
         borderRadius: BorderRadius.circular(16),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: value,
-          dropdownColor: kShell,
+          dropdownColor: _t.backgroundSecondary,
           icon: Icon(
             Icons.keyboard_arrow_down_rounded,
             color: Color(0xFFC4A0C8),
@@ -1867,101 +2196,6 @@ class _BillsScreenState extends State<BillsScreen>
     );
   }
 
-  Widget _buildCouponRow() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Coupon Code',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: _t.mutedText,
-          ),
-        ),
-        SizedBox(height: 5),
-        Row(
-          children: [
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Color(0x0A8D7DFF),
-                  border: Border.all(color: Color(0x598D7DFF), width: 1.5),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: [
-                    Padding(
-                      padding: EdgeInsets.only(left: 12),
-                      child: Icon(
-                        Icons.local_offer_outlined,
-                        size: 14,
-                        color: kAccent2,
-                      ),
-                    ),
-                    Expanded(
-                      child: TextField(
-                        controller: _couponCtrl,
-                        textCapitalization: TextCapitalization.characters,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: _t.textPrimary,
-                          letterSpacing: 1.0,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: 'Enter code',
-                          hintStyle: TextStyle(color: _t.mutedText),
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 12,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            SizedBox(width: 8),
-            _PressScaleButton(
-              onTap: () {
-                final code = _couponCtrl.text.trim().toUpperCase();
-                if (code.isEmpty) {
-                  _showToast('Enter a coupon code');
-                  return;
-                }
-                final found = _coupons.any((c) => c['code'] == code);
-                if (found) {
-                  _showToast('✦ Coupon "$code" applied!');
-                } else {
-                  _showToast('Coupon not found');
-                }
-              },
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Color(0x1F8D7DFF),
-                  border: Border.all(color: Color(0x388D7DFF), width: 1.5),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Text(
-                  'Apply',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: kAccent2,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
   // ════════════════════════════════════════════════════════════════════
   //  COUPON MANAGER SHEET
   // ════════════════════════════════════════════════════════════════════
@@ -1971,13 +2205,10 @@ class _BillsScreenState extends State<BillsScreen>
 
   Widget _buildCouponMgrSheet() {
     return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.92,
-      ),
       decoration: BoxDecoration(
-        color: kBg2,
+        color: _t.backgroundSecondary,
         borderRadius: BorderRadius.vertical(top: Radius.circular(36)),
-        border: Border(top: BorderSide(color: kBorder, width: 1.5)),
+        border: Border(top: BorderSide(color: _t.cardBorder, width: 1.5)),
         boxShadow: [
           BoxShadow(
             color: Color(0x2E8D7DFF),
@@ -1987,9 +2218,10 @@ class _BillsScreenState extends State<BillsScreen>
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: EdgeInsets.fromLTRB(22, 16, 22, 0),
+            padding: EdgeInsets.fromLTRB(22, 0, 22, 0),
             child: Column(
               children: [
                 _sheetHandle(),
@@ -2000,7 +2232,7 @@ class _BillsScreenState extends State<BillsScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'My Coupons',
+                            AppLocalizations.t(context, 'bills_my_coupons_title'),
                             style: TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.w700,
@@ -2009,7 +2241,7 @@ class _BillsScreenState extends State<BillsScreen>
                           ),
                           SizedBox(height: 3),
                           Text(
-                            '${_coupons.length} Saved Coupon${_coupons.length != 1 ? 's' : ''}',
+                            AppLocalizations.t(context, 'bills_saved_coupons_count').replaceFirst('{count}', '${_coupons.length}'),
                             style: TextStyle(
                               fontSize: 12,
                               color: _t.mutedText,
@@ -2025,8 +2257,8 @@ class _BillsScreenState extends State<BillsScreen>
                         width: 34,
                         height: 34,
                         decoration: BoxDecoration(
-                          color: kPanel,
-                          border: Border.all(color: kBorder),
+                          color: _t.panel,
+                          border: Border.all(color: _t.cardBorder),
                           borderRadius: BorderRadius.circular(17),
                         ),
                         child: Icon(
@@ -2042,7 +2274,7 @@ class _BillsScreenState extends State<BillsScreen>
               ],
             ),
           ),
-          Expanded(
+          Flexible(
             child: SingleChildScrollView(
               padding: EdgeInsets.fromLTRB(22, 0, 22, 40),
               child: Column(
@@ -2066,25 +2298,25 @@ class _BillsScreenState extends State<BillsScreen>
     return Container(
       padding: EdgeInsets.fromLTRB(16, 16, 16, 14),
       decoration: BoxDecoration(
-        color: kShell,
-        border: Border.all(color: kBorder, width: 1.5),
+        color: _t.panel,
+        border: Border.all(color: _t.cardBorder, width: 1.5),
         borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 14,
-            offset: Offset(0, 3),
+            color: _accent2.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: Offset(0, 4),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _couponFieldLabel('COUPON CODE'),
+          _couponFieldLabel(AppLocalizations.t(context, 'bills_coupon_code_label')),
           SizedBox(height: 5),
           _couponInput(
             controller: _newCodeCtrl,
-            placeholder: 'E.G. SAVE10',
+            placeholder: AppLocalizations.t(context, 'bills_coupon_code_placeholder'),
             isBold: true,
           ),
           SizedBox(height: 10),
@@ -2094,18 +2326,18 @@ class _BillsScreenState extends State<BillsScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _couponFieldLabel('TYPE'),
+                    _couponFieldLabel(AppLocalizations.t(context, 'bills_coupon_type_label')),
                     SizedBox(height: 5),
                     Container(
                       decoration: BoxDecoration(
-                        color: kPanel,
-                        border: Border.all(color: kBorder, width: 1.5),
+                        color: _t.panel,
+                        border: Border.all(color: _t.cardBorder, width: 1.5),
                         borderRadius: BorderRadius.circular(13),
                       ),
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
-                          value: _couponTypeVal,
-                          dropdownColor: kShell,
+                          value: _couponTypeVal ?? AppLocalizations.t(context, 'bills_coupon_type_percent'),
+                          dropdownColor: _t.backgroundSecondary,
                           icon: Icon(
                             Icons.keyboard_arrow_down_rounded,
                             color: Color(0xFFC4A0C8),
@@ -2121,13 +2353,12 @@ class _BillsScreenState extends State<BillsScreen>
                             fontWeight: FontWeight.w500,
                             color: _t.textPrimary,
                           ),
-                          items: ['Percent', 'Flat', 'Free']
-                              .map(
-                                (o) =>
-                                    DropdownMenuItem(value: o, child: Text(o)),
-                              )
-                              .toList(),
-                          onChanged: (v) => setState(() => _couponTypeVal = v!),
+                          items: [
+                                AppLocalizations.t(context, 'bills_coupon_type_percent'),
+                                AppLocalizations.t(context, 'bills_coupon_type_flat'),
+                                AppLocalizations.t(context, 'bills_coupon_type_free'),
+                              ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+                          onChanged: (v) => _setOverlayState(() => _couponTypeVal = v!),
                         ),
                       ),
                     ),
@@ -2139,7 +2370,7 @@ class _BillsScreenState extends State<BillsScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _couponFieldLabel('VALUE'),
+                    _couponFieldLabel(AppLocalizations.t(context, 'bills_coupon_value_label')),
                     SizedBox(height: 5),
                     _couponInput(
                       controller: _newValueCtrl,
@@ -2152,11 +2383,11 @@ class _BillsScreenState extends State<BillsScreen>
             ],
           ),
           SizedBox(height: 10),
-          _couponFieldLabel('NOTE (OPTIONAL)'),
+          _couponFieldLabel(AppLocalizations.t(context, 'bills_coupon_note_label')),
           SizedBox(height: 5),
           _couponInput(
             controller: _newNoteCtrl,
-            placeholder: 'Short description…',
+            placeholder: AppLocalizations.t(context, 'bills_coupon_note_placeholder'),
           ),
           SizedBox(height: 12),
           _PressScaleButton(
@@ -2167,11 +2398,11 @@ class _BillsScreenState extends State<BillsScreen>
               width: double.infinity,
               padding: EdgeInsets.symmetric(vertical: 13),
               decoration: BoxDecoration(
-                gradient: LinearGradient(colors: [kAccent2, kAccent]),
+                gradient: LinearGradient(colors: [_accent2, _accent]),
                 borderRadius: BorderRadius.circular(15),
                 boxShadow: [
                   BoxShadow(
-                    color: Color(0x528D7DFF),
+                    color: _accent2.withValues(alpha: 0.32),
                     blurRadius: 16,
                     offset: Offset(0, 5),
                   ),
@@ -2193,7 +2424,7 @@ class _BillsScreenState extends State<BillsScreen>
                     Icon(Icons.add_rounded, color: Colors.white, size: 16),
                     SizedBox(width: 6),
                     Text(
-                      'Save Coupon',
+                      AppLocalizations.t(context, 'bills_coupon_save'),
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -2230,8 +2461,8 @@ class _BillsScreenState extends State<BillsScreen>
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: kPanel,
-        border: Border.all(color: kBorder, width: 1.5),
+        color: _t.panel,
+        border: Border.all(color: _t.cardBorder, width: 1.5),
         borderRadius: BorderRadius.circular(13),
       ),
       child: TextField(
@@ -2261,10 +2492,10 @@ class _BillsScreenState extends State<BillsScreen>
       width: double.infinity,
       padding: EdgeInsets.symmetric(vertical: 36, horizontal: 20),
       decoration: BoxDecoration(
-        color: kShell,
+        color: _t.panel,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: kBorder,
+          color: _t.cardBorder,
           width: 1.5,
           style: BorderStyle.solid,
         ),
@@ -2274,7 +2505,7 @@ class _BillsScreenState extends State<BillsScreen>
           Text('🏷️', style: TextStyle(fontSize: 40)),
           SizedBox(height: 10),
           Text(
-            'No coupons saved yet',
+            AppLocalizations.t(context, 'bills_coupon_empty'),
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w700,
@@ -2283,7 +2514,7 @@ class _BillsScreenState extends State<BillsScreen>
           ),
           SizedBox(height: 5),
           Text(
-            'Add a coupon code above to save it here',
+            AppLocalizations.t(context, 'bills_coupon_empty_sub'),
             style: TextStyle(
               fontSize: 11,
               color: _t.mutedText,
@@ -2310,12 +2541,13 @@ class _BillsScreenState extends State<BillsScreen>
               ? '₹${coupon['value'].toInt()}'
               : '${coupon['value'].toInt()}%');
     final unitTxt = coupon['type'] == 'free'
-        ? 'SPECIAL'
-        : (coupon['type'] == 'flat' ? 'FLAT OFF' : 'OFF');
+        ? AppLocalizations.t(context, 'bills_coupon_type_special')
+        : (coupon['type'] == 'flat'
+            ? AppLocalizations.t(context, 'bills_coupon_type_flat')
+            : AppLocalizations.t(context, 'bills_coupon_type_off'));
 
     return Container(
       margin: EdgeInsets.only(bottom: 12),
-      height: 90,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
@@ -2326,7 +2558,8 @@ class _BillsScreenState extends State<BillsScreen>
           ),
         ],
       ),
-      child: Row(
+      child: IntrinsicHeight(
+        child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           ClipRRect(
@@ -2400,17 +2633,17 @@ class _BillsScreenState extends State<BillsScreen>
           ),
           SizedBox(
             width: 14,
-            child: CustomPaint(painter: _PerforationPainter()),
+            child: CustomPaint(painter: _PerforationPainter(notchColor: _t.backgroundSecondary)),
           ),
           Expanded(
             child: Container(
               padding: EdgeInsets.fromLTRB(16, 14, 14, 14),
               decoration: BoxDecoration(
-                color: kShell,
+                color: _t.backgroundSecondary,
                 borderRadius: BorderRadius.horizontal(
                   right: Radius.circular(20),
                 ),
-                border: Border.all(color: kBorder, width: 1.5),
+                border: Border.all(color: _t.cardBorder, width: 1.5),
               ),
               child: Row(
                 children: [
@@ -2448,7 +2681,7 @@ class _BillsScreenState extends State<BillsScreen>
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: gradientColors.first.withOpacity(0.12),
+                            color: gradientColors.first.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Row(
@@ -2498,6 +2731,7 @@ class _BillsScreenState extends State<BillsScreen>
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -2542,7 +2776,7 @@ class _BillsScreenState extends State<BillsScreen>
       child: Container(
         width: 40,
         height: 4,
-        margin: EdgeInsets.only(bottom: 16),
+        margin: EdgeInsets.only(top: 8, bottom: 20),
         decoration: BoxDecoration(
           color: kPanel2,
           borderRadius: BorderRadius.circular(2),
@@ -2625,16 +2859,20 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
           child: AnimatedScale(
             scale: _pressed ? 0.98 : 1.0,
             duration: Duration(milliseconds: 120),
-            child: Container(
+            child: Builder(builder: (context) {
+              final t = context.themeTokens;
+              return Container(
               margin: EdgeInsets.only(bottom: 10),
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               decoration: BoxDecoration(
-                color: kShell,
-                border: Border.all(color: kBorder, width: 1.5),
+                color: t.card,
+                border: Border.all(color: t.cardBorder, width: 1.5),
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
-                    color: _pressed ? Color(0x236B91FF) : Color(0x40000000),
+                    color: _pressed
+                        ? t.accent.primary.withValues(alpha: 0.14)
+                        : Colors.black.withValues(alpha: 0.10),
                     blurRadius: _pressed ? 24 : 12,
                     offset: Offset(0, _pressed ? 8 : 3),
                   ),
@@ -2649,10 +2887,10 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
                     decoration: BoxDecoration(
                       color: meta['bg'] as Color,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: kBorder, width: 1.5),
+                      border: Border.all(color: t.cardBorder, width: 1.5),
                       boxShadow: [
                         BoxShadow(
-                          color: Color(0x1F7850B4),
+                          color: (meta['color'] as Color).withValues(alpha: 0.12),
                           blurRadius: 9,
                           offset: Offset(0, 3),
                         ),
@@ -2678,18 +2916,21 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
-                            color: kText,
+                            color: t.textPrimary,
                           ),
                         ),
                         SizedBox(height: 3),
                         Row(
                           children: [
-                            Text(
-                              bill['date'] as String,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w500,
-                                color: kMuted,
+                            Flexible(
+                              child: Text(
+                                bill['date'] as String,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                  color: t.mutedText,
+                                ),
                               ),
                             ),
                             SizedBox(width: 6),
@@ -2703,7 +2944,7 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
-                                (bill['category'] as String).toUpperCase(),
+                                _translateCategory(context, bill['category'] as String).toUpperCase(),
                                 style: TextStyle(
                                   fontSize: 9,
                                   fontWeight: FontWeight.w700,
@@ -2721,7 +2962,7 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
                           maxLines: 1,
                           style: TextStyle(
                             fontSize: 10,
-                            color: kMuted,
+                            color: t.mutedText,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -2739,16 +2980,16 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: kText,
+                          color: t.textPrimary,
                           height: 1.0,
                         ),
                       ),
                       SizedBox(height: 2),
                       Text(
-                        bill['payment'] as String,
+                        _translatePayment(context, bill['payment'] as String),
                         style: TextStyle(
                           fontSize: 9,
-                          color: kMuted,
+                          color: t.mutedText,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -2777,7 +3018,8 @@ class _AnimatedBillCardState extends State<_AnimatedBillCard>
                   ),
                 ],
               ),
-            ),
+            );
+            }),
           ),
         ),
       ),
@@ -2920,7 +3162,7 @@ class _DetailSheet extends StatelessWidget {
                   Text('✦', style: TextStyle(fontSize: 8, color: kAccent2)),
                   SizedBox(width: 4),
                   Text(
-                    'AI Scanned',
+                    AppLocalizations.t(context, 'bills_ai_scanned'),
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
@@ -2933,7 +3175,7 @@ class _DetailSheet extends StatelessWidget {
             Padding(
               padding: EdgeInsets.only(top: 18, bottom: 10),
               child: Text(
-                'BILL DETAILS',
+                AppLocalizations.t(context, 'bills_detail_title'),
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
@@ -2942,18 +3184,18 @@ class _DetailSheet extends StatelessWidget {
                 ),
               ),
             ),
-            _detailRow('Category', (bill['category'] as String).toUpperCase()),
-            _detailRow('Payment', bill['payment'] as String),
-            _detailRow('Amount', '₹${_fmtAmount(bill['amount'] as double)}'),
-            _detailRow('Date', bill['date'] as String),
+            _detailRow(AppLocalizations.t(context, 'bills_detail_category'), _translateCategory(context, bill['category'] as String).toUpperCase()),
+            _detailRow(AppLocalizations.t(context, 'bills_detail_payment'), _translatePayment(context, bill['payment'] as String)),
+            _detailRow(AppLocalizations.t(context, 'bills_detail_amount'), '₹${_fmtAmount(bill['amount'] as double)}'),
+            _detailRow(AppLocalizations.t(context, 'bills_detail_date'), bill['date'] as String),
             if ((bill['items'] as String).isNotEmpty) ...[
-              _detailRow('Items', bill['items'] as String),
+              _detailRow(AppLocalizations.t(context, 'bills_detail_items'), bill['items'] as String),
             ],
             if ((bill['note'] as String).isNotEmpty) ...[
               Padding(
                 padding: EdgeInsets.only(top: 18, bottom: 10),
                 child: Text(
-                  'NOTES',
+                  AppLocalizations.t(context, 'bills_detail_notes'),
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -2988,12 +3230,12 @@ class _DetailSheet extends StatelessWidget {
             SizedBox(height: 18),
             Row(
               children: [
-                Expanded(child: _detailBtn(context, 'Share', false)),
+                Expanded(child: _detailBtn(context, AppLocalizations.t(context, 'bills_detail_share'), false)),
                 SizedBox(width: 9),
                 Expanded(
                   child: _detailBtn(
                     context,
-                    'Delete Bill',
+                    AppLocalizations.t(context, 'bills_detail_delete'),
                     true,
                     onTap: () => onDelete(bill['id'] as String),
                   ),
@@ -3194,10 +3436,13 @@ class _PressScaleButtonState extends State<_PressScaleButton> {
 //  PERFORATED DIVIDER
 // ════════════════════════════════════════════════════════════════════
 class _PerforationPainter extends CustomPainter {
+  final Color notchColor;
+  const _PerforationPainter({required this.notchColor});
+
   @override
   void paint(Canvas canvas, Size size) {
     final notchPaint = Paint()
-      ..color = kBg2
+      ..color = notchColor
       ..style = PaintingStyle.fill;
     canvas.drawCircle(Offset(size.width / 2, 0), 8, notchPaint);
     canvas.drawCircle(Offset(size.width / 2, size.height), 8, notchPaint);
@@ -3223,4 +3468,284 @@ class _PerforationPainter extends CustomPainter {
   @override
   bool shouldRepaint(_) => false;
 }
+// ─────────────────────────────────────────────────────────────────────────────
+//  Bills Chat Plus Button — Ahvi-style bottom sheet (same as ahvi_stylist_chat)
+// ─────────────────────────────────────────────────────────────────────────────
+class _BillsPlusButton extends StatefulWidget {
+  final Color panel, cardBorder, accent, accentSecondary, text, background;
+  final VoidCallback? onCameraSelected;
+  final VoidCallback? onMenuOpen;
+  final VoidCallback? onMenuClose;
 
+  const _BillsPlusButton({
+    required this.panel,
+    required this.cardBorder,
+    required this.accent,
+    required this.accentSecondary,
+    required this.text,
+    required this.background,
+    this.onCameraSelected,
+    this.onMenuOpen,
+    this.onMenuClose,
+  });
+
+  @override
+  State<_BillsPlusButton> createState() => _BillsPlusButtonState();
+}
+
+class _BillsPlusButtonState extends State<_BillsPlusButton> {
+  bool _menuOpen = false;
+
+  void _openSheet() {
+    setState(() => _menuOpen = true);
+    widget.onMenuOpen?.call();
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Container(
+            decoration: BoxDecoration(
+              color: widget.background,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              border: Border.all(color: widget.cardBorder),
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Handle
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: widget.cardBorder,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                // Menu rows
+                Container(
+                  decoration: BoxDecoration(
+                    color: widget.panel,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: widget.cardBorder),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _BillsMenuRow(
+                        icon: Icons.camera_alt_rounded,
+                        label: 'Camera',
+                        subtitle: 'Take a photo',
+                        accent: widget.accent,
+                        accentSecondary: widget.accentSecondary,
+                        cardBorder: widget.cardBorder,
+                        textPrimary: widget.text,
+                        isFirst: true,
+                        isLast: false,
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          widget.onCameraSelected?.call();
+                        },
+                      ),
+                      _BillsMenuRow(
+                        icon: Icons.photo_library_rounded,
+                        label: 'Photo Library',
+                        subtitle: 'Choose from gallery',
+                        accent: widget.accent,
+                        accentSecondary: widget.accentSecondary,
+                        cardBorder: widget.cardBorder,
+                        textPrimary: widget.text,
+                        isFirst: false,
+                        isLast: false,
+                        onTap: () => Navigator.of(ctx).pop(),
+                      ),
+                      _BillsMenuRow(
+                        icon: Icons.insert_drive_file_rounded,
+                        label: 'Files',
+                        subtitle: 'Upload a document',
+                        accent: widget.accent,
+                        accentSecondary: widget.accentSecondary,
+                        cardBorder: widget.cardBorder,
+                        textPrimary: widget.text,
+                        isFirst: false,
+                        isLast: false,
+                        onTap: () => Navigator.of(ctx).pop(),
+                      ),
+                      _BillsMenuRow(
+                        icon: Icons.travel_explore_rounded,
+                        label: 'Browse',
+                        subtitle: 'Search the web',
+                        accent: widget.accent,
+                        accentSecondary: widget.accentSecondary,
+                        cardBorder: widget.cardBorder,
+                        textPrimary: widget.text,
+                        isFirst: false,
+                        isLast: true,
+                        onTap: () => Navigator.of(ctx).pop(),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ).whenComplete(() {
+      if (mounted) setState(() => _menuOpen = false);
+      widget.onMenuClose?.call();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _openSheet,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: _menuOpen
+              ? widget.accent.withValues(alpha: 0.15)
+              : widget.panel,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _menuOpen
+                ? widget.accent.withValues(alpha: 0.5)
+                : widget.cardBorder,
+            width: 1.5,
+          ),
+        ),
+        child: Icon(
+          _menuOpen ? Icons.close_rounded : Icons.add_rounded,
+          color: widget.accent,
+          size: 18,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Ahvi-style menu row for Bills plus sheet ──────────────────────────────────
+class _BillsMenuRow extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final Color accent, accentSecondary, cardBorder, textPrimary;
+  final bool isFirst, isLast;
+  final VoidCallback onTap;
+
+  const _BillsMenuRow({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.accent,
+    required this.accentSecondary,
+    required this.cardBorder,
+    required this.textPrimary,
+    required this.isFirst,
+    required this.isLast,
+    required this.onTap,
+  });
+
+  @override
+  State<_BillsMenuRow> createState() => _BillsMenuRowState();
+}
+
+class _BillsMenuRowState extends State<_BillsMenuRow> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: widget.onTap,
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 100),
+        decoration: BoxDecoration(
+          color: _pressed
+              ? widget.accent.withValues(alpha: 0.08)
+              : Colors.transparent,
+          borderRadius: BorderRadius.vertical(
+            top: widget.isFirst ? const Radius.circular(20) : Radius.zero,
+            bottom: widget.isLast ? const Radius.circular(20) : Radius.zero,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          widget.accent.withValues(alpha: 0.18),
+                          widget.accentSecondary.withValues(alpha: 0.18),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(13),
+                      border: Border.all(
+                        color: widget.accent.withValues(alpha: 0.22),
+                      ),
+                    ),
+                    child: Icon(widget.icon, color: widget.accent, size: 20),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.label,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: widget.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.subtitle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: widget.textPrimary.withValues(alpha: 0.5),
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (!widget.isLast)
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: widget.cardBorder,
+                indent: 74,
+                endIndent: 0,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

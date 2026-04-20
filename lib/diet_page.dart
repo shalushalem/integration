@@ -1,13 +1,14 @@
-import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:myapp/app_localizations.dart';
 import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 // theme_tokens.dart — use package import below if in a sub-folder
 // Update this path to match your project structure, e.g.:
 // import 'package:your_app/theme/theme_tokens.dart';
 import 'theme/theme_tokens.dart';
+import 'package:myapp/widgets/ahvi_home_text.dart';
+import 'package:myapp/widgets/ahvi_chat_prompt_bar.dart';
 
 // ─── THEME COLORS ────────────────────────────────────────────────────────────
 // NOTE: kAccent and meal-type colors remain constant (not theme-dependent)
@@ -18,7 +19,7 @@ extension DietTheme on BuildContext {
   AppThemeTokens get _t => Theme.of(this).extension<AppThemeTokens>()!;
   Color get dBg => _t.backgroundPrimary;
   Color get dText => _t.textPrimary;
-  Color get dText2 => _t.textPrimary.withOpacity(0.85);
+  Color get dText2 => _t.textPrimary.withValues(alpha: 0.85);
   Color get dMuted => _t.mutedText;
   Color get dSurface => _t.backgroundSecondary;
   Color get dSurface2 => _t.card;
@@ -236,7 +237,7 @@ class _MainScreenState extends State<MainScreen> {
       content: Row(children: [
         const Icon(Icons.check_circle, color: Color(0xFF30D158), size: 18),
         const SizedBox(width: 8),
-        Expanded(child: Text('"${plan.name}" saved to My Plans!', style: const TextStyle(fontWeight: FontWeight.w600))),
+        Expanded(child: Text('"${plan.name}" ${AppLocalizations.t(context, 'diet_saved_to_plans')}', style: const TextStyle(fontWeight: FontWeight.w600))),
       ]),
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
@@ -256,7 +257,7 @@ class _MainScreenState extends State<MainScreen> {
       content: Row(children: [
         const Icon(Icons.edit_note_rounded, color: Color(0xFFFFD60A), size: 18),
         const SizedBox(width: 8),
-        Expanded(child: Text('"${updated.name}" updated successfully!', style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white))),
+        Expanded(child: Text('"${updated.name}" ${AppLocalizations.t(context, 'diet_updated_successfully')}', style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white))),
       ]),
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
@@ -288,25 +289,25 @@ class _MainScreenState extends State<MainScreen> {
                   decoration: BoxDecoration(
                     color: context.dAccent,
                     borderRadius: BorderRadius.circular(100),
-                    boxShadow: [BoxShadow(color: context.dAccent.withOpacity(0.4), blurRadius: 24, offset: const Offset(0, 6))],
+                    boxShadow: [BoxShadow(color: context.dAccent.withValues(alpha: 0.4), blurRadius: 24, offset: const Offset(0, 6))],
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.auto_awesome, color: Colors.white, size: 16),
-                      SizedBox(width: 7),
-                      Text('Ask AHVI', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+                      const Icon(Icons.auto_awesome, color: Colors.white, size: 16),
+                      const SizedBox(width: 7),
+                      Text(AppLocalizations.t(context, 'diet_ask_ahvi'), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
                     ],
                   ),
                 ),
               ),
             ),
           AnimatedPositioned(
-            duration: const Duration(milliseconds: 350),
+            duration: const Duration(milliseconds: 380),
             curve: Curves.easeInOutCubic,
-            left: _isChatOpen ? 0 : MediaQuery.of(context).size.width,
-            right: _isChatOpen ? 0 : -MediaQuery.of(context).size.width,
-            top: 0, bottom: 0,
+            left: 0, right: 0,
+            top: _isChatOpen ? 0 : MediaQuery.of(context).size.height,
+            bottom: _isChatOpen ? 0 : -MediaQuery.of(context).size.height,
             child: ChatScreen(
               onSavePlan: (p) {
                 _savePlanFromChat(p);
@@ -336,7 +337,6 @@ class _PlansScreenState extends State<PlansScreen> {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final dateStr = '${_weekday(now.weekday)}, ${now.day} ${_month(now.month)} ${now.year}';
     final filtered = _filter == 'all' ? widget.plans : widget.plans.where((p) => p.planType == _filter).toList();
     return ScaffoldMessenger(
       key: widget.messengerKey,
@@ -359,12 +359,12 @@ class _PlansScreenState extends State<PlansScreen> {
                         borderRadius: BorderRadius.circular(100),
                         boxShadow: const [BoxShadow(color: Color(0x4D6C63FF), blurRadius: 16, offset: Offset(0, 4))],
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.add_circle_outline, color: Colors.white, size: 16),
-                          SizedBox(width: 7),
-                          Text('Add Custom Meal', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+                          const Icon(Icons.add_circle_outline, color: Colors.white, size: 16),
+                          const SizedBox(width: 7),
+                          Text(AppLocalizations.t(context, 'diet_add_custom_meal'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
                         ],
                       ),
                     ),
@@ -404,7 +404,7 @@ class _PlansScreenState extends State<PlansScreen> {
           Text(isFilter ? '🔍' : '🥗', style: const TextStyle(fontSize: 42)),
           const SizedBox(height: 10),
           Text(
-            isFilter ? 'No plans for this view yet.' : 'No meal plans yet.\nAdd a custom plan or ask the assistant!',
+            isFilter ? AppLocalizations.t(context, 'diet_no_filter') : AppLocalizations.t(context, 'diet_no_plans'),
             textAlign: TextAlign.center,
             style: TextStyle(color: context.dMuted, fontSize: 13, height: 1.6),
           ),
@@ -448,10 +448,10 @@ class _FilterTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tabs = [
-      ('all', '⊞', 'All Plans'),
-      ('daily', '☀️', 'Daily'),
-      ('weekly', '📅', 'Weekly'),
-      ('monthly', '📆', 'Monthly'),
+      ('all', '⊞', AppLocalizations.t(context, 'diet_all_plans')),
+      ('daily', '☀️', AppLocalizations.t(context, 'diet_filter_daily')),
+      ('weekly', '📅', AppLocalizations.t(context, 'diet_filter_weekly')),
+      ('monthly', '📆', AppLocalizations.t(context, 'diet_filter_monthly')),
     ];
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -546,7 +546,7 @@ class PlanCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: context.dSurface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, 3))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 10, offset: const Offset(0, 3))],
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -559,7 +559,7 @@ class PlanCard extends StatelessWidget {
                 Expanded(child: Text(plan.name.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: titleColor, letterSpacing: 0.9))),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(color: Colors.white.withOpacity(0.5), borderRadius: BorderRadius.circular(100)),
+                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(100)),
                   child: Text(type.toUpperCase(), style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.w700, color: typePillColor)),
                 ),
                 const SizedBox(width: 8),
@@ -569,11 +569,11 @@ class PlanCard extends StatelessWidget {
                       _showToast(context,
                         icon: Icons.edit_note_rounded,
                         iconColor: const Color(0xFFFFD60A),
-                        message: 'Editing "${plan.name}"...',
+                        message: '${AppLocalizations.t(context, 'diet_editing')} "${plan.name}"...',
                       );
                       onEdit?.call();
                     },
-                    child: Icon(Icons.edit_outlined, size: 18, color: typePillColor.withOpacity(0.7)),
+                    child: Icon(Icons.edit_outlined, size: 18, color: typePillColor.withValues(alpha: 0.7)),
                   ),
                   const SizedBox(width: 8),
                   GestureDetector(
@@ -583,12 +583,12 @@ class PlanCard extends StatelessWidget {
                         builder: (ctx) => AlertDialog(
                           backgroundColor: ctx.dSurface,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                          title: Text('Delete Plan?', style: TextStyle(color: ctx.dText, fontWeight: FontWeight.w700, fontSize: 16)),
-                          content: Text('Are you sure you want to delete "${plan.name}"?', style: TextStyle(color: ctx.dMuted, fontSize: 13, height: 1.5)),
+                          title: Text(AppLocalizations.t(context, 'diet_delete_plan'), style: TextStyle(color: ctx.dText, fontWeight: FontWeight.w700, fontSize: 16)),
+                          content: Text(AppLocalizations.t(context, 'diet_delete_confirm').replaceAll('{name}', plan.name), style: TextStyle(color: ctx.dMuted, fontSize: 13, height: 1.5)),
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(ctx),
-                              child: Text('Cancel', style: TextStyle(color: ctx.dMuted, fontWeight: FontWeight.w600)),
+                              child: Text(AppLocalizations.t(context, 'common_cancel'), style: TextStyle(color: ctx.dMuted, fontWeight: FontWeight.w600)),
                             ),
                             TextButton(
                               onPressed: () {
@@ -600,20 +600,20 @@ class PlanCard extends StatelessWidget {
                                 );
                                 onDelete();
                               },
-                              child: const Text('Delete', style: TextStyle(color: Color(0xFFFF453A), fontWeight: FontWeight.w700)),
+                              child: Text(AppLocalizations.t(context, 'common_delete'), style: const TextStyle(color: Color(0xFFFF453A), fontWeight: FontWeight.w700)),
                             ),
                           ],
                         ),
                       );
                     },
-                    child: Icon(Icons.delete_sweep_outlined, size: 18, color: typePillColor.withOpacity(0.7)),
+                    child: Icon(Icons.delete_sweep_outlined, size: 18, color: typePillColor.withValues(alpha: 0.7)),
                   ),
                 ],
               ],
             ),
           ),
           if (plan.planType == 'daily')
-            ...plan.meals.map((m) => _MealRow(m: m)).toList()
+            ...plan.meals.map((m) => _MealRow(m: m))
           else
             ...plan.days.map((day) => Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -621,12 +621,12 @@ class PlanCard extends StatelessWidget {
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                  color: typePillColor.withOpacity(0.08),
+                  color: typePillColor.withValues(alpha: 0.08),
                   child: Text(day.label.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: typePillColor, letterSpacing: 0.7)),
                 ),
-                ...day.meals.map((m) => _MealRow(m: m)).toList(),
+                ...day.meals.map((m) => _MealRow(m: m)),
               ],
-            )).toList(),
+            )),
           if (isSuggestion)
             Container(
               padding: const EdgeInsets.all(10),
@@ -638,11 +638,11 @@ class PlanCard extends StatelessWidget {
                       onTap: onEdit,
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 8),
-                        decoration: BoxDecoration(color: context.dSurface2, borderRadius: BorderRadius.circular(8), border: Border.all(color: context.dAccent.withOpacity(0.5))),
+                        decoration: BoxDecoration(color: context.dSurface2, borderRadius: BorderRadius.circular(8), border: Border.all(color: context.dAccent.withValues(alpha: 0.5))),
                         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                           Icon(Icons.edit_outlined, size: 13, color: context.dAccent),
                           SizedBox(width: 5),
-                          Text('Edit', style: TextStyle(color: context.dAccent, fontSize: 12, fontWeight: FontWeight.w700)),
+                          Text(AppLocalizations.t(context, 'common_edit'), style: TextStyle(color: context.dAccent, fontSize: 12, fontWeight: FontWeight.w700)),
                         ]),
                       ),
                     ),
@@ -655,7 +655,7 @@ class PlanCard extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         decoration: BoxDecoration(color: context.dAccent, borderRadius: BorderRadius.circular(8)),
-                        child: const Center(child: Text('Save Suggestion', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))),
+                        child: Center(child: Text(AppLocalizations.t(context, 'diet_save_suggestion'), style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))),
                       ),
                     ),
                   ),
@@ -669,7 +669,7 @@ class PlanCard extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Text('TOTAL: ${plan.totalCal} CAL', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: titleColor)),
+                  Text('${AppLocalizations.t(context, 'diet_total')}: ${plan.totalCal} ${AppLocalizations.t(context, 'diet_cal')}', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: titleColor)),
                 ],
               ),
             )
@@ -687,7 +687,7 @@ class AddMealModal extends StatefulWidget {
 }
 class _AddMealModalState extends State<AddMealModal> {
   final _nameCtrl = TextEditingController();
-  String _planType = 'daily';
+  final String _planType = 'daily';
   bool _isSaved = false;
   final _bNameCtrl = TextEditingController(), _lNameCtrl = TextEditingController(), _dNameCtrl = TextEditingController(), _sNameCtrl = TextEditingController();
   final _bCalCtrl = TextEditingController(), _lCalCtrl = TextEditingController(), _dCalCtrl = TextEditingController(), _sCalCtrl = TextEditingController();
@@ -715,7 +715,7 @@ class _AddMealModalState extends State<AddMealModal> {
   void _save() {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
-      _toast(icon: Icons.warning_amber_rounded, iconColor: const Color(0xFFFFD60A), msg: 'Please enter a plan name!');
+      _toast(icon: Icons.warning_amber_rounded, iconColor: const Color(0xFFFFD60A), msg: AppLocalizations.t(context, 'diet_enter_plan_name'));
       return;
     }
     final meals = <Meal>[];
@@ -727,7 +727,7 @@ class _AddMealModalState extends State<AddMealModal> {
     add('Dinner', 'dinner', '🌙', _dNameCtrl, _dCalCtrl, _dImg);
     add('Snack', 'snack', '🍎', _sNameCtrl, _sCalCtrl, _sImg);
     if (meals.isEmpty) {
-      _toast(icon: Icons.restaurant_outlined, iconColor: const Color(0xFFFF9F0A), msg: 'Add at least one meal entry!');
+      _toast(icon: Icons.restaurant_outlined, iconColor: const Color(0xFFFF9F0A), msg: AppLocalizations.t(context, 'diet_add_meal_entry'));
       return;
     }
     setState(() => _isSaved = true);
@@ -758,7 +758,7 @@ class _AddMealModalState extends State<AddMealModal> {
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(border: Border(bottom: BorderSide(color: context.dBorder))),
                     child: Row(children: [
-                      const Expanded(child: Text('Add Custom Meal Plan', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700))),
+                      Expanded(child: Text(AppLocalizations.t(context, 'diet_add_custom_meal_plan'), style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700))),
                       GestureDetector(onTap: () => Navigator.pop(context), child: const Icon(Icons.close, size: 20)),
                     ]),
                   ),
@@ -768,32 +768,34 @@ class _AddMealModalState extends State<AddMealModal> {
                       controller: sc,
                       padding: const EdgeInsets.all(20),
                       children: [
-                        Text('PLAN NAME', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
+                        Text(AppLocalizations.t(context, 'diet_plan_name'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
                         const SizedBox(height: 6),
                         TextField(
                           controller: _nameCtrl,
                           decoration: InputDecoration(
-                            hintText: 'e.g. My Mediterranean Day',
+                            hintText: AppLocalizations.t(context, 'diet_plan_hint'),
                             filled: true,
                             fillColor: context.dSurface2,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: context.dBorder, width: 1.5)),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: context.dBorder, width: 1.5)),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: context.dAccent, width: 2)),
                           ),
                         ),
                         const SizedBox(height: 20),
-                        Text('PLAN TYPE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
+                        Text(AppLocalizations.t(context, 'diet_plan_type'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
                         const SizedBox(height: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-                          decoration: BoxDecoration(color: context.dAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: context.dAccent)),
-                          child: Center(child: Text('DAILY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dAccent))),
+                          decoration: BoxDecoration(color: context.dAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: context.dAccent)),
+                          child: Center(child: Text(AppLocalizations.t(context, 'diet_daily'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dAccent))),
                         ),
                         const SizedBox(height: 24),
-                        Text('MEALS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
+                        Text(AppLocalizations.t(context, 'diet_meals'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
                         const SizedBox(height: 12),
-                        _MealEntry(label: 'Breakfast', emoji: '🌅', color: kBreakfastFg, bg: kBreakfastBg, nameCtrl: _bNameCtrl, calCtrl: _bCalCtrl, imagePath: _bImg, onImageChanged: (v) => setState(() => _bImg = v)),
-                        _MealEntry(label: 'Lunch',     emoji: '☀️', color: kLunchFg,     bg: kLunchBg,     nameCtrl: _lNameCtrl, calCtrl: _lCalCtrl, imagePath: _lImg, onImageChanged: (v) => setState(() => _lImg = v)),
-                        _MealEntry(label: 'Dinner',    emoji: '🌙', color: kDinnerFg,    bg: kDinnerBg,    nameCtrl: _dNameCtrl, calCtrl: _dCalCtrl, imagePath: _dImg, onImageChanged: (v) => setState(() => _dImg = v)),
-                        _MealEntry(label: 'Snack',     emoji: '🍎', color: kSnackFg,     bg: kSnackBg,     nameCtrl: _sNameCtrl, calCtrl: _sCalCtrl, imagePath: _sImg, onImageChanged: (v) => setState(() => _sImg = v)),
+                        _MealEntry(label: AppLocalizations.t(context, 'diet_breakfast'), emoji: '🌅', color: kBreakfastFg, bg: kBreakfastBg, nameCtrl: _bNameCtrl, calCtrl: _bCalCtrl, imagePath: _bImg, onImageChanged: (v) => setState(() => _bImg = v)),
+                        _MealEntry(label: AppLocalizations.t(context, 'diet_lunch'),     emoji: '☀️', color: kLunchFg,     bg: kLunchBg,     nameCtrl: _lNameCtrl, calCtrl: _lCalCtrl, imagePath: _lImg, onImageChanged: (v) => setState(() => _lImg = v)),
+                        _MealEntry(label: AppLocalizations.t(context, 'diet_dinner'),    emoji: '🌙', color: kDinnerFg,    bg: kDinnerBg,    nameCtrl: _dNameCtrl, calCtrl: _dCalCtrl, imagePath: _dImg, onImageChanged: (v) => setState(() => _dImg = v)),
+                        _MealEntry(label: AppLocalizations.t(context, 'diet_snack'),     emoji: '🍎', color: kSnackFg,     bg: kSnackBg,     nameCtrl: _sNameCtrl, calCtrl: _sCalCtrl, imagePath: _sImg, onImageChanged: (v) => setState(() => _sImg = v)),
                         const SizedBox(height: 30),
                         GestureDetector(
                           onTap: _isSaved ? null : _save,
@@ -804,7 +806,7 @@ class _AddMealModalState extends State<AddMealModal> {
                             decoration: BoxDecoration(
                               color: _isSaved ? const Color(0xFF1A7A35) : context.dAccent,
                               borderRadius: BorderRadius.circular(100),
-                              boxShadow: [BoxShadow(color: (_isSaved ? const Color(0xFF1A7A35) : context.dAccent).withOpacity(0.35), blurRadius: 12, offset: const Offset(0, 4))],
+                              boxShadow: [BoxShadow(color: (_isSaved ? const Color(0xFF1A7A35) : context.dAccent).withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 4))],
                             ),
                             child: Center(
                               child: Row(
@@ -814,7 +816,7 @@ class _AddMealModalState extends State<AddMealModal> {
                                     const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
                                     const SizedBox(width: 8),
                                   ],
-                                  Text(_isSaved ? 'Plan Saved!' : 'Save My Plan', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)),
+                                  Text(_isSaved ? AppLocalizations.t(context, 'diet_plan_saved') : AppLocalizations.t(context, 'diet_save_my_plan'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)),
                                 ],
                               ),
                             ),
@@ -877,7 +879,7 @@ class _MealEntryState extends State<_MealEntry> {
       decoration: BoxDecoration(color: context.dSurface2, borderRadius: BorderRadius.circular(14), border: Border.all(color: context.dBorder)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [Text(widget.emoji, style: const TextStyle(fontSize: 17)), const SizedBox(width: 8), Expanded(child: Text(widget.label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700))),
-          GestureDetector(onTap: _fetching ? null : _autoFetch, child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: context.dAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: _fetching ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.5, color: context.dAccent)) : Icon(Icons.auto_fix_high, size: 14, color: context.dAccent)))
+          GestureDetector(onTap: _fetching ? null : _autoFetch, child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: context.dAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)), child: _fetching ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.5, color: context.dAccent)) : Icon(Icons.auto_fix_high, size: 14, color: context.dAccent)))
         ]),
         const SizedBox(height: 12),
         Container(
@@ -890,13 +892,13 @@ class _MealEntryState extends State<_MealEntry> {
                 Positioned(top: 4, right: 4, child: GestureDetector(onTap: () => widget.onImageChanged(null), child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Colors.black26, shape: BoxShape.circle), child: const Icon(Icons.close, size: 12, color: Colors.white))))
               ])
             : _fetching
-              ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: context.dAccent)), SizedBox(height: 6), Text('Fetching image…', style: TextStyle(fontSize: 10, color: context.dMuted))]))
-              : Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(widget.emoji, style: const TextStyle(fontSize: 22)), const SizedBox(height: 4), Text('Type name to auto-fetch 🪄', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: widget.color.withOpacity(0.6)))]),
+              ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: context.dAccent)), SizedBox(height: 6), Text(AppLocalizations.t(context, 'diet_fetching_image'), style: TextStyle(fontSize: 10, color: context.dMuted))]))
+              : Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(widget.emoji, style: const TextStyle(fontSize: 22)), const SizedBox(height: 4), Text(AppLocalizations.t(context, 'diet_type_name_hint'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: widget.color.withValues(alpha: 0.6)))]),
         ),
         const SizedBox(height: 12),
-        TextField(controller: widget.nameCtrl, decoration: InputDecoration(hintText: 'Meal Name', filled: true, fillColor: context.dSurface, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: context.dBorder)), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)), style: TextStyle(fontSize: 13)),
+        TextField(controller: widget.nameCtrl, decoration: InputDecoration(hintText: AppLocalizations.t(context, 'diet_meal_name_hint'), filled: true, fillColor: context.dSurface, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: context.dBorder)), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)), style: TextStyle(fontSize: 13)),
         const SizedBox(height: 8),
-        TextField(controller: widget.calCtrl, keyboardType: TextInputType.number, decoration: InputDecoration(hintText: 'e.g. 350', suffixText: 'cal', filled: true, fillColor: context.dSurface, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: context.dBorder)), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        TextField(controller: widget.calCtrl, keyboardType: TextInputType.number, decoration: InputDecoration(hintText: AppLocalizations.t(context, 'diet_cal_hint'), suffixText: 'cal', filled: true, fillColor: context.dSurface, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: context.dBorder)), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
       ]),
     );
   }
@@ -910,10 +912,17 @@ class ChatScreen extends StatefulWidget {
 }
 class _ChatScreenState extends State<ChatScreen> {
   final _msgCtrl = TextEditingController();
+  final _msgFocus = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
-  final List<ChatMessage> _messages = [ChatMessage(text: "Hey! 😊 Ask me for a meal plan!\n\n🥗 Diets: Mediterranean, Vegan, High Protein, Keto, Healthy\n📅 Plans: Daily, Weekly, Monthly\n\nExample: 'Give me a weekly keto plan'", isBot: true)];
+  final List<ChatMessage> _messages = [];
   bool _isTyping = false;
+  OverlayEntry? _overlay;
+
+  void _removeOverlay() {
+    _overlay?.remove();
+    _overlay = null;
+  }
 
   // ── Voice ──────────────────────────────────────────────────────────
   final stt.SpeechToText _speech = stt.SpeechToText();
@@ -924,43 +933,29 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _initSpeech();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _messages.isEmpty) {
+        setState(() {
+          _messages.add(ChatMessage(
+            text: AppLocalizations.t(context, 'diet_chat_welcome'),
+            isBot: true,
+          ));
+        });
+      }
+    });
   }
 
   Future<void> _initSpeech() async {
-    try {
-      _speechAvailable = await _speech.initialize(
-        onStatus: (status) {
-          if (status == 'done' || status == 'notListening') {
-            if (mounted) setState(() => _isListening = false);
-          }
-        },
-        onError: (e) {
+    _speechAvailable = await _speech.initialize(
+      onStatus: (status) {
+        if (status == 'done' || status == 'notListening') {
           if (mounted) setState(() => _isListening = false);
-        },
-      );
-    } on PlatformException catch (e) {
-      if (e.code == 'multipleRequests') {
-        await Future.delayed(const Duration(milliseconds: 350));
-        try {
-          _speechAvailable = await _speech.initialize(
-            onStatus: (status) {
-              if (status == 'done' || status == 'notListening') {
-                if (mounted) setState(() => _isListening = false);
-              }
-            },
-            onError: (err) {
-              if (mounted) setState(() => _isListening = false);
-            },
-          );
-        } catch (_) {
-          _speechAvailable = false;
         }
-      } else {
-        _speechAvailable = false;
-      }
-    } catch (_) {
-      _speechAvailable = false;
-    }
+      },
+      onError: (e) {
+        if (mounted) setState(() => _isListening = false);
+      },
+    );
     if (mounted) setState(() {});
   }
 
@@ -987,8 +982,6 @@ class _ChatScreenState extends State<ChatScreen> {
         listenFor: const Duration(seconds: 30),
         pauseFor: const Duration(seconds: 4),
         localeId: 'en_IN',
-        cancelOnError: true,
-        partialResults: true,
       );
     }
   }
@@ -997,6 +990,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _speech.stop();
     _msgCtrl.dispose();
+    _msgFocus.dispose();
+    _removeOverlay();
     super.dispose();
   }
   // Detect plan type from user message
@@ -1068,7 +1063,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   List<DayPlan> _weeklyDays(String diet) {
     final pool = _mealPool(diet);
-    const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    final days = [AppLocalizations.t(context,'diet_monday'),AppLocalizations.t(context,'diet_tuesday'),AppLocalizations.t(context,'diet_wednesday'),AppLocalizations.t(context,'diet_thursday'),AppLocalizations.t(context,'diet_friday'),AppLocalizations.t(context,'diet_saturday'),AppLocalizations.t(context,'diet_sunday')];
     return List.generate(7, (i) => DayPlan(label: days[i], meals: pool[i % pool.length]));
   }
 
@@ -1082,32 +1077,34 @@ class _ChatScreenState extends State<ChatScreen> {
         pool[(base + 2) % pool.length][2].copyWith(),
         pool[(base + 3) % pool.length][3].copyWith(),
       ];
-      return DayPlan(label: 'Week ${i + 1}', meals: meals);
+      return DayPlan(label: '${AppLocalizations.t(context, "diet_week")} ${i + 1}', meals: meals);
     });
   }
 
   void _send() async {
-    final t = _msgCtrl.text.trim(); if (t.isEmpty) return;
+    final t = _msgCtrl.text.trim();
+    if (t.isEmpty) return;
+    final displayText = t;
     _msgCtrl.clear();
-    setState(() { _messages.add(ChatMessage(text: t, isBot: false)); _isTyping = true; });
+    setState(() { _messages.add(ChatMessage(text: displayText, isBot: false)); _isTyping = true; });
     await Future.delayed(const Duration(seconds: 1));
 
     final lower = t.toLowerCase();
     final planType = _detectPlanType(lower);
     final planTypeLabel = planType[0].toUpperCase() + planType.substring(1);
 
-    String reply = "Here's your $planTypeLabel plan! 🎉";
+    String reply = AppLocalizations.t(context, 'diet_chat_here_plan').replaceAll('{type}', planTypeLabel);
     MealPlan? plan;
     String diet = 'healthy';
-    String planName = 'Healthy Balanced Plan';
+    String planName = AppLocalizations.t(context, 'diet_plan_healthy');
 
-    if (lower.contains('mediterr')) { diet = 'mediterranean'; planName = 'Mediterranean Plan'; }
-    else if (lower.contains('vegan')) { diet = 'vegan'; planName = 'Vegan Plan'; }
-    else if (lower.contains('high protein') || lower.contains('highprotein') || lower.contains('protein')) { diet = 'highprotein'; planName = 'High Protein Plan'; }
-    else if (lower.contains('keto')) { diet = 'keto'; planName = 'Keto Plan'; }
+    if (lower.contains('mediterr')) { diet = 'mediterranean'; planName = AppLocalizations.t(context, 'diet_plan_mediterranean'); }
+    else if (lower.contains('vegan')) { diet = 'vegan'; planName = AppLocalizations.t(context, 'diet_plan_vegan'); }
+    else if (lower.contains('high protein') || lower.contains('highprotein') || lower.contains('protein')) { diet = 'highprotein'; planName = AppLocalizations.t(context, 'diet_plan_highprotein'); }
+    else if (lower.contains('keto')) { diet = 'keto'; planName = AppLocalizations.t(context, 'diet_plan_keto'); }
     else if (lower.contains('healthy') || lower.contains('balanced') || lower.contains('plan')) { diet = 'healthy'; planName = 'Healthy Balanced Plan'; }
     else {
-      reply = "I'd love to help! 😊 Try asking for:\n• Mediterranean\n• Vegan\n• High Protein\n• Keto\n• Healthy plan\n\nYou can also say 'weekly' or 'monthly'!";
+      reply = AppLocalizations.t(context, 'diet_chat_fallback');
       if (mounted) setState(() { _isTyping = false; _messages.add(ChatMessage(text: reply, isBot: true)); });
       return;
     }
@@ -1160,11 +1157,13 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: context.dText),
               ),
             ),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Ahvi AI', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-              Text('Meal Planning Assistant', style: TextStyle(fontSize: 12, color: context.dMuted)),
-            ])),
-            // Chat History button
+            AhviHomeText(
+              color: context.dText,
+              fontSize: 30.0,
+              letterSpacing: 3.2,
+              fontWeight: FontWeight.w400,
+            ),
+            const Spacer(),
             GestureDetector(
               onTap: () => _scaffoldKey.currentState?.openDrawer(),
               child: Container(
@@ -1178,7 +1177,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         // ── Messages ────────────────────────────────────────────────────
         Expanded(child: ListView.builder(padding: const EdgeInsets.all(16), itemCount: _messages.length + (_isTyping ? 1 : 0), itemBuilder: (ctx, i) {
-          if (i == _messages.length) return Padding(padding: EdgeInsets.all(8.0), child: Text('Thinking...', style: TextStyle(fontSize: 11, color: context.dMuted)));
+          if (i == _messages.length) return Padding(padding: EdgeInsets.all(8.0), child: Text(AppLocalizations.t(context, 'diet_thinking'), style: TextStyle(fontSize: 11, color: context.dMuted)));
           final m = _messages[i];
           return Column(crossAxisAlignment: m.isBot ? CrossAxisAlignment.start : CrossAxisAlignment.end, children: [
             Container(margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), decoration: BoxDecoration(color: m.isBot ? context.dSurface : context.dAccent, borderRadius: BorderRadius.circular(16).copyWith(bottomLeft: m.isBot ? const Radius.circular(0) : const Radius.circular(16), bottomRight: m.isBot ? const Radius.circular(16) : const Radius.circular(0))), child: Text(m.text, style: TextStyle(color: m.isBot ? context.dText : Colors.white, fontSize: 13))),
@@ -1206,7 +1205,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             content: Row(children: [
                               const Icon(Icons.edit_note_rounded, color: Color(0xFFFFD60A), size: 18),
                               const SizedBox(width: 8),
-                              const Expanded(child: Text('Plan updated! Tap Save to keep it.', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white))),
+                              Expanded(child: Text(AppLocalizations.t(context, 'diet_plan_updated'), style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white))),
                             ]),
                             behavior: SnackBarBehavior.floating,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
@@ -1223,97 +1222,28 @@ class _ChatScreenState extends State<ChatScreen> {
           ]);
         })),
         // ── Input Bar ───────────────────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          color: context.dSurface,
-          child: Container(
-            decoration: BoxDecoration(
-              color: context.dSurface2,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: context.dBorder, width: 1),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(children: [
-              // Lens button
-              GestureDetector(
-                onTap: () {
-                  showModalBottomSheet<void>(
-                    context: context,
-                    backgroundColor: Colors.transparent,
-                    builder: (_) => const _DietLensActionSheet(),
-                  );
-                },
-                child: SizedBox(
-                  width: 26, height: 26,
-                  child: Center(child: Icon(Icons.search_rounded, color: context.dAccent, size: 20)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              // Text field
-              Expanded(
-                child: TextField(
-                  controller: _msgCtrl,
-                  onSubmitted: (_) => _send(),
-                  style: TextStyle(color: context.dText, fontSize: 13.5),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    contentPadding: EdgeInsets.zero,
-                    border: InputBorder.none,
-                    hintText: 'Ask for a meal plan…',
-                    hintStyle: TextStyle(fontSize: 13.5, color: context.dMuted),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              // Mic button
-              GestureDetector(
-                onTap: _toggleListening,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOutCubic,
-                  width: 38, height: 38,
-                  decoration: BoxDecoration(
-                    gradient: _isListening
-                        ? const LinearGradient(colors: [Colors.redAccent, Color(0xFFB71C1C)])
-                        : LinearGradient(colors: [context.dAccent.withOpacity(0.18), context.dAccent.withOpacity(0.18)]),
-                    borderRadius: BorderRadius.circular(13),
-                    boxShadow: _isListening
-                        ? [BoxShadow(color: Colors.redAccent.withOpacity(0.45), blurRadius: 16, offset: const Offset(0, 4))]
-                        : [],
-                  ),
-                  child: _isListening
-                      ? const _DietPulsingMicIcon()
-                      : Icon(Icons.mic_none_rounded, color: context.dAccent, size: 18),
-                ),
-              ),
-              const SizedBox(width: 6),
-              // Send button
-              GestureDetector(
-                onTap: _send,
-                child: ValueListenableBuilder<TextEditingValue>(
-                  valueListenable: _msgCtrl,
-                  builder: (context, value, _) {
-                    final hasText = value.text.trim().isNotEmpty;
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 38, height: 38,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: hasText
-                              ? [context.dAccent, context.dAccent2]
-                              : [context.dAccent.withOpacity(0.35), context.dAccent.withOpacity(0.35)],
-                        ),
-                        borderRadius: BorderRadius.circular(13),
-                      ),
-                      child: const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 16),
-                    );
-                  },
-                ),
-              ),
-            ]),
+        AhviChatPromptBar(
+          controller: _msgCtrl,
+          focusNode: _msgFocus,
+          hintText: AppLocalizations.t(context, 'diet_chat_hint'),
+          surface: context.dSurface,
+          border: context.dBorder,
+          accent: context.dAccent,
+          accentSecondary: context.dAccent2,
+          textHeading: context.dText,
+          textMuted: context.dMuted,
+          shadowMedium: Colors.black.withValues(alpha: 0.06),
+          onAccent: Colors.white,
+          onSendMessage: (_) => _send(),
+          themeTokens: Theme.of(context).extension<AppThemeTokens>()!,
+          onVoiceTap: _toggleListening,
+          isListening: _isListening,
+          onVisualSearch: () => showModalBottomSheet(
+            context: context,
+            backgroundColor: Colors.transparent,
+            builder: (_) => const _DietLensActionSheet(),
           ),
         ),
-        const SizedBox(height: 8),
       ]))
     ));
   }
@@ -1329,7 +1259,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 16, 4),
               child: Row(children: [
-                Text('Chats', style: TextStyle(color: context.dText, fontSize: 20, fontWeight: FontWeight.w700)),
+                Text(AppLocalizations.t(context, 'common_chats'), style: TextStyle(color: context.dText, fontSize: 20, fontWeight: FontWeight.w700)),
                 const Spacer(),
                 GestureDetector(
                   onTap: () {
@@ -1346,10 +1276,10 @@ class _ChatScreenState extends State<ChatScreen> {
                       gradient: LinearGradient(colors: [context.dAccent, context.dAccent2]),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.add, color: Colors.white, size: 14),
-                      SizedBox(width: 4),
-                      Text('New', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.add, color: Colors.white, size: 14),
+                      const SizedBox(width: 4),
+                      Text(AppLocalizations.t(context, 'common_new'), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
                     ]),
                   ),
                 ),
@@ -1429,14 +1359,18 @@ class _EditMealModalState extends State<EditMealModal> {
   @override
   void dispose() {
     _nameCtrl.dispose();
-    for (final c in _nameCtrlMap.values) c.dispose();
-    for (final c in _calCtrlMap.values) c.dispose();
+    for (final c in _nameCtrlMap.values) {
+      c.dispose();
+    }
+    for (final c in _calCtrlMap.values) {
+      c.dispose();
+    }
     super.dispose();
   }
   void _save() {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
-      _toast(icon: Icons.warning_amber_rounded, iconColor: const Color(0xFFFFD60A), msg: 'Please enter a plan name!');
+      _toast(icon: Icons.warning_amber_rounded, iconColor: const Color(0xFFFFD60A), msg: AppLocalizations.t(context, 'diet_enter_plan_name'));
       return;
     }
     final meals = <Meal>[];
@@ -1447,7 +1381,7 @@ class _EditMealModalState extends State<EditMealModal> {
       }
     }
     if (meals.isEmpty) {
-      _toast(icon: Icons.restaurant_outlined, iconColor: const Color(0xFFFF9F0A), msg: 'Add at least one meal entry!');
+      _toast(icon: Icons.restaurant_outlined, iconColor: const Color(0xFFFF9F0A), msg: AppLocalizations.t(context, 'diet_add_meal_entry'));
       return;
     }
     setState(() => _isSaved = true);
@@ -1477,7 +1411,7 @@ class _EditMealModalState extends State<EditMealModal> {
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(border: Border(bottom: BorderSide(color: context.dBorder))),
                     child: Row(children: [
-                      const Expanded(child: Text('Edit Meal Plan', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700))),
+                      Expanded(child: Text(AppLocalizations.t(context, 'diet_edit_meal_plan'), style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700))),
                       GestureDetector(onTap: () => Navigator.pop(context), child: const Icon(Icons.close, size: 20)),
                     ]),
                   ),
@@ -1487,27 +1421,27 @@ class _EditMealModalState extends State<EditMealModal> {
                       controller: sc,
                       padding: const EdgeInsets.all(20),
                       children: [
-                        Text('PLAN NAME', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
+                        Text(AppLocalizations.t(context, 'diet_plan_name'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
                         const SizedBox(height: 6),
                         TextField(
                           controller: _nameCtrl,
                           decoration: InputDecoration(
-                            hintText: 'e.g. My Mediterranean Day',
+                            hintText: AppLocalizations.t(context, 'diet_plan_hint'),
                             filled: true,
                             fillColor: context.dSurface2,
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                           ),
                         ),
                         const SizedBox(height: 20),
-                        Text('PLAN TYPE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
+                        Text(AppLocalizations.t(context, 'diet_plan_type'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
                         const SizedBox(height: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-                          decoration: BoxDecoration(color: context.dAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: context.dAccent)),
-                          child: Center(child: Text('DAILY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dAccent))),
+                          decoration: BoxDecoration(color: context.dAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: context.dAccent)),
+                          child: Center(child: Text(AppLocalizations.t(context, 'diet_daily'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dAccent))),
                         ),
                         const SizedBox(height: 24),
-                        Text('MEALS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
+                        Text(AppLocalizations.t(context, 'diet_meals'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.dMuted, letterSpacing: 0.8)),
                         const SizedBox(height: 12),
                         ...(_mealTypes.map((mt) => StatefulBuilder(
                           builder: (ctx, setSt) => _MealEntry(
@@ -1517,7 +1451,7 @@ class _EditMealModalState extends State<EditMealModal> {
                             imagePath: _imgMap[mt.$2],
                             onImageChanged: (v) { setSt(() => _imgMap[mt.$2] = v); setState(() {}); },
                           ),
-                        ))).toList(),
+                        ))),
                         const SizedBox(height: 30),
                         GestureDetector(
                           onTap: _isSaved ? null : _save,
@@ -1528,7 +1462,7 @@ class _EditMealModalState extends State<EditMealModal> {
                             decoration: BoxDecoration(
                               color: _isSaved ? const Color(0xFF1A7A35) : context.dAccent,
                               borderRadius: BorderRadius.circular(100),
-                              boxShadow: [BoxShadow(color: (_isSaved ? const Color(0xFF1A7A35) : context.dAccent).withOpacity(0.35), blurRadius: 12, offset: const Offset(0, 4))],
+                              boxShadow: [BoxShadow(color: (_isSaved ? const Color(0xFF1A7A35) : context.dAccent).withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 4))],
                             ),
                             child: Center(
                               child: Row(
@@ -1578,8 +1512,169 @@ class _MealImage extends StatelessWidget {
               child: Center(child: SizedBox(width: size * 0.35, height: size * 0.35, child: CircularProgressIndicator(strokeWidth: 1.5, color: context.dAccent, value: progress.expectedTotalBytes != null ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes! : null))),
             );
           },
-          errorBuilder: (_, __, ___) => Container(color: context.dSurface2, child: Center(child: Text(emoji, style: TextStyle(fontSize: size * 0.5)))),
+          errorBuilder: (_, _, _) => Container(color: context.dSurface2, child: Center(child: Text(emoji, style: TextStyle(fontSize: size * 0.5)))),
         ),
+      ),
+    );
+  }
+}
+
+// ─── CHATGPT-STYLE PLUS BUTTON FOR DIET ─────────────────────────────────────
+class _DietPlusButton extends StatefulWidget {
+  final VoidCallback? onCameraSelected;
+  const _DietPlusButton({this.onCameraSelected});
+  @override
+  State<_DietPlusButton> createState() => _DietPlusButtonState();
+}
+
+class _DietPlusButtonState extends State<_DietPlusButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _rotateAnim;
+  bool _menuOpen = false;
+  OverlayEntry? _overlay;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _rotateAnim = Tween<double>(begin: 0.0, end: 0.125)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() {
+    _closeMenu();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _openMenu() {
+    if (_menuOpen) { _closeMenu(); return; }
+    setState(() => _menuOpen = true);
+    _ctrl.forward();
+    final renderBox = context.findRenderObject() as RenderBox;
+    final offset = renderBox.localToGlobal(Offset.zero);
+    final size = renderBox.size;
+
+    final actions = [
+      (Icons.camera_alt_outlined, 'Camera', const Color(0xFFFF6B6B)),
+      (Icons.photo_library_outlined, 'Photos', const Color(0xFF4ECDC4)),
+      (Icons.attach_file_rounded, 'Files', const Color(0xFF45B7D1)),
+      (Icons.search_rounded, 'Search Food', const Color(0xFF96CEB4)),
+    ];
+
+    _overlay = OverlayEntry(builder: (_) {
+      return GestureDetector(
+        onTap: _closeMenu,
+        behavior: HitTestBehavior.translucent,
+        child: Stack(children: [
+          Positioned(
+            left: offset.dx - 10,
+            bottom: MediaQuery.of(context).size.height - offset.dy + 8,
+            child: GestureDetector(
+              onTap: () {},
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  width: 190,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: context.dSurface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: context.dBorder, width: 1),
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 24, offset: const Offset(0, 8))],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: actions.map((a) => _DietMenuRow(
+                      icon: a.$1,
+                      label: a.$2,
+                      color: a.$3,
+                      onTap: () {
+                        _closeMenu();
+                        if (a.$2 == 'Camera' || a.$2 == 'Search Food') widget.onCameraSelected?.call();
+                      },
+                    )).toList(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      );
+    });
+    Overlay.of(context).insert(_overlay!);
+  }
+
+  void _closeMenu() {
+    _overlay?.remove();
+    _overlay = null;
+    _ctrl.reverse();
+    if (mounted) setState(() => _menuOpen = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _openMenu,
+      child: AnimatedBuilder(
+        animation: _rotateAnim,
+        builder: (_, child) => Transform.rotate(
+          angle: _rotateAnim.value * 2 * 3.14159,
+          child: child,
+        ),
+        child: Container(
+          width: 34, height: 34,
+          decoration: BoxDecoration(
+            color: _menuOpen ? context.dAccent.withValues(alpha: 0.15) : context.dSurface2,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _menuOpen ? context.dAccent.withValues(alpha: 0.5) : context.dBorder, width: 1.5),
+          ),
+          child: Icon(Icons.add_rounded, color: context.dAccent, size: 20),
+        ),
+      ),
+    );
+  }
+}
+
+class _DietMenuRow extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _DietMenuRow({required this.icon, required this.label, required this.color, required this.onTap});
+  @override
+  State<_DietMenuRow> createState() => _DietMenuRowState();
+}
+
+class _DietMenuRowState extends State<_DietMenuRow> {
+  bool _hovered = false;
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _hovered = true),
+      onTapUp: (_) { setState(() => _hovered = false); widget.onTap(); },
+      onTapCancel: () => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: BoxDecoration(
+          color: _hovered ? widget.color.withValues(alpha: 0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(children: [
+          Container(
+            width: 32, height: 32,
+            decoration: BoxDecoration(color: widget.color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(9)),
+            child: Icon(widget.icon, color: widget.color, size: 16),
+          ),
+          const SizedBox(width: 10),
+          Text(widget.label, style: TextStyle(color: context.dText, fontSize: 13, fontWeight: FontWeight.w600)),
+        ]),
       ),
     );
   }
@@ -1603,13 +1698,13 @@ class _DietLensActionSheet extends StatelessWidget {
           Container(
             width: 36, height: 4,
             margin: const EdgeInsets.only(bottom: 18),
-            decoration: BoxDecoration(color: context.dMuted.withOpacity(0.4), borderRadius: BorderRadius.circular(99)),
+            decoration: BoxDecoration(color: context.dMuted.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(99)),
           ),
           // Header
           Padding(
             padding: const EdgeInsets.only(bottom: 14),
             child: Row(children: [
-              Expanded(child: Text('Visual Search', style: TextStyle(color: context.dText, fontSize: 16, fontWeight: FontWeight.w700))),
+              Expanded(child: Text(AppLocalizations.t(context, 'diet_visual_search'), style: TextStyle(color: context.dText, fontSize: 16, fontWeight: FontWeight.w700))),
               GestureDetector(
                 onTap: () => Navigator.pop(context),
                 child: Container(
@@ -1624,18 +1719,18 @@ class _DietLensActionSheet extends StatelessWidget {
           Container(
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: context.dSurface2, border: Border.all(color: context.dAccent.withOpacity(0.15)), borderRadius: BorderRadius.circular(16)),
+            decoration: BoxDecoration(color: context.dSurface2, border: Border.all(color: context.dAccent.withValues(alpha: 0.15)), borderRadius: BorderRadius.circular(16)),
             child: Row(children: [
               Container(
                 width: 40, height: 40,
-                decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: context.dAccent.withOpacity(0.5), width: 2), color: context.dAccent.withOpacity(0.08)),
+                decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: context.dAccent.withValues(alpha: 0.5), width: 2), color: context.dAccent.withValues(alpha: 0.08)),
                 child: Icon(Icons.camera_alt_outlined, color: context.dAccent, size: 18),
               ),
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Visual AI Search', style: TextStyle(color: context.dText, fontSize: 14, fontWeight: FontWeight.w600)),
+                Text(AppLocalizations.t(context, 'diet_visual_ai_search'), style: TextStyle(color: context.dText, fontSize: 14, fontWeight: FontWeight.w600)),
                 SizedBox(height: 2),
-                Text('Point at any food to identify & get nutrition info.', style: TextStyle(color: context.dMuted, fontSize: 11.5, height: 1.5)),
+                Text(AppLocalizations.t(context, 'diet_visual_ai_desc'), style: TextStyle(color: context.dMuted, fontSize: 11.5, height: 1.5)),
               ])),
             ]),
           ),
@@ -1677,7 +1772,7 @@ class _DietLensOptionTile extends StatelessWidget {
         child: Row(children: [
           Container(
             width: 40, height: 40,
-            decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.25))),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.25))),
             child: Icon(icon, color: color, size: 18),
           ),
           const SizedBox(width: 10),

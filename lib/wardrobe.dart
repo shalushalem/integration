@@ -5,25 +5,23 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:camera/camera.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:myapp/app_localizations.dart';
 import 'package:myapp/chat.dart';
+import 'package:myapp/home.dart';
 import 'package:myapp/services/appwrite_service.dart';
 import 'package:myapp/services/backend_service.dart';
-import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
+import 'package:myapp/widgets/ahvi_home_text.dart';
 import 'package:myapp/widgets/ahvi_stylist_chat.dart';
+import 'package:provider/provider.dart';
 
-// ðŸš€ Backend & Providers
-
-// ðŸš€ Appwrite & Minio S3
-
-// ðŸš€ Environment Variables
 
 // â”€â”€ COLORS â”€â”€
 
@@ -97,67 +95,44 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   AppThemeTokens get t => context.themeTokens;
   final FocusNode _keyboardFocusNode = FocusNode();
 
-  List<String> _extractCategories(Iterable<WardrobeItem> items) {
-    final seen = <String>{};
-    final ordered = <String>[];
-    for (final item in items) {
-      final cat = item.cat.trim();
-      if (cat.isEmpty) continue;
-      final key = cat.toLowerCase();
-      if (key == 'all') continue;
-      if (seen.add(key)) ordered.add(cat);
-    }
-    return ordered;
-  }
-
-  bool _containsCategory(List<String> categories, String category) {
-    final key = category.trim().toLowerCase();
-    return categories.any((c) => c.trim().toLowerCase() == key);
-  }
-
-  List<String> get _dynamicCategories => _extractCategories(_wardrobe);
-
   @override
   void initState() {
     super.initState();
     _fetchWardrobeItems();
   }
 
-  // ðŸš€ Fetch from Appwrite
+  WardrobeItem _mapToWardrobeItem(Map<String, dynamic> data) {
+    return WardrobeItem(
+      id: (data['id'] ?? data[r'$id'] ?? '').toString(),
+      name: (data['name'] ?? 'Untitled').toString(),
+      cat: (data['category'] ?? data['cat'] ?? 'Other').toString(),
+      occasions: (data['occasions'] is List)
+          ? List<String>.from((data['occasions'] as List).map((e) => e.toString()))
+          : <String>[],
+      notes: (data['notes'] ?? '').toString(),
+      worn: (data['worn'] as num?)?.toInt() ?? 0,
+      liked: data['liked'] == true,
+      imageUrl: (data['image_url'] ?? data['imageUrl'])?.toString(),
+      maskedUrl: (data['masked_url'] ?? data['maskedUrl'])?.toString(),
+    );
+  }
+
+  // Fetch wardrobe through backend-backed service only (no direct DB calls)
   Future<void> _fetchWardrobeItems() async {
     try {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
       final docs = await appwrite.getWardrobeItems();
-
-      final fetchedItems = docs.map((doc) {
-        return WardrobeItem(
-          id: (doc['\$id'] ?? doc['id'] ?? '').toString(),
-          name: (doc['name'] ?? '').toString(),
-          cat: (doc['category'] ?? '').toString(),
-          occasions: doc['occasions'] != null
-              ? List<String>.from(doc['occasions'])
-              : [],
-          notes: (doc['notes'] ?? '').toString(),
-          worn: (doc['worn'] ?? 0) as int,
-          liked: (doc['liked'] ?? false) as bool,
-          imageUrl: (doc['image_url'] ?? doc['imageUrl'])?.toString(),
-          maskedUrl: (doc['masked_url'] ?? doc['maskedUrl'])?.toString(),
-        );
-      }).toList();
+      final fetchedItems = docs.map(_mapToWardrobeItem).toList();
 
       if (mounted) {
-        final categories = _extractCategories(fetchedItems);
         setState(() {
           _wardrobe.clear();
           _wardrobe.addAll(fetchedItems);
-          if (_activeCat != 'All' && !_containsCategory(categories, _activeCat)) {
-            _activeCat = 'All';
-          }
           _isLoading = false;
         });
       }
     } catch (e) {
-      debugPrint("Failed to fetch wardrobe: $e");
+      debugPrint("âŒ Failed to fetch wardrobe: $e");
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -180,593 +155,41 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     setState(() => _activeTab = index);
   }
 
-  Future<void> _saveNewItem(Map<String, dynamic> item) async {
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    final backend = Provider.of<BackendService>(context, listen: false);
-
-    final name = (item['name'] ?? '').toString().trim();
-    final cat = (item['cat'] ?? '').toString().trim();
-    final notes = (item['notes'] ?? '').toString();
-    final occasions = List<String>.from(item['occasions'] as List? ?? const <String>[]);
-    final rawImageBytes = item['rawImageBytes'] as Uint8List?;
-    final imageBytes = item['imageBytes'] as Uint8List?;
-
-    String? imageUrl = item['imageUrl'] as String?;
-    String? maskedUrl = item['maskedUrl'] as String?;
-    bool forceSave = false;
-
+  Future<void> _persistCreatedItem(
+    Map<String, dynamic> draft,
+    String localId,
+  ) async {
     try {
-      final duplicateProbePayload = _buildWardrobePayload(
-        name: name,
-        category: cat,
-        notes: notes,
-        occasions: occasions,
-      );
-      if (imageBytes != null) {
-        duplicateProbePayload['processed_image_base64'] = _encodeBytes(imageBytes);
-        duplicateProbePayload['image_base64'] = _encodeBytes(rawImageBytes ?? imageBytes);
-      }
-
-      _showToast('Searching duplicate items...');
-      final precheckDuplicate = await appwrite.checkWardrobeDuplicate(duplicateProbePayload);
-      if (precheckDuplicate != null) {
-        if (!mounted) return;
-        final proceed = await _confirmDuplicateProceed(
-          appwrite: appwrite,
-          dup: precheckDuplicate,
-          incomingName: name,
-          incomingBytes: imageBytes ?? rawImageBytes,
-          incomingUrl: maskedUrl ?? imageUrl,
-        );
-        if (!proceed) {
-          _showToast('Duplicate skipped');
-          return;
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final payload = <String, dynamic>{
+        'name': (draft['name'] ?? '').toString().trim(),
+        'category': (draft['cat'] ?? '').toString().trim(),
+        'occasions': List<String>.from((draft['occasions'] as List?) ?? const <String>[]),
+        'notes': (draft['notes'] ?? '').toString().trim(),
+        'worn': (draft['worn'] as num?)?.toInt() ?? 0,
+        'liked': draft['liked'] == true,
+        if ((draft['imageUrl'] ?? '').toString().trim().isNotEmpty)
+          'image_url': (draft['imageUrl']).toString().trim(),
+        if ((draft['maskedUrl'] ?? '').toString().trim().isNotEmpty)
+          'masked_url': (draft['maskedUrl']).toString().trim(),
+      };
+      final created = await appwrite.createWardrobeItem(payload);
+      final serverItem = _mapToWardrobeItem({
+        'id': created.$id,
+        ...created.data,
+      });
+      if (!mounted) return;
+      setState(() {
+        final idx = _wardrobe.indexWhere((w) => w.id == localId);
+        if (idx >= 0) {
+          _wardrobe[idx] = serverItem;
+        } else {
+          _wardrobe.insert(0, serverItem);
         }
-        forceSave = true;
-      }
+      });
     } catch (e) {
-      debugPrint('Duplicate precheck warning: $e');
-    }
-
-    if (imageBytes != null) {
-      try {
-        final upload = await _uploadWardrobeImages(
-          backend: backend,
-          rawBytes: rawImageBytes ?? imageBytes,
-          maskedBytes: imageBytes,
-          prefix: 'wardrobe',
-        );
-        imageUrl = upload['raw_image_url'] ?? imageUrl;
-        maskedUrl = upload['masked_image_url'] ?? maskedUrl;
-      } catch (e) {
-        debugPrint('Wardrobe upload warning: $e');
-        _showToast('Image upload failed. Please try again.');
-        return;
-      }
-    }
-
-    try {
-      final payload = _buildWardrobePayload(
-        name: name,
-        category: cat,
-        notes: notes,
-        occasions: occasions,
-        imageUrl: imageUrl,
-        maskedUrl: maskedUrl,
-      );
-      final doc = await appwrite.createWardrobeItem(
-        payload,
-        forceSave: forceSave,
-      );
-
-      if (!mounted) return;
-      _insertWardrobeFromDoc(
-        doc: doc,
-        fallbackId: item['id']?.toString(),
-        fallbackName: name,
-        fallbackCategory: cat,
-        fallbackOccasions: occasions,
-        fallbackNotes: notes,
-        fallbackImageBytes: imageBytes,
-        fallbackImageUrl: imageUrl,
-        fallbackMaskedUrl: maskedUrl,
-      );
-      _showToast('âœ“ "${name.isEmpty ? "Item" : name}" saved to wardrobe');
-    } on DuplicateOutfitException catch (dup) {
-      if (!mounted) return;
-      final useForceSave = await _confirmDuplicateProceed(
-        appwrite: appwrite,
-        dup: dup,
-        incomingName: name,
-        incomingBytes: imageBytes ?? rawImageBytes,
-        incomingUrl: maskedUrl ?? imageUrl,
-      );
-      if (!useForceSave) {
-        _showToast('Duplicate skipped');
-        return;
-      }
-
-      String? forceImageUrl = imageUrl;
-      String? forceMaskedUrl = maskedUrl;
-
-      if (imageBytes != null) {
-        try {
-          final upload = await _uploadWardrobeImages(
-            backend: backend,
-            rawBytes: rawImageBytes ?? imageBytes,
-            maskedBytes: imageBytes,
-            prefix: 'wardrobe_force',
-          );
-          forceImageUrl = upload['raw_image_url'] ?? forceImageUrl;
-          forceMaskedUrl = upload['masked_image_url'] ?? forceMaskedUrl;
-        } catch (e) {
-          debugPrint('Force upload warning: $e');
-          _showToast('Image upload failed. Please try again.');
-          return;
-        }
-      }
-
-      final forcedPayload = _buildWardrobePayload(
-        name: name,
-        category: cat,
-        notes: notes,
-        occasions: occasions,
-        imageUrl: forceImageUrl,
-        maskedUrl: forceMaskedUrl,
-      );
-      try {
-        final forcedDoc = await appwrite.createWardrobeItem(
-          forcedPayload,
-          forceSave: true,
-        );
-        if (!mounted) return;
-        _insertWardrobeFromDoc(
-          doc: forcedDoc,
-          fallbackId: item['id']?.toString(),
-          fallbackName: name,
-          fallbackCategory: cat,
-          fallbackOccasions: occasions,
-          fallbackNotes: notes,
-          fallbackImageBytes: imageBytes,
-          fallbackImageUrl: forceImageUrl,
-          fallbackMaskedUrl: forceMaskedUrl,
-        );
-        _showToast('Duplicate uploaded by your choice');
-      } on DuplicateOutfitException catch (forceDup) {
-        debugPrint('Force-save still conflicted: ${forceDup.rawBody}');
-        _showToast('Still blocked by duplicate check. Please try once more.');
-      }
-    } catch (e) {
-      debugPrint('Save wardrobe item failed: $e');
-      _showToast('Could not save item');
-    }
-  }
-
-  Future<bool> _confirmDuplicateProceed({
-    required AppwriteService appwrite,
-    required DuplicateOutfitException dup,
-    required String incomingName,
-    Uint8List? incomingBytes,
-    String? incomingUrl,
-  }) async {
-    final existing = dup.existingDocument;
-    final duplicateMeta = dup.duplicate;
-    final existingId =
-        (existing[r'$id'] ?? existing['id'] ?? duplicateMeta['point_id'] ?? duplicateMeta['id'] ?? '')
-            .toString()
-            .trim();
-    String duplicateName = (existing['name'] ?? existingId).toString();
-    String? existingImageUrl = dup.existingPreviewUrl ?? _pickBestImageUrl(existing);
-    if ((existingImageUrl == null || existingImageUrl.isEmpty) &&
-        existingId.isNotEmpty) {
-      final fetched = await appwrite.getWardrobeItemById(existingId);
-      if (fetched != null) {
-        existingImageUrl = _pickBestImageUrl(fetched);
-        final fetchedName = (fetched['name'] ?? '').toString().trim();
-        if (fetchedName.isNotEmpty) {
-          duplicateName = fetchedName;
-        }
-      }
-    }
-    if (existingImageUrl == null || existingImageUrl.isEmpty) {
-      try {
-        final allItems = await appwrite.getWardrobeItems();
-        Map<String, dynamic>? match;
-        final duplicatePointId = (duplicateMeta['point_id'] ?? duplicateMeta['id'] ?? '')
-            .toString()
-            .trim();
-        if (duplicatePointId.isNotEmpty) {
-          for (final row in allItems) {
-            final rowPointId =
-                (row['qdrant_point_id'] ?? row['qdrantPointId'] ?? '')
-                    .toString()
-                    .trim();
-            final rowId = (row['id'] ?? '').toString().trim();
-            if (rowPointId == duplicatePointId || rowId == duplicatePointId) {
-              match = row;
-              break;
-            }
-          }
-        }
-        if (match == null) {
-          final wantedCategory =
-              (existing['category'] ?? existing['cat'] ?? '').toString().trim().toLowerCase();
-          final wantedColor =
-              (existing['color_code'] ?? '').toString().trim().toLowerCase();
-          for (final row in allItems) {
-            final rowCategory = (row['category'] ?? '').toString().trim().toLowerCase();
-            final rowColor = (row['color_code'] ?? '').toString().trim().toLowerCase();
-            if (wantedCategory.isNotEmpty && rowCategory != wantedCategory) {
-              continue;
-            }
-            if (wantedColor.isNotEmpty && rowColor.isNotEmpty && rowColor != wantedColor) {
-              continue;
-            }
-            match = row;
-            break;
-          }
-        }
-        if (match != null) {
-          existingImageUrl = _pickBestImageUrl(match);
-          final matchName = (match['name'] ?? '').toString().trim();
-          if (matchName.isNotEmpty) {
-            duplicateName = matchName;
-          }
-        }
-      } catch (_) {}
-    }
-    if (duplicateName.trim().isEmpty) {
-      duplicateName = existingId;
-    }
-    if (existingImageUrl == null || existingImageUrl.isEmpty) {
-      debugPrint(
-        'Duplicate preview missing. existingId=$existingId reason=${duplicateMeta['reason']} raw=${dup.rawBody}',
-      );
-    }
-    final duplicateBytes = await _downloadImageBytes(existingImageUrl);
-    final useForceSave = await _showDuplicateDecisionDialog(
-      incomingName: incomingName,
-      incomingBytes: incomingBytes,
-      incomingUrl: incomingUrl,
-      duplicateName: duplicateName,
-      duplicateUrl: existingImageUrl,
-      duplicateBytes: duplicateBytes,
-    );
-    return useForceSave == true;
-  }
-
-  Future<Uint8List?> _downloadImageBytes(String? url) async {
-    final value = (url ?? '').trim();
-    if (value.isEmpty) return null;
-    final lower = value.toLowerCase();
-    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
-      return null;
-    }
-    try {
-      final response = await http.get(Uri.parse(value));
-      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
-        return response.bodyBytes;
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Map<String, dynamic> _buildWardrobePayload({
-    required String name,
-    required String category,
-    required String notes,
-    required List<String> occasions,
-    String? imageUrl,
-    String? maskedUrl,
-  }) {
-    return {
-      'name': name,
-      'category': category,
-      'occasions': occasions,
-      'notes': notes,
-      'worn': 0,
-      'liked': false,
-      if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
-      if (maskedUrl != null && maskedUrl.isNotEmpty) 'masked_url': maskedUrl,
-    };
-  }
-
-  String? _pickBestImageUrl(Map<String, dynamic>? source) {
-    if (source == null || source.isEmpty) return null;
-    bool isRenderableImageUrl(String value) {
-      final text = value.trim().toLowerCase();
-      return text.startsWith('http://') ||
-          text.startsWith('https://') ||
-          text.startsWith('data:image/');
-    }
-    for (final key in const [
-      'existing_preview_data_url',
-      'existing_preview_url',
-      'masked_url',
-      'maskedUrl',
-      'image_masked_url',
-      'maskedImageUrl',
-      'image_url',
-      'imageUrl',
-    ]) {
-      final value = (source[key] ?? '').toString().trim();
-      if (value.isNotEmpty && isRenderableImageUrl(value)) return value;
-    }
-    return null;
-  }
-
-  Future<Map<String, String>> _uploadWardrobeImages({
-    required BackendService backend,
-    required Uint8List rawBytes,
-    required Uint8List maskedBytes,
-    required String prefix,
-  }) async {
-    final upload = await backend.uploadWardrobeImages(
-      fileId: '${prefix}_${DateTime.now().millisecondsSinceEpoch}',
-      rawImageBytes: rawBytes,
-      maskedImageBytes: maskedBytes,
-    );
-    if (upload == null) {
-      throw Exception('Wardrobe upload returned null');
-    }
-    final rawUrl = (upload['raw_image_url'] ?? '').toString().trim();
-    final maskedUrl = (upload['masked_image_url'] ?? '').toString().trim();
-    if (rawUrl.isEmpty || maskedUrl.isEmpty) {
-      throw Exception('Wardrobe upload missing image URLs');
-    }
-    return <String, String>{
-      'raw_image_url': (upload['raw_image_url'] ?? '').toString(),
-      'masked_image_url': (upload['masked_image_url'] ?? '').toString(),
-    };
-  }
-
-  void _insertWardrobeFromDoc({
-    required ProxyDocument doc,
-    required String fallbackName,
-    required String fallbackCategory,
-    required List<String> fallbackOccasions,
-    required String fallbackNotes,
-    String? fallbackId,
-    Uint8List? fallbackImageBytes,
-    String? fallbackImageUrl,
-    String? fallbackMaskedUrl,
-  }) {
-    setState(() {
-      _wardrobe.insert(
-        0,
-        WardrobeItem(
-          id: (doc[r'$id'] ?? doc['id'] ?? fallbackId ?? '').toString(),
-          name: (doc['name'] ?? fallbackName).toString(),
-          cat: (doc['category'] ?? fallbackCategory).toString(),
-          occasions: doc['occasions'] != null
-              ? List<String>.from(doc['occasions'])
-              : fallbackOccasions,
-          notes: (doc['notes'] ?? fallbackNotes).toString(),
-          imageBytes: fallbackImageBytes,
-          imageUrl: (doc['image_url'] ?? doc['imageUrl'] ?? fallbackImageUrl)
-              ?.toString(),
-          maskedUrl:
-              (doc['masked_url'] ?? doc['maskedUrl'] ?? fallbackMaskedUrl)
-                  ?.toString(),
-          worn: ((doc['worn'] ?? 0) as num).toInt(),
-          liked: (doc['liked'] ?? false) as bool,
-        ),
-      );
-    });
-  }
-
-  Future<bool?> _showDuplicateDecisionDialog({
-    required String incomingName,
-    Uint8List? incomingBytes,
-    String? incomingUrl,
-    required String duplicateName,
-    String? duplicateUrl,
-    Uint8List? duplicateBytes,
-  }) {
-    return showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) {
-        final tokens = context.themeTokens;
-        final titleIncoming = incomingName.trim().isEmpty ? 'New upload' : incomingName;
-        final titleDuplicate =
-            duplicateName.trim().isEmpty ? 'Existing item' : duplicateName;
-
-        Widget preview(String? url, Uint8List? bytes) {
-          final normalizedUrl = (url ?? '').trim();
-          final hasDataUrl = normalizedUrl.toLowerCase().startsWith('data:image/');
-          final dataPayload = hasDataUrl
-              ? (normalizedUrl.contains(',')
-                  ? normalizedUrl.substring(normalizedUrl.indexOf(',') + 1)
-                  : normalizedUrl)
-              : '';
-          Uint8List? dataBytes;
-          if (hasDataUrl && dataPayload.isNotEmpty) {
-            try {
-              dataBytes = base64Decode(dataPayload);
-            } catch (_) {
-              dataBytes = null;
-            }
-          }
-          final hasNetworkUrl = (() {
-            final text = (url ?? '').trim().toLowerCase();
-            return text.startsWith('http://') || text.startsWith('https://');
-          })();
-          return Container(
-            height: 150,
-            decoration: BoxDecoration(
-              color: tokens.panel,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: tokens.cardBorder),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: (dataBytes != null)
-                ? Image.memory(
-                    dataBytes,
-                    fit: BoxFit.cover,
-                  )
-                : hasNetworkUrl
-                ? Image.network(
-                    normalizedUrl,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) {
-                      if (bytes != null) {
-                        return Image.memory(bytes, fit: BoxFit.cover);
-                      }
-                      return Center(
-                        child: Text(
-                          'No preview',
-                          style: TextStyle(color: tokens.mutedText),
-                        ),
-                      );
-                    },
-                  )
-                : (bytes != null
-                    ? Image.memory(bytes, fit: BoxFit.cover)
-                    : Center(
-                        child: Text(
-                          'No preview',
-                          style: TextStyle(color: tokens.mutedText),
-                        ),
-                      )),
-          );
-        }
-
-        return AlertDialog(
-          backgroundColor: tokens.backgroundSecondary,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text(
-            'Duplicate Found',
-            style: TextStyle(
-              fontFamily: 'Inter',
-              color: tokens.textPrimary,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          content: SizedBox(
-            width: 320,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'A similar outfit already exists. Upload anyway?',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    color: tokens.mutedText,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Uploaded image',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              color: tokens.textPrimary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          preview(incomingUrl, incomingBytes),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Duplicate',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              color: tokens.textPrimary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          preview(duplicateUrl, duplicateBytes),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$titleIncoming vs $titleDuplicate',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    color: tokens.mutedText,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text(
-                'Skip',
-                style: TextStyle(fontFamily: 'Inter', color: tokens.mutedText),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: tokens.accent.primary,
-                foregroundColor: tokens.textPrimary,
-              ),
-              child: const Text('Upload anyway'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _toggleLikePersist(String id) async {
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    final index = _wardrobe.indexWhere((e) => e.id == id);
-    if (index < 0) return;
-    final item = _wardrobe[index];
-    final previous = item.liked;
-    setState(() => item.liked = !item.liked);
-    _showToast(
-      item.liked
-          ? 'â™¥ Added "${item.name}" to favourites'
-          : 'â™¡ Removed from favourites',
-    );
-    try {
-      await appwrite.updateWardrobeItem(id, {'liked': item.liked});
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => item.liked = previous);
-      _showToast('Could not save like state');
-    }
-  }
-
-  Future<void> _logWearPersist(String id) async {
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    final index = _wardrobe.indexWhere((e) => e.id == id);
-    if (index < 0) return;
-    final item = _wardrobe[index];
-    final previous = item.worn;
-    setState(() => item.worn = previous + 1);
-    _showToast('âœ“ Logged a wear for "${item.name}"');
-    try {
-      await appwrite.updateWardrobeItem(id, {'worn': item.worn});
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => item.worn = previous);
-      _showToast('Could not save wear count');
+      debugPrint("❌ Failed to persist wardrobe item: $e");
+      if (mounted) _showToast('Saved locally, sync will retry.');
     }
   }
 
@@ -776,9 +199,26 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       context: context,
       barrierColor: t.backgroundPrimary.withValues(alpha: 0.7),
       builder: (_) => _AddItemModal(
-        categories: _dynamicCategories,
-        onSave: (item) async {
-          await _saveNewItem(item);
+        onSave: (item) {
+          final localId = (item['id'] ?? '').toString();
+          setState(() {
+            _wardrobe.insert(
+              0,
+              WardrobeItem(
+                id: localId,
+                name: item['name'] as String,
+                cat: item['cat'] as String,
+                occasions: List<String>.from(item['occasions'] as List),
+                notes: item['notes'] as String,
+                imageBytes: item['imageBytes'] as Uint8List?,
+                imageUrl: item['imageUrl'] as String?,
+                maskedUrl: item['maskedUrl'] as String?,
+                worn: item['worn'] as int? ?? 0,
+                liked: item['liked'] as bool? ?? false,
+                ),
+            );
+          });
+          _persistCreatedItem(item, localId);
         },
       ),
     );
@@ -787,8 +227,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   List<WardrobeItem> get _filtered {
     final q = _searchQuery.toLowerCase();
     return _wardrobe.where((item) {
-      final matchCat =
-          _activeCat == 'All' || item.cat.toLowerCase() == _activeCat.toLowerCase();
+      final matchCat = _activeCat == 'All' || item.cat == _activeCat;
       final matchQ =
           q.isEmpty ||
           item.name.toLowerCase().contains(q) ||
@@ -799,24 +238,25 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
 
   void _openItemDetail(String id) {
     final t = context.themeTokens;
-    final index = _wardrobe.indexWhere((i) => i.id == id);
-    if (index < 0) {
-      _showToast('Item no longer available');
-      return;
-    }
-    final item = _wardrobe[index];
+    final item = _wardrobe.firstWhere((i) => i.id == id);
     showDialog(
       context: context,
       barrierColor: t.backgroundPrimary.withValues(alpha: 0.55),
       builder: (_) => _ItemDetailPanel(
         item: item,
         onWore: () {
-          _logWearPersist(id);
+          setState(() => item.worn++);
           Navigator.of(context).pop();
           _openItemDetail(id);
+          _showToast('âœ“ Logged a wear for "${item.name}"');
         },
         onToggleLike: () {
-          _toggleLikePersist(id);
+          setState(() => item.liked = !item.liked);
+          _showToast(
+            item.liked
+                ? 'â™¥ Added "${item.name}" to favourites'
+                : 'â™¡ Removed from favourites',
+          );
         },
         onDelete: () {
           Navigator.of(context).pop();
@@ -834,7 +274,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       SnackBar(
         content: Text(
           msg,
-          style: TextStyle(fontFamily: 'Inter', color: t.textPrimary),
+          style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, color: t.textPrimary),
         ),
         backgroundColor: t.backgroundSecondary,
         behavior: SnackBarBehavior.floating,
@@ -855,12 +295,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   void _showDeleteConfirm(String id) {
     final t = context.themeTokens;
     final accent4 = _accent4(t);
-    final index = _wardrobe.indexWhere((i) => i.id == id);
-    if (index < 0) {
-      _showToast('Item no longer available');
-      return;
-    }
-    final item = _wardrobe[index];
+    final item = _wardrobe.firstWhere((i) => i.id == id);
     showDialog(
       context: context,
       barrierColor: t.backgroundPrimary.withValues(alpha: 0.7),
@@ -870,40 +305,41 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         title: Text(
           'Remove item?',
           style: TextStyle(
-            fontFamily: 'Inter',
+            fontFamily: GoogleFonts.inter().fontFamily,
             fontWeight: FontWeight.w600,
             color: t.textPrimary,
           ),
         ),
         content: Text(
           'Remove "${item.name}" from your wardrobe?',
-          style: TextStyle(fontFamily: 'Inter', color: t.mutedText),
+          style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, color: t.mutedText),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: Text(
-              'Cancel',
-              style: TextStyle(fontFamily: 'Inter', color: t.mutedText),
+              AppLocalizations.t(context, 'cancel'),
+              style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, color: t.mutedText),
             ),
           ),
           TextButton(
             onPressed: () async {
               Navigator.of(context).pop();
               setState(() => _wardrobe.removeWhere((i) => i.id == id));
-              _showToast('🗑 "${item.name}" removed');
               try {
-                final appwrite = Provider.of<AppwriteService>(context, listen: false);
+                final appwrite = Provider.of<AppwriteService>(
+                  context,
+                  listen: false,
+                );
                 await appwrite.deleteWardrobeItem(id);
-              } catch (_) {
-                if (!mounted) return;
-                setState(() => _wardrobe.insert(0, item));
-                _showToast('Could not remove item');
+              } catch (e) {
+                debugPrint("❌ Failed to delete wardrobe item remotely: $e");
               }
+              _showToast('ðŸ—‘ "${item.name}" removed');
             },
             child: Text(
-              'Remove',
-              style: TextStyle(fontFamily: 'Inter', color: accent4),
+              AppLocalizations.t(context, 'wardrobe_remove'),
+              style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, color: accent4),
             ),
           ),
         ],
@@ -912,33 +348,35 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   }
 
   Widget _buildAskAhviFab() {
+    final t = context.themeTokens;
+    final fabBg = t.accent.primary;
     return GestureDetector(
-      onTap: () => showAhviStylistChatSheet(context),
+      onTap: () => showAhviStylistChatSheet(context, moduleContext: 'wardrobe'),
       child: Container(
         padding: const EdgeInsets.fromLTRB(10, 10, 22, 10),
         decoration: BoxDecoration(
-          color: Colors.black,
+          color: fabBg,
           borderRadius: BorderRadius.circular(50),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.55),
+              color: fabBg.withValues(alpha: 0.45),
               blurRadius: 20,
               offset: const Offset(0, 6),
             ),
           ],
         ),
-        child: const Row(
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             CircleAvatar(
               radius: 14,
-              backgroundColor: Color(0x24FFFFFF),
-              child: Text('âœ¦', style: TextStyle(color: Colors.white)),
+              backgroundColor: Colors.white.withValues(alpha: 0.18),
+              child: const Text('âœ¦', style: TextStyle(color: Colors.white)),
             ),
-            SizedBox(width: 10),
+            const SizedBox(width: 10),
             Text(
-              'Ask AHVI',
-              style: TextStyle(
+              AppLocalizations.t(context, 'ask_ahvi'),
+              style: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
                 color: Colors.white,
@@ -981,19 +419,14 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         body: Column(
           children: [
             _AppHeader(
-              title: _activeTab == 0 ? 'My Wardrobe' : 'Insights',
+              title: _activeTab == 0 ? AppLocalizations.t(context, 'wardrobe_title') : AppLocalizations.t(context, 'wardrobe_insights'),
               activeTab: _activeTab,
               onTabTap: _setTab,
               onAddTap: _openAddModal,
-              onLensTap: _openLensSheet,
               onSearch: (q) => setState(() => _searchQuery = q),
             ),
             if (_activeTab == 0)
-            _FilterBar(
-              activeCat: _activeCat,
-              categories: _dynamicCategories,
-              onCatTap: _setCat,
-            ),
+              _FilterBar(activeCat: _activeCat, onCatTap: _setCat),
             Expanded(
               child: _isLoading
                   ? Center(
@@ -1008,18 +441,25 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                       onDelete: (id) => _showDeleteConfirm(id),
                       onToggleLike: (id) {
                         HapticFeedback.selectionClick();
-                        _toggleLikePersist(id);
+                        final i = _wardrobe.firstWhere((e) => e.id == id);
+                        setState(() => i.liked = !i.liked);
+                        _showToast(
+                          i.liked
+                              ? 'â™¥ Added "${i.name}" to favourites'
+                              : 'â™¡ Removed from favourites',
+                        );
                       },
                       onWore: (id) {
-                        _logWearPersist(id);
+                        setState(() {
+                          final i = _wardrobe.firstWhere((e) => e.id == id);
+                          i.worn++;
+                        });
+                        final i = _wardrobe.firstWhere((e) => e.id == id);
+                        _showToast('âœ“ Logged a wear for "${i.name}"');
                       },
                       onShare: (id) {
-                        final index = _wardrobe.indexWhere((e) => e.id == id);
-                        if (index < 0) {
-                          _showToast('Item no longer available');
-                          return;
-                        }
-                        _shareItem(_wardrobe[index]);
+                        final i = _wardrobe.firstWhere((e) => e.id == id);
+                        _shareItem(i);
                       },
                       onTapCard: _openItemDetail,
                     )
@@ -1171,7 +611,7 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                       child: Text(
                         item.name,
                         style: TextStyle(
-                          fontFamily: 'Inter',
+                          fontFamily: GoogleFonts.inter().fontFamily,
                           fontSize: 26,
                           fontWeight: FontWeight.w700,
                           color: t.textPrimary,
@@ -1200,7 +640,7 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                           child: Text(
                             item.cat,
                             style: TextStyle(
-                              fontFamily: 'Inter',
+                              fontFamily: GoogleFonts.inter().fontFamily,
                               fontSize: 12,
                               color: t.accent.secondary,
                               fontWeight: FontWeight.w500,
@@ -1211,7 +651,7 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                         Text(
                           item.worn == 0 ? 'Never worn' : 'Worn ${item.worn}Ã—',
                           style: TextStyle(
-                            fontFamily: 'Inter',
+                            fontFamily: GoogleFonts.inter().fontFamily,
                             fontSize: 13,
                             color: t.mutedText,
                           ),
@@ -1289,18 +729,18 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                                         CrossAxisAlignment.start,
                                     children: [
                                       _DetailInfoRow(
-                                        label: 'Category',
+                                        label: AppLocalizations.t(context, 'wardrobe_category'),
                                         value: item.cat,
                                       ),
                                       const SizedBox(height: 10),
                                       _DetailInfoRow(
-                                        label: 'Times worn',
+                                        label: AppLocalizations.t(context, 'wardrobe_times_worn'),
                                         value: '${item.worn}',
                                       ),
                                       if (item.notes.isNotEmpty) ...[
                                         const SizedBox(height: 10),
                                         _DetailInfoRow(
-                                          label: 'Notes',
+                                          label: AppLocalizations.t(context, 'wardrobe_notes'),
                                           value: item.notes,
                                         ),
                                       ],
@@ -1330,7 +770,7 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                                       child: Text(
                                         o,
                                         style: TextStyle(
-                                          fontFamily: 'Inter',
+                                          fontFamily: GoogleFonts.inter().fontFamily,
                                           fontSize: 12,
                                           color: t.mutedText,
                                         ),
@@ -1356,7 +796,7 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                       runSpacing: 8,
                       children: [
                         _HoverTintButton(
-                          label: '+ Wore it today',
+                          label: AppLocalizations.t(context, 'wardrobe_wore_today'),
                           bgColor: t.accent.tertiary.withValues(alpha: 0.12),
                           hoverBgColor: t.accent.tertiary.withValues(
                             alpha: 0.22,
@@ -1366,7 +806,7 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                         ),
                         StatefulBuilder(
                           builder: (ctx, setSt) => _HoverTintButton(
-                            label: item.liked ? 'â™¥ Liked' : 'â™¡ Like',
+                            label: item.liked ? AppLocalizations.t(context, 'wardrobe_liked') : AppLocalizations.t(context, 'wardrobe_like'),
                             bgColor: item.liked
                                 ? accent4.withValues(alpha: 0.12)
                                 : t.panel,
@@ -1381,14 +821,14 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                           ),
                         ),
                         _HoverTintButton(
-                          label: 'â†— Share',
+                          label: AppLocalizations.t(context, 'wardrobe_share'),
                           bgColor: t.panel,
                           hoverBgColor: t.panelBorder,
                           fgColor: t.textPrimary,
                           onTap: widget.onShare,
                         ),
                         _HoverTintButton(
-                          label: 'Remove',
+                          label: AppLocalizations.t(context, 'wardrobe_remove'),
                           bgColor: accent4.withValues(alpha: 0.08),
                           hoverBgColor: accent4.withValues(alpha: 0.18),
                           fgColor: accent4,
@@ -1446,7 +886,7 @@ class _HoverTintButtonState extends State<_HoverTintButton> {
           child: Text(
             widget.label,
             style: TextStyle(
-              fontFamily: 'Inter',
+              fontFamily: GoogleFonts.inter().fontFamily,
               fontSize: 13,
               fontWeight: FontWeight.w500,
               color: widget.fgColor,
@@ -1472,7 +912,7 @@ class _DetailInfoRow extends StatelessWidget {
         Text(
           label.toUpperCase(),
           style: TextStyle(
-            fontFamily: 'Inter',
+            fontFamily: GoogleFonts.inter().fontFamily,
             fontSize: 10,
             fontWeight: FontWeight.w600,
             color: t.mutedText,
@@ -1483,7 +923,7 @@ class _DetailInfoRow extends StatelessWidget {
         Text(
           value,
           style: TextStyle(
-            fontFamily: 'Inter',
+            fontFamily: GoogleFonts.inter().fontFamily,
             fontSize: 14,
             color: t.textPrimary,
           ),
@@ -1512,8 +952,35 @@ class _DetectedItem {
   });
 
   static String mapCategory(String raw) {
-    final value = raw.trim();
-    return value.isEmpty ? 'Uncategorized' : value;
+    final s = raw.toLowerCase();
+    if (s.contains('top') || s.contains('shirt') || s.contains('blouse') ||
+        s.contains('tee') || s.contains('sweater') || s.contains('hoodie')) {
+      return 'Tops';
+    }
+    if (s.contains('pant') || s.contains('trouser') || s.contains('jean') ||
+        s.contains('short') || s.contains('skirt')) {
+      return 'Bottoms';
+    }
+    if (s.contains('jacket') || s.contains('coat') || s.contains('blazer') ||
+        s.contains('outer') || s.contains('cardigan')) {
+      return 'Outerwear';
+    }
+    if (s.contains('shoe') || s.contains('boot') || s.contains('sneaker') ||
+        s.contains('sandal') || s.contains('heel')) {
+      return 'Footwear';
+    }
+    if (s.contains('dress') || s.contains('gown') || s.contains('jumpsuit')) return 'Dresses';
+    if (s.contains('bag') || s.contains('purse') || s.contains('clutch') ||
+        s.contains('backpack')) {
+      return 'Bags';
+    }
+    if (s.contains('jewelry') || s.contains('necklace') || s.contains('ring') ||
+        s.contains('bracelet') || s.contains('earring') || s.contains('watch')) {
+      return 'Jewelry';
+    }
+    if (s.contains('makeup') || s.contains('lipstick')) return 'Makeup';
+    if (s.contains('skincare') || s.contains('moisturizer')) return 'Skincare';
+    return 'Accessories';
   }
 
   static String catEmoji(String cat) =>
@@ -1529,9 +996,8 @@ enum _ModalStep { camera, detecting, results, editing }
 
 // â”€â”€ ADD ITEM MODAL â€” Camera embedded inside â”€â”€
 class _AddItemModal extends StatefulWidget {
-  final List<String> categories;
-  final Future<void> Function(Map<String, dynamic> item) onSave;
-  const _AddItemModal({required this.categories, required this.onSave});
+  final void Function(Map<String, dynamic> item) onSave;
+  const _AddItemModal({required this.onSave});
 
   @override
   State<_AddItemModal> createState() => _AddItemModalState();
@@ -1539,6 +1005,7 @@ class _AddItemModal extends StatefulWidget {
 
 class _AddItemModalState extends State<_AddItemModal>
     with TickerProviderStateMixin {
+  final BackendService _backendService = BackendService();
 
   // â”€â”€ Modal entry animations â”€â”€
   late AnimationController _slideCtrl;
@@ -1556,7 +1023,8 @@ class _AddItemModalState extends State<_AddItemModal>
   // â”€â”€ Flow state â”€â”€
   _ModalStep _step = _ModalStep.camera;
   Uint8List? _capturedBytes;
-  Uint8List? _capturedRawBytes;
+  List<Uint8List> _galleryImages = []; // gallery multi-pick
+  bool _isGalleryPick = false;
   List<_DetectedItem> _detected = [];
   String? _detectError;
 
@@ -1567,26 +1035,10 @@ class _AddItemModalState extends State<_AddItemModal>
   final List<String> _selectedOccs = [];
   int? _editingIndex;
 
-  List<String> get _cats {
-    final seen = <String>{};
-    final out = <String>[];
-    void addCategory(String value) {
-      final cat = value.trim();
-      if (cat.isEmpty) return;
-      final key = cat.toLowerCase();
-      if (seen.add(key)) out.add(cat);
-    }
-
-    for (final cat in widget.categories) {
-      addCategory(cat);
-    }
-    for (final item in _detected) {
-      addCategory(item.category);
-    }
-    addCategory(_selectedCat);
-    if (out.isEmpty) out.add('Uncategorized');
-    return out;
-  }
+  static const _cats = [
+    'Tops', 'Bottoms', 'Outerwear', 'Footwear', 'Dresses',
+    'Accessories', 'Bags', 'Jewelry', 'Makeup', 'Skincare',
+  ];
   static const _occs = ['Casual', 'Work', 'Dinner', 'Sport', 'Travel'];
 
   AppThemeTokens get t => context.themeTokens;
@@ -1615,7 +1067,7 @@ class _AddItemModalState extends State<_AddItemModal>
       _cameras = await availableCameras();
       if (_cameras.isEmpty) return;
       final cam = _isFront && _cameras.length > 1 ? _cameras[1] : _cameras[0];
-      _camCtrl = CameraController(cam, ResolutionPreset.high, enableAudio: false);
+      _camCtrl = CameraController(cam, ResolutionPreset.medium, enableAudio: false);
       await _camCtrl!.initialize();
       await _camCtrl!.setFlashMode(_flash);
       if (mounted) setState(() => _camReady = true);
@@ -1639,9 +1091,14 @@ class _AddItemModalState extends State<_AddItemModal>
     try {
       final xfile = await _camCtrl!.takePicture();
       final bytes = await File(xfile.path).readAsBytes();
+
+      // âœ… Camera no longer needed â€” dispose immediately to save battery
+      await _camCtrl?.dispose();
+      _camCtrl = null;
+      if (mounted) setState(() => _camReady = false);
+
       setState(() {
         _capturedBytes = bytes;
-        _capturedRawBytes = bytes;
         _step = _ModalStep.detecting;
         _detectError = null;
       });
@@ -1654,91 +1111,113 @@ class _AddItemModalState extends State<_AddItemModal>
   Future<void> _pickGallery() async {
     try {
       final picker = ImagePicker();
-      final file = await picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
-      if (file == null) return;
-      // XFile.readAsBytes() works on iOS & Android without dart:io File
-      final bytes = await file.readAsBytes();
+      final files = await picker.pickMultiImage(imageQuality: 90, limit: 6);
+      if (files.isEmpty) return;
       if (!mounted) return;
-      setState(() {
-        _capturedBytes = bytes;
-        _capturedRawBytes = bytes;
-        _step = _ModalStep.detecting;
-        _detectError = null;
-      });
-      await _runDetection(bytes);
+
+      // âœ… Gallery picked â€” camera no longer needed, dispose to save battery
+      await _camCtrl?.dispose();
+      _camCtrl = null;
+      if (mounted) setState(() => _camReady = false);
+
+      // Warn if user had more than 6 selected (some platforms ignore limit)
+      final capped = files.take(6).toList();
+      if (files.length > 6) {
+        _toast('Only the first 6 images were selected');
+      }
+
+      final bytesList = await Future.wait(capped.map((f) => f.readAsBytes()));
+      if (!mounted) return;
+
+      if (bytesList.length == 1) {
+        // Single image â†’ existing AI detection flow
+        setState(() {
+          _capturedBytes = bytesList.first;
+          _galleryImages = [];
+          _isGalleryPick = false;
+          _step = _ModalStep.detecting;
+          _detectError = null;
+        });
+        await _runDetection(bytesList.first);
+      } else {
+        // Multiple images â†’ parallel AI detection on all images
+        setState(() {
+          _capturedBytes = bytesList.first;
+          _galleryImages = bytesList;
+          _isGalleryPick = true;
+          _step = _ModalStep.detecting;
+          _detectError = null;
+          _detected = [];
+        });
+        await _runDetectionMulti(bytesList);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _detectError = 'Could not load image. Please try again.';
+        _detectError = 'Could not load images. Please try again.';
         _step = _ModalStep.results;
         _detected = [];
       });
     }
   }
 
+  // Single image -> returns detected items (throws on failure)
+  Future<List<_DetectedItem>> _detectOneImage(Uint8List bytes) async {
+    var response = await _backendService.analyzeImage(bytes);
+    response ??= await Future<Map<String, dynamic>?>.delayed(
+      const Duration(seconds: 2),
+      () => _backendService.analyzeImage(bytes),
+    );
+    if (response == null) {
+      throw Exception('Analyze API returned null');
+    }
+
+    final dynamic payload = response['data'] ?? response;
+    final List<Map<String, dynamic>> records = [];
+
+    if (payload is List) {
+      for (final item in payload) {
+        if (item is Map) records.add(Map<String, dynamic>.from(item));
+      }
+    } else if (payload is Map) {
+      final map = Map<String, dynamic>.from(payload);
+      final dynamic items = map['items'];
+      if (items is List && items.isNotEmpty) {
+        for (final item in items) {
+          if (item is Map) records.add(Map<String, dynamic>.from(item));
+        }
+      } else {
+        records.add(map);
+      }
+    }
+
+    if (records.isEmpty) {
+      throw Exception('No detectable items in backend response');
+    }
+
+    return records.map((r) {
+      final name = (r['name'] ?? r['item_name'] ?? 'Unknown').toString();
+      final categoryRaw =
+          (r['category'] ?? r['sub_category'] ?? r['type'] ?? '').toString();
+      final colorRaw = (r['color'] ?? r['color_code'] ?? '').toString();
+      final patternRaw = (r['pattern'] ?? '').toString();
+      return _DetectedItem(
+        id:
+            r['id']?.toString() ??
+            '${DateTime.now().microsecondsSinceEpoch}-${name.hashCode}',
+        name: name,
+        category: _DetectedItem.mapCategory(categoryRaw),
+        color: colorRaw.isEmpty ? null : colorRaw,
+        pattern: patternRaw.isEmpty ? null : patternRaw,
+        selected: true,
+      );
+    }).toList();
+  }
+
+  // Single image flow (camera / single gallery pick)
   Future<void> _runDetection(Uint8List bytes) async {
     try {
-      final backend = Provider.of<BackendService>(context, listen: false);
-      final originalBase64 = base64Encode(bytes);
-      final bgInfo = await backend.removeBackgroundDetailed(originalBase64);
-      final bgRemovedBase64 = bgInfo?['image_base64']?.toString();
-      final bgRemoved = bgInfo?['bg_removed'] == true;
-      final bgReason = bgInfo?['fallback_reason']?.toString();
-      final effectiveBase64 = (bgRemoved && bgRemovedBase64 != null && bgRemovedBase64.isNotEmpty)
-          ? bgRemovedBase64
-          : originalBase64;
-      final removedBytes = (bgRemoved && bgRemovedBase64 != null && bgRemovedBase64.isNotEmpty)
-          ? base64Decode(bgRemovedBase64)
-          : bytes;
-      if (mounted) {
-        setState(() {
-          _capturedBytes = removedBytes;
-          _capturedRawBytes = bytes;
-        });
-      }
-      if (!bgRemoved && mounted) {
-        _toast('Background removal unavailable. Continuing with original image.');
-        debugPrint('BG remove fallback used: ${bgReason ?? "unknown"}');
-      }
-
-      final analysis = await backend.analyzeImageFromBase64(effectiveBase64);
-      if (analysis == null) {
-        throw Exception('Backend returned null for analyze-image');
-      }
-
-      dynamic payload = analysis['items'] ??
-          analysis['detected_items'] ??
-          analysis['garments'] ??
-          analysis['results'] ??
-          analysis['data'] ??
-          analysis;
-
-      if (payload is Map<String, dynamic>) {
-        payload = payload['items'] ??
-            payload['detected_items'] ??
-            payload['garments'] ??
-            payload['results'] ??
-            [payload];
-      }
-
-      if (payload is! List) {
-        throw Exception('Unexpected analyze-image response shape');
-      }
-
-      final List<dynamic> raw = payload;
-      final items = raw
-          .whereType<Map>()
-          .map((r) => Map<String, dynamic>.from(r))
-          .map((r) => _DetectedItem(
-                id: r['id']?.toString() ?? UniqueKey().toString(),
-                name: (r['name'] ?? 'Unknown').toString(),
-                category: _DetectedItem.mapCategory((r['category'] ?? '').toString()),
-                color: (r['color'] ?? r['color_code'])?.toString(),
-                pattern: r['pattern']?.toString(),
-                selected: true,
-              ))
-          .toList();
-
+      final items = await _detectOneImage(bytes);
       if (mounted) {
         setState(() {
           _detected = items;
@@ -1747,26 +1226,96 @@ class _AddItemModalState extends State<_AddItemModal>
       }
     } catch (e) {
       if (mounted) {
-        final err = e.toString();
-        final msg = err.contains('Background removal failed')
-            ? err.replaceFirst('Exception: ', '')
+        final msg = e.toString().toLowerCase().contains('timeout') ||
+                e.toString().toLowerCase().contains('null')
+            ? 'Detection is warming up. Tap Try Again in 10 seconds.'
             : 'Detection failed. Please retake with better lighting.';
         setState(() {
-        _detectError = msg;
-        _step = _ModalStep.results;
-        _detected = [];
-      });
+          _detectError = msg;
+          _step = _ModalStep.results;
+          _detected = [];
+        });
       }
     }
   }
 
-  void _retake() => setState(() {
-    _step = _ModalStep.camera;
-    _capturedBytes = null;
-    _capturedRawBytes = null;
-    _detected = [];
-    _detectError = null;
-  });
+  // Multi-image flow â€” all images scanned in parallel, results merged
+  Future<void> _runDetectionMulti(List<Uint8List> bytesList) async {
+    try {
+      // Run all detections in parallel
+      final results = await Future.wait(
+        bytesList.map((b) => _detectOneImage(b).catchError((_) => <_DetectedItem>[])),
+      );
+
+      // Merge all items, re-assign unique IDs to avoid collisions
+      final allItems = <_DetectedItem>[];
+      var counter = 1;
+      for (final list in results) {
+        for (final item in list) {
+          allItems.add(_DetectedItem(
+            id: (counter++).toString(),
+            name: item.name,
+            category: item.category,
+            color: item.color,
+            pattern: item.pattern,
+            selected: true,
+          ));
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _detected = allItems;
+          _step = _ModalStep.results;
+          if (allItems.isEmpty) {
+            _detectError = 'No items detected in any of the images.';
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _detectError = 'Detection failed. Please try again.';
+          _step = _ModalStep.results;
+          _detected = [];
+        });
+      }
+    }
+  }
+
+  void _retake() {
+    setState(() {
+      _step = _ModalStep.camera;
+      _capturedBytes = null;
+      _galleryImages = [];
+      _isGalleryPick = false;
+      _detected = [];
+      _detectError = null;
+    });
+    // âœ… Restart camera fresh for retake
+    _initCamera();
+  }
+
+  /// Re-runs AI detection on the already-captured image(s) without going
+  /// back to camera. Used by the "Try Again" button on the error banner
+  /// and the "Retake Photo" button on the empty-results state.
+  Future<void> _tryAgain() async {
+    if (_capturedBytes == null && _galleryImages.isEmpty) {
+      // No image in memory â€” fall back to full retake
+      _retake();
+      return;
+    }
+    setState(() {
+      _step = _ModalStep.detecting;
+      _detectError = null;
+      _detected = [];
+    });
+    if (_isGalleryPick && _galleryImages.length > 1) {
+      await _runDetectionMulti(_galleryImages);
+    } else {
+      await _runDetection(_capturedBytes!);
+    }
+  }
 
   void _editItem(int index) {
     final item = _detected[index];
@@ -1793,20 +1342,20 @@ class _AddItemModalState extends State<_AddItemModal>
     }
   }
 
-  Future<void> _confirmAndSave() async {
+  void _confirmAndSave() {
     final selected = _detected.where((i) => i.selected).toList();
     if (selected.isEmpty) { _toast('Select at least one item'); return; }
+    if (selected.length > 6) { _toast('Maximum 6 items per outfit'); return; }
     HapticFeedback.lightImpact();
     Navigator.of(context).pop();
     for (final item in selected) {
-      await widget.onSave({
+      widget.onSave({
         'id': DateTime.now().millisecondsSinceEpoch.toString(),
         'name': item.name,
         'cat': item.category,
         'occasions': <String>[],
         'notes': [item.color, item.pattern]
             .where((v) => v != null && v.isNotEmpty && v != 'null').join(', '),
-        'rawImageBytes': _capturedRawBytes ?? _capturedBytes,
         'imageBytes': _capturedBytes,
         'imageUrl': null,
         'maskedUrl': null,
@@ -1816,20 +1365,20 @@ class _AddItemModalState extends State<_AddItemModal>
     }
   }
 
-  Future<void> _manualSave() async {
+  void _manualSave() {
     if (_nameCtrl.text.trim().isEmpty || _selectedCat.isEmpty) {
       _toast('Name and category are required');
       return;
     }
     Navigator.of(context).pop();
-    await widget.onSave({
+    widget.onSave({
       'id': DateTime.now().millisecondsSinceEpoch.toString(),
       'name': _nameCtrl.text.trim(),
       'cat': _selectedCat,
       'occasions': List<String>.from(_selectedOccs),
       'notes': _notesCtrl.text.trim(),
-      'rawImageBytes': _capturedRawBytes ?? _capturedBytes,
       'imageBytes': _capturedBytes,
+      'galleryImages': _isGalleryPick ? List<Uint8List>.from(_galleryImages) : null,
       'imageUrl': null,
       'maskedUrl': null,
       'worn': 0,
@@ -1839,7 +1388,7 @@ class _AddItemModalState extends State<_AddItemModal>
 
   void _toast(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg, style: TextStyle(fontFamily: 'Inter', color: t.textPrimary)),
+      content: Text(msg, style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, color: t.textPrimary)),
       backgroundColor: t.backgroundSecondary,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1986,9 +1535,9 @@ class _AddItemModalState extends State<_AddItemModal>
             ),
           ),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(titles[_step]!, style: TextStyle(fontFamily: 'Inter', fontSize: 16,
+          Text(titles[_step]!, style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 16,
               fontWeight: FontWeight.w700, color: t.textPrimary, letterSpacing: -0.3)),
-          Text(subtitles[_step]!, style: TextStyle(fontFamily: 'Inter', fontSize: 11, color: t.mutedText)),
+          Text(subtitles[_step]!, style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 11, color: t.mutedText)),
         ])),
         GestureDetector(
           onTap: () => Navigator.of(context).pop(),
@@ -2032,8 +1581,8 @@ class _AddItemModalState extends State<_AddItemModal>
                 child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
                   CircularProgressIndicator(color: t.accent.primary, strokeWidth: 2),
                   const SizedBox(height: 12),
-                  Text('Starting cameraâ€¦',
-                      style: TextStyle(fontFamily: 'Inter', fontSize: 13, color: Colors.white60)),
+                  Text(AppLocalizations.t(context, 'wardrobe_starting_camera'),
+                      style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 13, color: Colors.white60)),
                 ])),
               ),
         // â”€â”€ Corner frame guides â”€â”€
@@ -2079,7 +1628,7 @@ class _AddItemModalState extends State<_AddItemModal>
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     const Icon(Icons.photo_library_outlined, size: 16, color: Colors.white),
                     const SizedBox(width: 7),
-                    const Text('Gallery', style: TextStyle(fontFamily: 'Inter',
+                    Text(AppLocalizations.t(context, 'wardrobe_gallery'), style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily,
                         fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white)),
                   ]),
                 ),
@@ -2115,6 +1664,7 @@ class _AddItemModalState extends State<_AddItemModal>
 
   // â”€â”€ STEP 2: AI scanning â€” full screen with photo bg â”€â”€
   Widget _buildDetectingBody() {
+    final isMulti = _isGalleryPick && _galleryImages.length > 1;
     return Stack(
       key: const ValueKey('detecting'),
       fit: StackFit.expand,
@@ -2128,12 +1678,19 @@ class _AddItemModalState extends State<_AddItemModal>
         Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
           _ScanPulse(color: t.accent.primary),
           const SizedBox(height: 24),
-          Text('Scanning outfitâ€¦', style: TextStyle(fontFamily: 'Inter', fontSize: 20,
-              fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: -0.3)),
+          Text(
+            isMulti ? 'Scanning ${_galleryImages.length} imagesâ€¦' : 'Scanning outfitâ€¦',
+            style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 20,
+                fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: -0.3),
+          ),
           const SizedBox(height: 8),
-          Text('AI is detecting your items',
-              style: TextStyle(fontFamily: 'Inter', fontSize: 13,
-                  color: Colors.white54, fontWeight: FontWeight.w400)),
+          Text(
+            isMulti
+                ? 'AI is detecting items from all images in parallel'
+                : 'AI is detecting your items',
+            style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 13,
+                color: Colors.white54, fontWeight: FontWeight.w400),
+          ),
         ])),
       ],
     );
@@ -2145,8 +1702,48 @@ class _AddItemModalState extends State<_AddItemModal>
       key: const ValueKey('results'),
       mainAxisSize: MainAxisSize.min,
       children: [
-        // â”€â”€ Captured photo strip â”€â”€
-        if (_capturedBytes != null)
+        // â”€â”€ Photo strip / thumbnails â”€â”€
+        if (_isGalleryPick && _galleryImages.length > 1) ...[
+          // Multi-image thumbnail row with retake button
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+            child: Row(children: [
+              Expanded(
+                child: SizedBox(
+                  height: 72,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _galleryImages.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 6),
+                    itemBuilder: (_, idx) => ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.memory(_galleryImages[idx],
+                          width: 72, height: 72, fit: BoxFit.cover),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              GestureDetector(
+                onTap: _retake,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: t.panel,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: t.cardBorder),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.refresh, size: 13, color: t.mutedText),
+                    const SizedBox(width: 5),
+                    Text(AppLocalizations.t(context, 'wardrobe_retake'), style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily,
+                        fontSize: 12, color: t.mutedText, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
+        ] else if (_capturedBytes != null)
           Stack(children: [
             SizedBox(
               height: 130,
@@ -2174,10 +1771,10 @@ class _AddItemModalState extends State<_AddItemModal>
                     color: Colors.black.withOpacity(0.60),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.refresh, color: Colors.white, size: 13),
-                    SizedBox(width: 5),
-                    Text('Retake', style: TextStyle(fontFamily: 'Inter',
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.refresh, color: Colors.white, size: 13),
+                    const SizedBox(width: 5),
+                    Text(AppLocalizations.t(context, 'wardrobe_retake'), style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily,
                         fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
                   ]),
                 ),
@@ -2200,18 +1797,18 @@ class _AddItemModalState extends State<_AddItemModal>
                 Icon(Icons.info_outline, size: 15, color: t.accent.primary),
                 const SizedBox(width: 8),
                 Expanded(child: Text(_detectError!, style: TextStyle(
-                    fontFamily: 'Inter', fontSize: 12, color: t.mutedText))),
+                    fontFamily: GoogleFonts.inter().fontFamily, fontSize: 12, color: t.mutedText))),
               ]),
               const SizedBox(height: 10),
               GestureDetector(
-                onTap: _retake,
+                onTap: _tryAgain,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(colors: [t.accent.primary, t.accent.tertiary]),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text('Try again', style: TextStyle(fontFamily: 'Inter',
+                  child: Text(AppLocalizations.t(context, 'wardrobe_try_again'), style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily,
                       fontSize: 12, fontWeight: FontWeight.w600, color: t.textPrimary)),
                 ),
               ),
@@ -2234,8 +1831,8 @@ class _AddItemModalState extends State<_AddItemModal>
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Text('âœ¦', style: TextStyle(fontSize: 9, color: t.accent.primary)),
                   const SizedBox(width: 4),
-                  Text('${_detected.length} detected',
-                      style: TextStyle(fontFamily: 'Inter', fontSize: 11,
+                  Text("${_detected.length} ${AppLocalizations.t(context, 'wardrobe_detected')}",
+                      style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 11,
                           fontWeight: FontWeight.w700, color: t.accent.primary)),
                 ]),
               ),
@@ -2243,13 +1840,24 @@ class _AddItemModalState extends State<_AddItemModal>
               GestureDetector(
                 onTap: () {
                   final all = _detected.every((i) => i.selected);
-                  setState(() { for (final i in _detected) {
-                    i.selected = !all;
-                  } });
+                  if (all) {
+                    // deselect all
+                    setState(() { for (final i in _detected) { i.selected = false; } });
+                  } else {
+                    // select up to 6
+                    int count = 0;
+                    setState(() {
+                      for (final i in _detected) {
+                        if (count < 6) { i.selected = true; count++; }
+                        else { i.selected = false; }
+                      }
+                    });
+                    if (_detected.length > 6) _toast('Maximum 6 items selected');
+                  }
                 },
                 child: Text(
-                  _detected.every((i) => i.selected) ? 'Deselect all' : 'Select all',
-                  style: TextStyle(fontFamily: 'Inter', fontSize: 12,
+                  _detected.every((i) => i.selected) ? AppLocalizations.t(context, 'wardrobe_deselect_all') : AppLocalizations.t(context, 'wardrobe_select_all'),
+                  style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 12,
                       color: t.accent.primary, fontWeight: FontWeight.w600),
                 ),
               ),
@@ -2265,7 +1873,14 @@ class _AddItemModalState extends State<_AddItemModal>
               itemBuilder: (_, i) {
                 final item = _detected[i];
                 return GestureDetector(
-                  onTap: () => setState(() => item.selected = !item.selected),
+                  onTap: () {
+                    final selCount = _detected.where((d) => d.selected).length;
+                    if (!item.selected && selCount >= 6) {
+                      _toast('Maximum 6 items per outfit');
+                      return;
+                    }
+                    setState(() => item.selected = !item.selected);
+                  },
                   onLongPress: () => _editItem(i),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 180),
@@ -2293,7 +1908,7 @@ class _AddItemModalState extends State<_AddItemModal>
                       ),
                       const SizedBox(width: 12),
                       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(item.name, style: TextStyle(fontFamily: 'Inter', fontSize: 14,
+                        Text(item.name, style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 14,
                             fontWeight: FontWeight.w600, color: t.textPrimary)),
                         const SizedBox(height: 5),
                         Wrap(spacing: 5, runSpacing: 4, children: [
@@ -2338,21 +1953,21 @@ class _AddItemModalState extends State<_AddItemModal>
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               const Text('ðŸ”', style: TextStyle(fontSize: 40)),
               const SizedBox(height: 12),
-              Text('No items detected', style: TextStyle(fontFamily: 'Inter', fontSize: 15,
+              Text(AppLocalizations.t(context, 'wardrobe_no_items'), style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 15,
                   fontWeight: FontWeight.w600, color: t.textPrimary)),
               const SizedBox(height: 4),
-              Text('Try better lighting or a clearer angle.',
-                  style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: t.mutedText)),
+              Text(AppLocalizations.t(context, 'wardrobe_no_items_desc'),
+                  style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 12, color: t.mutedText)),
               const SizedBox(height: 16),
               GestureDetector(
-                onTap: _retake,
+                onTap: _tryAgain,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 11),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(colors: [t.accent.primary, t.accent.tertiary]),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text('Retake photo', style: TextStyle(fontFamily: 'Inter',
+                  child: Text(AppLocalizations.t(context, 'wardrobe_retake_photo'), style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily,
                       fontSize: 13, fontWeight: FontWeight.w600, color: t.textPrimary)),
                 ),
               ),
@@ -2368,8 +1983,52 @@ class _AddItemModalState extends State<_AddItemModal>
     return SingleChildScrollView(
       key: const ValueKey('editing'),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // â”€â”€ Photo banner (full-width, taller) â”€â”€
-        if (_capturedBytes != null)
+        // â”€â”€ Photo banner â”€â”€
+        if (_isGalleryPick && _galleryImages.isNotEmpty) ...[
+          // Multi-image horizontal strip
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: t.accent.primary.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: t.accent.primary.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('ðŸ–¼', style: TextStyle(fontSize: 10)),
+                    const SizedBox(width: 4),
+                    Text("${_galleryImages.length} ${AppLocalizations.t(context, 'wardrobe_photos_selected')}",
+                        style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 11,
+                            fontWeight: FontWeight.w700, color: t.accent.primary)),
+                  ]),
+                ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: _retake,
+                  child: Text(AppLocalizations.t(context, 'wardrobe_change'), style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily,
+                      fontSize: 12, color: t.accent.primary, fontWeight: FontWeight.w600)),
+                ),
+              ]),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 90,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _galleryImages.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (_, idx) => ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.memory(_galleryImages[idx],
+                        width: 90, height: 90, fit: BoxFit.cover),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        ] else if (_capturedBytes != null)
           Stack(children: [
             SizedBox(
               height: 160,
@@ -2401,7 +2060,7 @@ class _AddItemModalState extends State<_AddItemModal>
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Text('âœ¦', style: TextStyle(fontSize: 9, color: t.textPrimary)),
                     const SizedBox(width: 5),
-                    Text('AI Auto-filled', style: TextStyle(fontFamily: 'Inter',
+                    Text(AppLocalizations.t(context, 'wardrobe_ai_filled'), style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily,
                         fontSize: 11, fontWeight: FontWeight.w700, color: t.textPrimary)),
                   ]),
                 ),
@@ -2412,14 +2071,14 @@ class _AddItemModalState extends State<_AddItemModal>
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _ModalField(label: 'Item name *',
+            _ModalField(label: AppLocalizations.t(context, 'wardrobe_item_name'),
                 child: _StyledInput(controller: _nameCtrl, hint: 'e.g. White linen shirt')),
             const SizedBox(height: 14),
-            _ModalField(label: 'Category *',
+            _ModalField(label: AppLocalizations.t(context, 'wardrobe_category_required'),
                 child: _CategoryDropdown(value: _selectedCat, categories: _cats,
                     onChanged: (v) => setState(() => _selectedCat = v ?? ''))),
             const SizedBox(height: 14),
-            _ModalField(label: 'Occasions',
+            _ModalField(label: AppLocalizations.t(context, 'occasion'),
                 child: Wrap(spacing: 7, runSpacing: 7,
                   children: _occs.map((occ) {
                     final active = _selectedOccs.contains(occ);
@@ -2435,7 +2094,7 @@ class _AddItemModalState extends State<_AddItemModal>
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(color: active ? t.accent.primary : t.cardBorder, width: 1.5),
                         ),
-                        child: Text(occ, style: TextStyle(fontFamily: 'Inter', fontSize: 13,
+                        child: Text(occ, style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 13,
                             fontWeight: FontWeight.w500,
                             color: active ? t.textPrimary : t.mutedText)),
                       ),
@@ -2443,7 +2102,7 @@ class _AddItemModalState extends State<_AddItemModal>
                   }).toList(),
                 )),
             const SizedBox(height: 14),
-            _ModalField(label: 'Notes (optional)',
+            _ModalField(label: AppLocalizations.t(context, 'wardrobe_notes_optional'),
                 child: _StyledInput(controller: _notesCtrl,
                     hint: 'Colour, material, where you got itâ€¦', maxLines: 3)),
           ]),
@@ -2472,7 +2131,7 @@ class _AddItemModalState extends State<_AddItemModal>
               decoration: BoxDecoration(color: t.panel, borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: t.cardBorder, width: 1.5)),
               alignment: Alignment.center,
-              child: Text('Cancel', style: TextStyle(fontFamily: 'Inter', fontSize: 14, color: t.mutedText)),
+              child: Text(AppLocalizations.t(context, 'cancel'), style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 14, color: t.mutedText)),
             ),
           ),
         ),
@@ -2499,8 +2158,8 @@ class _AddItemModalState extends State<_AddItemModal>
                 border: Border.all(color: t.cardBorder, width: 1.5),
               ),
               alignment: Alignment.center,
-              child: Text('Cancel', style: TextStyle(
-                  fontFamily: 'Inter', fontSize: 14, color: t.mutedText)),
+              child: Text(AppLocalizations.t(context, 'cancel'), style: TextStyle(
+                  fontFamily: GoogleFonts.inter().fontFamily, fontSize: 14, color: t.mutedText)),
             ),
           ),
         ),
@@ -2511,16 +2170,16 @@ class _AddItemModalState extends State<_AddItemModal>
       _ModalStep.camera    => '',
       _ModalStep.detecting => 'âœ¦  Detectingâ€¦',
       _ModalStep.results   => selCount == 0
-          ? 'Select items'
-          : 'Add $selCount item${selCount != 1 ? 's' : ''} to Wardrobe â†’',
+          ? AppLocalizations.t(context, 'wardrobe_select_items')
+          : 'Add $selCount/6 item${selCount != 1 ? 's' : ''} to Wardrobe â†’',
       _ModalStep.editing   => _editingIndex != null ? 'Save changes' : 'Save to wardrobe âœ¦',
     };
     final bool primaryDisabled = (_step == _ModalStep.results && selCount == 0) || _step == _ModalStep.detecting;
     final VoidCallback? primaryAction = switch (_step) {
       _ModalStep.camera    => null,
       _ModalStep.detecting => null,
-      _ModalStep.results   => (selCount == 0 || _detected.isEmpty) ? null : () { _confirmAndSave(); },
-      _ModalStep.editing   => _editingIndex != null ? _saveEditedItem : () { _manualSave(); },
+      _ModalStep.results   => (selCount == 0 || _detected.isEmpty) ? null : _confirmAndSave,
+      _ModalStep.editing   => _editingIndex != null ? _saveEditedItem : _manualSave,
     };
 
     return Container(
@@ -2536,7 +2195,7 @@ class _AddItemModalState extends State<_AddItemModal>
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
             decoration: BoxDecoration(color: t.panel, borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: t.cardBorder, width: 1.5)),
-            child: Text('Cancel', style: TextStyle(fontFamily: 'Inter', fontSize: 14, color: t.mutedText)),
+            child: Text(AppLocalizations.t(context, 'cancel'), style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 14, color: t.mutedText)),
           ),
         ),
         const SizedBox(width: 10),
@@ -2556,7 +2215,7 @@ class _AddItemModalState extends State<_AddItemModal>
                 borderRadius: BorderRadius.circular(14),
               ),
               alignment: Alignment.center,
-              child: Text(primaryLabel, style: TextStyle(fontFamily: 'Inter', fontSize: 14,
+              child: Text(primaryLabel, style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 14,
                   fontWeight: FontWeight.w700, color: t.textPrimary)),
             ),
           ),
@@ -2667,7 +2326,7 @@ class _SmallPill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(color: color.withOpacity(0.14),
           borderRadius: BorderRadius.circular(20)),
-      child: Text(label, style: TextStyle(fontFamily: 'Inter', fontSize: 10,
+      child: Text(label, style: TextStyle(fontFamily: GoogleFonts.inter().fontFamily, fontSize: 10,
           color: color, fontWeight: FontWeight.w500)),
     );
   }
@@ -2687,7 +2346,7 @@ class _ModalField extends StatelessWidget {
         Text(
           label.toUpperCase(),
           style: TextStyle(
-              fontFamily: 'Inter',
+              fontFamily: GoogleFonts.inter().fontFamily,
               fontSize: 11,
               fontWeight: FontWeight.w600,
               color: t.mutedText,
@@ -2732,7 +2391,7 @@ class _UploadSourceButton extends StatelessWidget {
                 label,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontFamily: 'Inter',
+                  fontFamily: GoogleFonts.inter().fontFamily,
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
                   color: t.mutedText,
@@ -2769,7 +2428,7 @@ class _StyledInput extends StatelessWidget {
         controller: controller,
         maxLines: maxLines,
         style: TextStyle(
-            fontFamily: 'Inter', fontSize: 14, color: t.textPrimary),
+            fontFamily: GoogleFonts.inter().fontFamily, fontSize: 14, color: t.textPrimary),
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: TextStyle(color: t.mutedText),
@@ -2804,13 +2463,13 @@ class _CategoryDropdown extends StatelessWidget {
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: value.isEmpty ? null : value,
-          hint: Text('â€” Select â€”',
+          hint: Text(AppLocalizations.t(context, 'wardrobe_select_hint'),
               style:
-              TextStyle(color: t.mutedText, fontFamily: 'Inter')),
+              TextStyle(color: t.mutedText, fontFamily: GoogleFonts.inter().fontFamily)),
           isExpanded: true,
           dropdownColor: t.backgroundSecondary,
           style: TextStyle(
-              fontFamily: 'Inter',
+              fontFamily: GoogleFonts.inter().fontFamily,
               fontSize: 14,
               color: t.textPrimary),
           items: categories
@@ -2829,7 +2488,6 @@ class _AppHeader extends StatelessWidget {
   final int activeTab;
   final ValueChanged<int> onTabTap;
   final VoidCallback onAddTap;
-  final VoidCallback onLensTap;
   final ValueChanged<String> onSearch;
 
   const _AppHeader({
@@ -2837,19 +2495,20 @@ class _AppHeader extends StatelessWidget {
     required this.activeTab,
     required this.onTabTap,
     required this.onAddTap,
-    required this.onLensTap,
     required this.onSearch,
   });
 
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
-    return Container(
+    return SafeArea(
+      bottom: false,
+      child: Container(
       decoration: BoxDecoration(
         color: t.backgroundPrimary.withValues(alpha: 0.92),
         border: Border(bottom: BorderSide(color: t.cardBorder, width: 1)),
       ),
-      padding: const EdgeInsets.fromLTRB(24, 52, 24, 0),
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
       child: Column(
         children: [
           Padding(
@@ -2861,29 +2520,16 @@ class _AppHeader extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      GestureDetector(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const ChatScreen(),
-                            ),
-                          );
-                        },
-                        child: Text(
-                          'AHVI',
-                          style: GoogleFonts.anton(
-                            fontSize: 36,
-                            color: t.textPrimary,
-                            letterSpacing: 0.6,
-                            height: 1,
-                          ),
-                        ),
+                      const AhviHomeText(
+                        fontSize: 30,
+                        letterSpacing: 3.2,
+                        fontWeight: FontWeight.w400,
                       ),
                       const SizedBox(height: 2),
                       Text(
                         title,
                         style: TextStyle(
-                          fontFamily: 'Inter',
+                          fontFamily: GoogleFonts.inter().fontFamily,
                           fontSize: 28,
                           fontWeight: FontWeight.w700,
                           color: t.textPrimary,
@@ -2897,47 +2543,6 @@ class _AppHeader extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 40),
                   child: Row(
                     children: [
-                      // Lens button
-                      _HoverScaleButton(
-                        scaleFactor: 1.02,
-                        duration: const Duration(milliseconds: 200),
-                        onTap: onLensTap,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: t.accent.primary.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: t.accent.primary.withValues(alpha: 0.25),
-                              width: 1,
-                            ),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 8,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.search_rounded,
-                                color: t.accent.primary,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Lens',
-                                style: TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                  color: t.accent.primary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
                       // Add item button
                       _HoverScaleButton(
                         scaleFactor: 1.02,
@@ -2963,9 +2568,9 @@ class _AppHeader extends StatelessWidget {
                                 Icon(Icons.add, color: t.textPrimary, size: 16),
                                 const SizedBox(width: 6),
                                 Text(
-                                  'Add item',
+                                  AppLocalizations.t(context, 'wardrobe_add_item'),
                                   style: TextStyle(
-                                    fontFamily: 'Inter',
+                                    fontFamily: GoogleFonts.inter().fontFamily,
                                     fontSize: 14,
                                     fontWeight: FontWeight.w500,
                                     color: t.textPrimary,
@@ -2998,12 +2603,12 @@ class _AppHeader extends StatelessWidget {
                     child: TextField(
                       onChanged: onSearch,
                       style: TextStyle(
-                        fontFamily: 'Inter',
+                        fontFamily: GoogleFonts.inter().fontFamily,
                         fontSize: 15,
                         color: t.textPrimary,
                       ),
                       decoration: InputDecoration(
-                        hintText: 'Search your notes, tagsâ€¦',
+                        hintText: AppLocalizations.t(context, 'wardrobe_search_hint'),
                         hintStyle: TextStyle(color: t.mutedText),
                         isDense: true,
                         border: InputBorder.none,
@@ -3017,6 +2622,7 @@ class _AppHeader extends StatelessWidget {
           ),
         ],
       ),
+    ),
     );
   }
 }
@@ -3062,59 +2668,22 @@ class _HoverScaleButtonState extends State<_HoverScaleButton> {
 // â”€â”€ FILTER BAR â”€â”€
 class _FilterBar extends StatelessWidget {
   final String activeCat;
-  final List<String> categories;
   final ValueChanged<String> onCatTap;
-  const _FilterBar({
-    required this.activeCat,
-    required this.categories,
-    required this.onCatTap,
-  });
-
-  static IconData _iconForCategory(String category) {
-    final value = category.toLowerCase();
-    if (value.contains('top') || value.contains('shirt') || value.contains('tee')) {
-      return Icons.checkroom_outlined;
-    }
-    if (value.contains('bottom') || value.contains('pant') || value.contains('jean')) {
-      return Icons.format_align_justify;
-    }
-    if (value.contains('outer') || value.contains('jacket') || value.contains('coat')) {
-      return Icons.umbrella_outlined;
-    }
-    if (value.contains('shoe') || value.contains('foot') || value.contains('sneaker')) {
-      return Icons.directions_walk;
-    }
-    if (value.contains('dress')) return Icons.dry_cleaning_outlined;
-    if (value.contains('bag')) return Icons.shopping_bag_outlined;
-    if (value.contains('jewel') || value.contains('watch')) return Icons.diamond_outlined;
-    if (value.contains('makeup') || value.contains('beauty')) {
-      return Icons.face_retouching_natural;
-    }
-    if (value.contains('skin')) return Icons.spa_outlined;
-    if (value.contains('accessor')) return Icons.watch_outlined;
-    return Icons.category_outlined;
-  }
+  const _FilterBar({required this.activeCat, required this.onCatTap});
 
   @override
   Widget build(BuildContext context) {
     final t = context.themeTokens;
     final accent4 = _accent4(t);
     final accent5 = _accent5(t);
-    final palette = <Color>[
-      t.accent.primary,
-      t.accent.secondary,
-      t.accent.tertiary,
-      accent4,
-      accent5,
-      _bagsChip(t),
-      _jewelryChip(t),
-      _makeupChip(t),
-      _skincareChip(t),
-    ];
+    final bags = _bagsChip(t);
+    final jewelry = _jewelryChip(t);
+    final makeup = _makeupChip(t);
+    final skincare = _skincareChip(t);
 
-    final chips = <_ChipData>[
+    final chips = [
       _ChipData(
-        label: 'All',
+        label: AppLocalizations.t(context, 'wardrobe_all'),
         icon: Icons.grid_view_rounded,
         activeGradient: LinearGradient(
           colors: [t.accent.primary, t.accent.secondary],
@@ -3126,24 +2695,117 @@ class _FilterBar extends StatelessWidget {
         inactiveText: t.mutedText,
         activeText: t.textPrimary,
       ),
+      _ChipData(
+        label: AppLocalizations.t(context, 'cat_tops'),
+        icon: Icons.checkroom_outlined,
+        activeBg: t.accent.primary.withValues(alpha: 0.28),
+        activeBorder: t.accent.primary,
+        activeShadow: t.accent.primary.withValues(alpha: 0.25),
+        inactiveBg: t.accent.primary.withValues(alpha: 0.12),
+        inactiveBorder: t.accent.primary.withValues(alpha: 0.30),
+        inactiveText: t.accent.primary,
+        activeText: t.textPrimary,
+      ),
+      _ChipData(
+        label: AppLocalizations.t(context, 'cat_bottoms'),
+        icon: Icons.format_align_justify,
+        activeBg: t.accent.secondary.withValues(alpha: 0.28),
+        activeBorder: t.accent.secondary,
+        activeShadow: t.accent.secondary.withValues(alpha: 0.25),
+        inactiveBg: t.accent.secondary.withValues(alpha: 0.12),
+        inactiveBorder: t.accent.secondary.withValues(alpha: 0.30),
+        inactiveText: t.accent.secondary,
+        activeText: t.textPrimary,
+      ),
+      _ChipData(
+        label: AppLocalizations.t(context, 'cat_outerwear'),
+        icon: Icons.umbrella_outlined,
+        activeBg: t.accent.tertiary.withValues(alpha: 0.22),
+        activeBorder: t.accent.tertiary,
+        activeShadow: t.accent.tertiary.withValues(alpha: 0.20),
+        inactiveBg: t.accent.tertiary.withValues(alpha: 0.10),
+        inactiveBorder: t.accent.tertiary.withValues(alpha: 0.30),
+        inactiveText: t.accent.tertiary,
+        activeText: t.textPrimary,
+      ),
+      _ChipData(
+        label: AppLocalizations.t(context, 'cat_footwear'),
+        icon: Icons.directions_walk,
+        activeBg: accent5.withValues(alpha: 0.22),
+        activeBorder: accent5,
+        activeShadow: accent5.withValues(alpha: 0.20),
+        inactiveBg: accent5.withValues(alpha: 0.10),
+        inactiveBorder: accent5.withValues(alpha: 0.30),
+        inactiveText: accent5,
+        activeText: t.textPrimary,
+      ),
+      _ChipData(
+        label: AppLocalizations.t(context, 'cat_dresses'),
+        icon: Icons.dry_cleaning_outlined,
+        activeBg: accent4.withValues(alpha: 0.22),
+        activeBorder: accent4,
+        activeShadow: accent4.withValues(alpha: 0.20),
+        inactiveBg: accent4.withValues(alpha: 0.10),
+        inactiveBorder: accent4.withValues(alpha: 0.30),
+        inactiveText: accent4,
+        activeText: t.textPrimary,
+      ),
+      _ChipData(
+        label: AppLocalizations.t(context, 'cat_accessories'),
+        icon: Icons.watch_outlined,
+        activeBg: t.accent.secondary.withValues(alpha: 0.24),
+        activeBorder: t.accent.secondary,
+        activeShadow: t.accent.secondary.withValues(alpha: 0.20),
+        inactiveBg: t.accent.secondary.withValues(alpha: 0.10),
+        inactiveBorder: t.accent.secondary.withValues(alpha: 0.28),
+        inactiveText: t.accent.secondary,
+        activeText: t.textPrimary,
+      ),
+      _ChipData(
+        label: AppLocalizations.t(context, 'cat_bags'),
+        icon: Icons.shopping_bag_outlined,
+        activeBg: bags.withValues(alpha: 0.22),
+        activeBorder: bags,
+        activeShadow: bags.withValues(alpha: 0.25),
+        inactiveBg: bags.withValues(alpha: 0.12),
+        inactiveBorder: bags.withValues(alpha: 0.30),
+        inactiveText: bags,
+        activeText: t.textPrimary,
+      ),
+      _ChipData(
+        label: AppLocalizations.t(context, 'cat_jewelry'),
+        icon: Icons.diamond_outlined,
+        activeBg: jewelry.withValues(alpha: 0.22),
+        activeBorder: jewelry,
+        activeShadow: jewelry.withValues(alpha: 0.25),
+        inactiveBg: jewelry.withValues(alpha: 0.12),
+        inactiveBorder: jewelry.withValues(alpha: 0.30),
+        inactiveText: jewelry,
+        activeText: t.textPrimary,
+      ),
+      _ChipData(
+        label: AppLocalizations.t(context, 'cat_makeup'),
+        icon: Icons.face_retouching_natural,
+        activeBg: makeup.withValues(alpha: 0.22),
+        activeBorder: makeup,
+        activeShadow: makeup.withValues(alpha: 0.25),
+        inactiveBg: makeup.withValues(alpha: 0.12),
+        inactiveBorder: makeup.withValues(alpha: 0.30),
+        inactiveText: makeup,
+        activeText: t.textPrimary,
+      ),
+      _ChipData(
+        label: AppLocalizations.t(context, 'cat_skincare'),
+        icon: Icons.spa_outlined,
+        activeBg: skincare.withValues(alpha: 0.22),
+        activeBorder: skincare,
+        activeShadow: skincare.withValues(alpha: 0.25),
+        inactiveBg: skincare.withValues(alpha: 0.12),
+        inactiveBorder: skincare.withValues(alpha: 0.30),
+        inactiveText: skincare,
+        activeText: t.textPrimary,
+      ),
     ];
-    for (int i = 0; i < categories.length; i++) {
-      final base = palette[i % palette.length];
-      final category = categories[i];
-      chips.add(
-        _ChipData(
-          label: category,
-          icon: _iconForCategory(category),
-          activeBg: base.withValues(alpha: 0.26),
-          activeBorder: base,
-          activeShadow: base.withValues(alpha: 0.22),
-          inactiveBg: base.withValues(alpha: 0.11),
-          inactiveBorder: base.withValues(alpha: 0.30),
-          inactiveText: base,
-          activeText: t.textPrimary,
-        ),
-      );
-    }
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -3271,7 +2933,7 @@ class _FilterChipState extends State<_FilterChip> {
               Text(
                 widget.chip.label,
                 style: TextStyle(
-                  fontFamily: 'Inter',
+                  fontFamily: GoogleFonts.inter().fontFamily,
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
                   color: widget.isActive
@@ -3385,7 +3047,7 @@ class _InlineInsightCardState extends State<_InlineInsightCard>
   String _computeInsightText() {
     final total = widget.wardrobe.length;
     if (total == 0) {
-      return 'Add items to your wardrobe to unlock smart style insights.';
+      return AppLocalizations.t(context, 'wardrobe_insight_empty');
     }
     final wornItems = widget.wardrobe.where((i) => i.worn > 0).toList();
     final unwornCount = total - wornItems.length;
@@ -3497,9 +3159,9 @@ class _InlineInsightCardState extends State<_InlineInsightCard>
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      'AI INSIGHT',
+                      AppLocalizations.t(context, 'wardrobe_ai_insight'),
                       style: TextStyle(
-                        fontFamily: 'Inter',
+                        fontFamily: GoogleFonts.inter().fontFamily,
                         fontSize: 9,
                         fontWeight: FontWeight.w800,
                         color: accent2,
@@ -3512,7 +3174,7 @@ class _InlineInsightCardState extends State<_InlineInsightCard>
                 Text(
                   _computeInsightText(),
                   style: TextStyle(
-                    fontFamily: 'Inter',
+                    fontFamily: GoogleFonts.inter().fontFamily,
                     fontSize: 12.5,
                     color: t.mutedText,
                     height: 1.5,
@@ -3807,7 +3469,7 @@ class _ItemCardState extends State<_ItemCard>
                         Text(
                           item.name,
                           style: TextStyle(
-                            fontFamily: 'Inter',
+                            fontFamily: GoogleFonts.inter().fontFamily,
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                             color: t.textPrimary,
@@ -3822,7 +3484,7 @@ class _ItemCardState extends State<_ItemCard>
                             Text(
                               item.cat,
                               style: TextStyle(
-                                fontFamily: 'Inter',
+                                fontFamily: GoogleFonts.inter().fontFamily,
                                 fontSize: 11,
                                 color: t.mutedText,
                               ),
@@ -3839,7 +3501,7 @@ class _ItemCardState extends State<_ItemCard>
                               child: Text(
                                 wornLabel,
                                 style: TextStyle(
-                                  fontFamily: 'Inter',
+                                  fontFamily: GoogleFonts.inter().fontFamily,
                                   fontSize: 10,
                                   fontWeight: FontWeight.w500,
                                   color: wornTextColor,
@@ -3987,7 +3649,7 @@ class _ItemCardState extends State<_ItemCard>
                                   '+ Wore it',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
-                                    fontFamily: 'Inter',
+                                    fontFamily: GoogleFonts.inter().fontFamily,
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
                                     color: t.tileText,
@@ -4095,9 +3757,9 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Your wardrobe is empty',
+            AppLocalizations.t(context, 'wardrobe_empty_title'),
             style: TextStyle(
-              fontFamily: 'Inter',
+              fontFamily: GoogleFonts.inter().fontFamily,
               fontSize: 22,
               fontWeight: FontWeight.w600,
               color: t.textPrimary,
@@ -4106,9 +3768,9 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Add pieces to start building your digital closet and get AI-powered outfit ideas.',
+            AppLocalizations.t(context, 'wardrobe_empty_desc'),
             style: TextStyle(
-              fontFamily: 'Inter',
+              fontFamily: GoogleFonts.inter().fontFamily,
               fontSize: 14,
               color: t.mutedText,
               height: 1.7,
@@ -4127,9 +3789,9 @@ class _EmptyState extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
-                '+ Add first item',
+                  '+ ${AppLocalizations.t(context, 'wardrobe_add_first_item')}',
                 style: TextStyle(
-                  fontFamily: 'Inter',
+                  fontFamily: GoogleFonts.inter().fontFamily,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: t.textPrimary,
@@ -4161,7 +3823,7 @@ class _EmptySearch extends StatelessWidget {
           Text(
             'No results',
             style: TextStyle(
-              fontFamily: 'Inter',
+              fontFamily: GoogleFonts.inter().fontFamily,
               fontSize: 20,
               fontWeight: FontWeight.w600,
               color: t.textPrimary,
@@ -4171,7 +3833,7 @@ class _EmptySearch extends StatelessWidget {
           Text(
             'Try a different search or category.',
             style: TextStyle(
-              fontFamily: 'Inter',
+              fontFamily: GoogleFonts.inter().fontFamily,
               fontSize: 14,
               color: t.mutedText,
             ),
@@ -4204,7 +3866,7 @@ class _StatsPanel extends StatelessWidget {
           Text(
             'Overview',
             style: TextStyle(
-              fontFamily: 'Inter',
+              fontFamily: GoogleFonts.inter().fontFamily,
               fontSize: 20,
               fontWeight: FontWeight.w700,
               color: t.textPrimary,
@@ -4232,7 +3894,7 @@ class _StatsPanel extends StatelessWidget {
                 iconBg: t.accent.primary.withValues(alpha: 0.25),
                 iconChar: 'ðŸ‘•',
                 number: '$total',
-                label: 'TOTAL PIECES',
+                label: AppLocalizations.t(context, 'wardrobe_total_pieces'),
                 sub: 'in your wardrobe',
               ),
               _HoverStatCard(
@@ -4247,7 +3909,7 @@ class _StatsPanel extends StatelessWidget {
                 iconBg: accent4.withValues(alpha: 0.25),
                 iconChar: 'ðŸ‘—',
                 number: '0',
-                label: 'OUTFITS SAVED',
+                label: AppLocalizations.t(context, 'wardrobe_outfits_saved'),
                 sub: 'ready to wear',
               ),
               _HoverStatCard(
@@ -4262,7 +3924,7 @@ class _StatsPanel extends StatelessWidget {
                 iconBg: t.accent.tertiary.withValues(alpha: 0.25),
                 iconChar: 'âœ“',
                 number: '$totalWears',
-                label: 'TIMES WORN',
+                label: AppLocalizations.t(context, 'wardrobe_times_worn_stat'),
                 sub: 'total logs',
               ),
               _HoverStatCard(
@@ -4277,7 +3939,7 @@ class _StatsPanel extends StatelessWidget {
                 iconBg: t.accent.secondary.withValues(alpha: 0.25),
                 iconChar: 'â˜…',
                 number: '$wearRate%',
-                label: 'WEAR RATE',
+                label: AppLocalizations.t(context, 'wardrobe_wear_rate'),
                 sub: 'items worn at least once',
               ),
             ],
@@ -4310,7 +3972,7 @@ class _StatsPanel extends StatelessWidget {
           child: Text(
             'No wear logs yet',
             style: TextStyle(
-              fontFamily: 'Inter',
+              fontFamily: GoogleFonts.inter().fontFamily,
               fontSize: 13,
               color: t.mutedText,
             ),
@@ -4338,7 +4000,7 @@ class _StatsPanel extends StatelessWidget {
         child: Text(
           'Everything has been worn â€” great work! ðŸŽ‰',
           style: TextStyle(
-            fontFamily: 'Inter',
+            fontFamily: GoogleFonts.inter().fontFamily,
             fontSize: 13,
             fontStyle: FontStyle.italic,
             color: t.mutedText,
@@ -4389,7 +4051,7 @@ class _StatsPanel extends StatelessWidget {
                           Text(
                             item.name,
                             style: TextStyle(
-                              fontFamily: 'Inter',
+                              fontFamily: GoogleFonts.inter().fontFamily,
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: t.textPrimary,
@@ -4401,7 +4063,7 @@ class _StatsPanel extends StatelessWidget {
                           Text(
                             item.cat,
                             style: TextStyle(
-                              fontFamily: 'Inter',
+                              fontFamily: GoogleFonts.inter().fontFamily,
                               fontSize: 11,
                               color: t.mutedText,
                             ),
@@ -4424,7 +4086,7 @@ class _StatsPanel extends StatelessWidget {
                       child: Text(
                         'Unworn',
                         style: TextStyle(
-                          fontFamily: 'Inter',
+                          fontFamily: GoogleFonts.inter().fontFamily,
                           fontSize: 9,
                           fontWeight: FontWeight.w700,
                           color: accent4,
@@ -4461,7 +4123,7 @@ class _StatsPanel extends StatelessWidget {
       Text(
         label,
         style: TextStyle(
-          fontFamily: 'Inter',
+          fontFamily: GoogleFonts.inter().fontFamily,
           fontSize: 12,
           fontWeight: FontWeight.w600,
           color: context.themeTokens.mutedText,
@@ -4580,7 +4242,7 @@ class _MostWornHoverCardState extends State<_MostWornHoverCard> {
             Text(
               widget.item.name,
               style: TextStyle(
-                fontFamily: 'Inter',
+                fontFamily: GoogleFonts.inter().fontFamily,
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
                 color: t.textPrimary,
@@ -4593,7 +4255,7 @@ class _MostWornHoverCardState extends State<_MostWornHoverCard> {
             Text(
               '${widget.item.worn}Ã— worn',
               style: TextStyle(
-                fontFamily: 'Inter',
+                fontFamily: GoogleFonts.inter().fontFamily,
                 fontSize: 10,
                 color: t.accent.secondary,
               ),
@@ -4682,7 +4344,7 @@ class _HoverStatCardState extends State<_HoverStatCard> {
             Text(
               widget.number,
               style: TextStyle(
-                fontFamily: 'Inter',
+                fontFamily: GoogleFonts.inter().fontFamily,
                 fontSize: 40,
                 fontWeight: FontWeight.w700,
                 color: t.textPrimary,
@@ -4694,7 +4356,7 @@ class _HoverStatCardState extends State<_HoverStatCard> {
             Text(
               widget.label,
               style: TextStyle(
-                fontFamily: 'Inter',
+                fontFamily: GoogleFonts.inter().fontFamily,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: t.textPrimary,
@@ -4705,7 +4367,7 @@ class _HoverStatCardState extends State<_HoverStatCard> {
             Text(
               widget.sub,
               style: TextStyle(
-                fontFamily: 'Inter',
+                fontFamily: GoogleFonts.inter().fontFamily,
                 fontSize: 12,
                 color: t.textPrimary.withValues(alpha: 0.75),
                 fontStyle: FontStyle.italic,
@@ -4776,7 +4438,7 @@ class _BarSectionState extends State<_BarSection>
                       child: Text(
                         bar.label,
                         style: TextStyle(
-                          fontFamily: 'Inter',
+                          fontFamily: GoogleFonts.inter().fontFamily,
                           fontSize: 13,
                           color: t.mutedText,
                           fontWeight: FontWeight.w400,
@@ -4815,7 +4477,7 @@ class _BarSectionState extends State<_BarSection>
                         '${(bar.value * 100).round()}',
                         textAlign: TextAlign.right,
                         style: TextStyle(
-                          fontFamily: 'Inter',
+                          fontFamily: GoogleFonts.inter().fontFamily,
                           fontSize: 12,
                           color: t.mutedText,
                         ),
@@ -4925,7 +4587,7 @@ class _WardrobeLensSheet extends StatelessWidget {
                     Text(
                       'AHVI Lens',
                       style: TextStyle(
-                        fontFamily: 'Inter',
+                        fontFamily: GoogleFonts.inter().fontFamily,
                         color: textHeading,
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
@@ -4983,7 +4645,7 @@ class _WardrobeLensSheet extends StatelessWidget {
                       Text(
                         'Visual AI Search',
                         style: TextStyle(
-                          fontFamily: 'Inter',
+                          fontFamily: GoogleFonts.inter().fontFamily,
                           color: textHeading,
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -4993,7 +4655,7 @@ class _WardrobeLensSheet extends StatelessWidget {
                       Text(
                         'Point at any item to find, save, or get styling advice.',
                         style: TextStyle(
-                          fontFamily: 'Inter',
+                          fontFamily: GoogleFonts.inter().fontFamily,
                           color: textMuted,
                           fontSize: 11.5,
                           height: 1.5,
@@ -5119,7 +4781,7 @@ class _WardrobeLensOptionState extends State<_WardrobeLensOption> {
                       Text(
                         widget.name,
                         style: TextStyle(
-                          fontFamily: 'Inter',
+                          fontFamily: GoogleFonts.inter().fontFamily,
                           color: widget.textHeading,
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -5128,7 +4790,7 @@ class _WardrobeLensOptionState extends State<_WardrobeLensOption> {
                       Text(
                         widget.desc,
                         style: TextStyle(
-                          fontFamily: 'Inter',
+                          fontFamily: GoogleFonts.inter().fontFamily,
                           color: widget.textMuted,
                           fontSize: 11,
                         ),
@@ -5155,8 +4817,3 @@ class _WardrobeLensOptionState extends State<_WardrobeLensOption> {
     );
   }
 }
-
-
-
-
-

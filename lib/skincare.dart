@@ -1,13 +1,18 @@
-import 'dart:async';
-
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+// ignore: depend_on_referenced_packages
+import 'package:http/http.dart' as http;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:myapp/services/appwrite_service.dart';
-import 'package:myapp/services/backend_service.dart';
+import 'package:myapp/app_localizations.dart';
 import 'package:myapp/theme/theme_tokens.dart';
+import 'package:myapp/theme/theme_controller.dart';
 import 'package:myapp/widgets/ahvi_stylist_chat.dart';
 import 'package:myapp/widgets/ahvi_lens_sheet.dart';
+
+Map<String, dynamic> _parseSkincareJsonMap(String payload) =>
+    Map<String, dynamic>.from(jsonDecode(payload) as Map);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  BEHAVIORAL DIFF ANALYSIS REPORT
@@ -111,21 +116,6 @@ import 'package:myapp/widgets/ahvi_lens_sheet.dart';
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: SkincareScreen(),
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Color constants
@@ -154,19 +144,19 @@ Color get _phoneShell2 => _t.phoneShellInner;
 // ─────────────────────────────────────────────────────────────────────────────
 //  Data
 // ─────────────────────────────────────────────────────────────────────────────
-const _dayRoutine = [
-  'Cleanser',
-  'Toner',
-  'Vitamin C Serum',
-  'Moisturizer',
-  'Sunscreen',
+const _dayRoutineKeys = [
+  'skin_cleanser',
+  'skin_toner',
+  'skin_vitamin_c',
+  'skin_moisturizer',
+  'skin_sunscreen',
 ];
-const _nightRoutine = [
-  'Cleanser',
-  'Toner',
-  'Retinol Serum',
-  'Night Cream',
-  'Lip Care',
+const _nightRoutineKeys = [
+  'skin_cleanser',
+  'skin_toner',
+  'skin_retinol',
+  'skin_night_cream',
+  'skin_lip_care',
 ];
 
 List<Color> get _stepColors => [
@@ -206,11 +196,6 @@ class _SkincareScreenState extends State<SkincareScreen>
   String _skinType = '';
   List<String> _concerns = [];
   Set<int> _completedSteps = {};
-  Set<int> _dayCompletedSteps = {};
-  Set<int> _nightCompletedSteps = {};
-  String? _skincareDocId;
-  bool _profileLoaded = false;
-  Timer? _profileSaveDebounce;
   bool _chatOpen = false;
 
   // ── F01: back-btn hover state ──────────────────────────────────────────────
@@ -228,14 +213,19 @@ class _SkincareScreenState extends State<SkincareScreen>
   late List<Animation<double>> _stepSlideAnims;
   late List<Animation<double>> _stepFadeAnims;
 
-  List<String> get _currentRoutine => _isNight ? _nightRoutine : _dayRoutine;
+  // Raw keys — safe to use in initState / animation setup (no context needed)
+  List<String> get _currentRoutineKeys => _isNight ? _nightRoutineKeys : _dayRoutineKeys;
+
+  // Translated labels — only call inside build() or methods called from build()
+  List<String> _currentRoutine(BuildContext ctx) =>
+      _currentRoutineKeys.map((k) => AppLocalizations.t(ctx, k)).toList();
   int get _completed => _completedSteps.length;
-  int get _total => _currentRoutine.length;
+  int get _total => _currentRoutineKeys.length;
   double get _progressPct => _total == 0 ? 0 : _completed / _total;
 
   String get _infoText {
     if (_skinType.isEmpty) {
-      return 'Select your skin type to personalise your routine';
+      return AppLocalizations.t(context, 'skin_select_type_hint');
     }
     if (_concerns.isEmpty) {
       return '$_skinType skin · ${_isNight ? 'night' : 'day'} routine · Pick your concerns';
@@ -247,13 +237,12 @@ class _SkincareScreenState extends State<SkincareScreen>
       final rem = _total - _completed;
       return '${(_progressPct * 100).round()}% done · $rem step${rem > 1 ? 's' : ''} remaining';
     }
-    return 'All done! Great ${_isNight ? 'night' : 'day'} routine 🎉';
+    return AppLocalizations.t(context, _isNight ? 'skin_all_done_night' : 'skin_all_done_day');
   }
 
   @override
   void initState() {
     super.initState();
-    _loadSkincareProfile();
 
     // ── F06: Init pulse animation (2.5s infinite) ──────────────────────────
     _pulseCtrl = AnimationController(
@@ -289,7 +278,7 @@ class _SkincareScreenState extends State<SkincareScreen>
       } catch (_) {}
     }
     _stepAnimCtrls = List.generate(
-      _currentRoutine.length,
+      _currentRoutineKeys.length,
       (i) => AnimationController(
         vsync: this,
         duration: const Duration(milliseconds: 350),
@@ -324,7 +313,6 @@ class _SkincareScreenState extends State<SkincareScreen>
 
   @override
   void dispose() {
-    _profileSaveDebounce?.cancel();
     _pulseCtrl.dispose();
     for (final c in _stepAnimCtrls) {
       c.dispose();
@@ -332,84 +320,12 @@ class _SkincareScreenState extends State<SkincareScreen>
     super.dispose();
   }
 
-  Future<void> _loadSkincareProfile() async {
-    try {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      final profile = await appwrite.getSkincareProfile();
-      if (!mounted || profile == null) return;
-
-      final data = profile.data;
-      final concerns = (data['concerns'] is List)
-          ? (data['concerns'] as List)
-                .map((e) => e.toString().trim())
-                .where((e) => e.isNotEmpty)
-                .toList()
-          : <String>[];
-
-      setState(() {
-        _skincareDocId = profile.$id;
-        _skinType = (data['skinType'] ?? '').toString();
-        _concerns = concerns;
-        _dayCompletedSteps = _toStepSet(data['daySteps']);
-        _nightCompletedSteps = _toStepSet(data['nightSteps']);
-        _completedSteps = Set<int>.from(
-          _isNight ? _nightCompletedSteps : _dayCompletedSteps,
-        );
-        _profileLoaded = true;
-      });
-    } catch (_) {}
-  }
-
-  Set<int> _toStepSet(dynamic value) {
-    if (value is List) {
-      return value
-          .map((e) => int.tryParse(e.toString()) ?? -1)
-          .where((v) => v >= 0)
-          .toSet();
-    }
-    return <int>{};
-  }
-
-  void _queueProfileSave() {
-    if (!_profileLoaded) return;
-    _profileSaveDebounce?.cancel();
-    _profileSaveDebounce = Timer(
-      const Duration(milliseconds: 350),
-      _persistSkincareProfile,
-    );
-  }
-
-  Future<void> _persistSkincareProfile() async {
-    final docId = _skincareDocId;
-    if (docId == null || docId.isEmpty) return;
-    try {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      final daySteps = _dayCompletedSteps.toList()..sort();
-      final nightSteps = _nightCompletedSteps.toList()..sort();
-      await appwrite.updateSkincareProfile(
-        documentId: docId,
-        skinType: _skinType,
-        concerns: List<String>.from(_concerns),
-        daySteps: daySteps,
-        nightSteps: nightSteps,
-      );
-    } catch (_) {}
-  }
-
   void _setRoutine(bool night) {
-    if (_isNight) {
-      _nightCompletedSteps = Set<int>.from(_completedSteps);
-    } else {
-      _dayCompletedSteps = Set<int>.from(_completedSteps);
-    }
     setState(() {
       _isNight = night;
-      _completedSteps = Set<int>.from(
-        _isNight ? _nightCompletedSteps : _dayCompletedSteps,
-      );
+      _completedSteps = {};
     });
-    _queueProfileSave();
-    // Re-trigger step slide-up animations on routine switch.
+    // ── F20: Re-trigger step slideUp animations on routine switch ─────────
     _buildStepAnimations();
     setState(() {}); // Rebuild with new controllers
     _playStepAnimations();
@@ -419,11 +335,8 @@ class _SkincareScreenState extends State<SkincareScreen>
     setState(() {
       _skinType = type;
       _completedSteps = {};
-      _dayCompletedSteps = {};
-      _nightCompletedSteps = {};
       _concerns = [];
     });
-    _queueProfileSave();
   }
 
   void _toggleConcern(String concern) {
@@ -434,20 +347,11 @@ class _SkincareScreenState extends State<SkincareScreen>
         _concerns.add(concern);
       }
     });
-    _queueProfileSave();
   }
 
   void _markStep(int index) {
     if (_completedSteps.contains(index)) return;
-    setState(() {
-      _completedSteps.add(index);
-      if (_isNight) {
-        _nightCompletedSteps = Set<int>.from(_completedSteps);
-      } else {
-        _dayCompletedSteps = Set<int>.from(_completedSteps);
-      }
-    });
-    _queueProfileSave();
+    setState(() => _completedSteps.add(index));
   }
 
   @override
@@ -494,50 +398,32 @@ class _SkincareScreenState extends State<SkincareScreen>
   // ── Header ──────────────────────────────────────────────────────────────────
   Widget _buildHeader() {
     return Padding(
-      padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 8, 20, 16),
+      padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 4, 20, 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           GestureDetector(
             onTap: () => Navigator.of(context).pop(),
             child: Container(
-              width: 36,
-              height: 36,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
                 color: _panel,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: _cardBorder),
               ),
-              child: Icon(Icons.chevron_left_rounded, color: _text, size: 22),
+              child: Icon(Icons.chevron_left_rounded, color: _text, size: 18),
             ),
           ),
           const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ShaderMask(
-                shaderCallback: (bounds) => LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [_accent, _accent2],
-                ).createShader(bounds),
-                child: Text(
-                  'Skincare',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    color: _text,
-                    letterSpacing: -0.5,
-                    height: 1,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                'Your personalised ritual ?',
-                style: TextStyle(fontSize: 12, color: _muted),
-              ),
-            ],
+          Text(
+            'Skincare',
+            style: TextStyle(
+              fontSize: 22.0,
+              fontWeight: FontWeight.w600,
+              color: _text,
+              letterSpacing: -0.5,
+            ),
           ),
         ],
       ),
@@ -557,14 +443,14 @@ class _SkincareScreenState extends State<SkincareScreen>
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [_buildSecLabel('Skin Type'), _buildSkinBar()],
+              children: [_buildSecLabel(AppLocalizations.t(context, 'skin_skin_type')), _buildSkinBar()],
             ),
           ),
           const SizedBox(height: 16),
           _buildSection(
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [_buildSecLabel('Concerns'), _buildConcernPills()],
+              children: [_buildSecLabel(AppLocalizations.t(context, 'skin_concerns')), _buildConcernPills()],
             ),
           ),
           const SizedBox(height: 16),
@@ -577,7 +463,7 @@ class _SkincareScreenState extends State<SkincareScreen>
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      'Daily Progress',
+                      AppLocalizations.t(context, 'skin_daily_progress'),
                       style: TextStyle(
                         fontSize: 12,
                         color: _muted,
@@ -604,7 +490,7 @@ class _SkincareScreenState extends State<SkincareScreen>
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildSecLabel(_isNight ? 'Night Routine' : 'Morning Routine'),
+                _buildSecLabel(AppLocalizations.t(context, _isNight ? 'skin_night_routine' : 'skin_morning_routine')),
                 _buildStepsGrid(),
               ],
             ),
@@ -697,7 +583,7 @@ class _SkincareScreenState extends State<SkincareScreen>
             ),
             const SizedBox(width: 7),
             Text(
-              isDay ? 'Morning' : 'Night',
+              isDay ? AppLocalizations.t(context, 'skin_morning') : AppLocalizations.t(context, 'skin_night'),
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -714,26 +600,26 @@ class _SkincareScreenState extends State<SkincareScreen>
   Widget _buildSkinBar() {
     final List<_SkinData> skins = [
       _SkinData(
-        'Oily',
+        AppLocalizations.t(context, 'skin_type_oily'),
         Icons.water_drop_outlined,
         _accent,
         _accent.withValues(alpha: 0.40),
       ),
       _SkinData(
-        'Dry',
+        AppLocalizations.t(context, 'skin_type_dry'),
         Icons.wb_sunny_outlined,
         _accent5,
         _accent5.withValues(alpha: 0.40),
       ),
       _SkinData(
-        'Normal',
+        AppLocalizations.t(context, 'skin_type_normal'),
         Icons.eco_outlined,
         _accent3,
         _accent3.withValues(alpha: 0.40),
       ),
-      _SkinData('Combo', Icons.add, _accent2, _accent2.withValues(alpha: 0.40)),
+      _SkinData(AppLocalizations.t(context, 'skin_type_combo'), Icons.add, _accent2, _accent2.withValues(alpha: 0.40)),
       _SkinData(
-        'Sensitive',
+        AppLocalizations.t(context, 'skin_type_sensitive'),
         Icons.favorite_outline,
         _accent4,
         _accent4.withValues(alpha: 0.40),
@@ -799,7 +685,7 @@ class _SkincareScreenState extends State<SkincareScreen>
   Widget _buildConcernPills() {
     final List<_ConcernData> concerns = [
       _ConcernData(
-        'Acne',
+        AppLocalizations.t(context, 'skin_concern_acne'),
         Icons.shield_outlined,
         _accent4,
         _accent4.withValues(alpha: 0.12),
@@ -807,7 +693,7 @@ class _SkincareScreenState extends State<SkincareScreen>
         _accent4.withValues(alpha: 0.40),
       ),
       _ConcernData(
-        'Pigmentation',
+        AppLocalizations.t(context, 'skin_concern_pigmentation'),
         Icons.grain,
         _accent2,
         _accent2.withValues(alpha: 0.12),
@@ -815,7 +701,7 @@ class _SkincareScreenState extends State<SkincareScreen>
         _accent2.withValues(alpha: 0.40),
       ),
       _ConcernData(
-        'Aging',
+        AppLocalizations.t(context, 'skin_concern_aging'),
         Icons.auto_awesome_outlined,
         _accent5,
         _accent5.withValues(alpha: 0.12),
@@ -823,7 +709,7 @@ class _SkincareScreenState extends State<SkincareScreen>
         _accent5.withValues(alpha: 0.45),
       ),
       _ConcernData(
-        'Dullness',
+        AppLocalizations.t(context, 'skin_concern_dullness'),
         Icons.wb_sunny_outlined,
         _accent,
         _accent.withValues(alpha: 0.12),
@@ -831,7 +717,7 @@ class _SkincareScreenState extends State<SkincareScreen>
         _accent.withValues(alpha: 0.45),
       ),
       _ConcernData(
-        'Dryness',
+        AppLocalizations.t(context, 'skin_concern_dryness'),
         Icons.water_drop_outlined,
         _accent3,
         _accent3.withValues(alpha: 0.12),
@@ -954,7 +840,7 @@ class _SkincareScreenState extends State<SkincareScreen>
 
   // ── Steps Grid ──────────────────────────────────────────────────────────────
   Widget _buildStepsGrid() {
-    final steps = _currentRoutine;
+    final steps = _currentRoutine(context);
     final List<Widget> rows = [];
     for (int i = 0; i < steps.length; i += 2) {
       rows.add(
@@ -996,49 +882,31 @@ class _SkincareScreenState extends State<SkincareScreen>
   }
 
   String? _stepImageUrl(String name) {
-    switch (name) {
-      case 'Cleanser':
-        return 'https://images.unsplash.com/photo-1556228724-4f3e2f3bb7f1?auto=format&fit=crop&w=120&q=80';
-      case 'Toner':
-        return 'https://images.unsplash.com/photo-1629198735660-e39ea93f5b49?auto=format&fit=crop&w=120&q=80';
-      case 'Vitamin C Serum':
-        return 'https://images.unsplash.com/photo-1571781418606-70265b9cce90?auto=format&fit=crop&w=120&q=80';
-      case 'Moisturizer':
-        return 'https://images.unsplash.com/photo-1625772452859-1c03d5bf1137?auto=format&fit=crop&w=120&q=80';
-      case 'Sunscreen':
-        return 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=120&q=80';
-      case 'Retinol Serum':
-        return 'https://images.unsplash.com/photo-1612817288484-6f916006741a?auto=format&fit=crop&w=120&q=80';
-      case 'Night Cream':
-        return 'https://images.unsplash.com/photo-1611080541599-8c6dbde6ed28?auto=format&fit=crop&w=120&q=80';
-      case 'Lip Care':
-        return 'https://images.unsplash.com/photo-1586495777744-4413f21062fa?auto=format&fit=crop&w=120&q=80';
-      default:
-        return null;
-    }
+    final Map<String, String> urlMap = {
+      AppLocalizations.t(context, 'skin_cleanser'): 'https://images.unsplash.com/photo-1556228724-4f3e2f3bb7f1?auto=format&fit=crop&w=120&q=80',
+      AppLocalizations.t(context, 'skin_toner'): 'https://images.unsplash.com/photo-1629198735660-e39ea93f5b49?auto=format&fit=crop&w=120&q=80',
+      AppLocalizations.t(context, 'skin_vitamin_c'): 'https://images.unsplash.com/photo-1571781418606-70265b9cce90?auto=format&fit=crop&w=120&q=80',
+      AppLocalizations.t(context, 'skin_moisturizer'): 'https://images.unsplash.com/photo-1625772452859-1c03d5bf1137?auto=format&fit=crop&w=120&q=80',
+      AppLocalizations.t(context, 'skin_sunscreen'): 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=120&q=80',
+      AppLocalizations.t(context, 'skin_retinol'): 'https://images.unsplash.com/photo-1612817288484-6f916006741a?auto=format&fit=crop&w=120&q=80',
+      AppLocalizations.t(context, 'skin_night_cream'): 'https://images.unsplash.com/photo-1611080541599-8c6dbde6ed28?auto=format&fit=crop&w=120&q=80',
+      AppLocalizations.t(context, 'skin_lip_care'): 'https://images.unsplash.com/photo-1586495777744-4413f21062fa?auto=format&fit=crop&w=120&q=80',
+    };
+    return urlMap[name];
   }
 
   IconData _stepIcon(String name) {
-    switch (name) {
-      case 'Cleanser':
-        return Icons.water_drop_outlined;
-      case 'Toner':
-        return Icons.grid_view_outlined;
-      case 'Vitamin C Serum':
-        return Icons.science_outlined;
-      case 'Moisturizer':
-        return Icons.opacity;
-      case 'Sunscreen':
-        return Icons.light_mode_outlined;
-      case 'Retinol Serum':
-        return Icons.biotech_outlined;
-      case 'Night Cream':
-        return Icons.bedtime_outlined;
-      case 'Lip Care':
-        return Icons.face_retouching_natural;
-      default:
-        return Icons.spa_outlined;
-    }
+    final Map<String, IconData> iconMap = {
+      AppLocalizations.t(context, 'skin_cleanser'): Icons.water_drop_outlined,
+      AppLocalizations.t(context, 'skin_toner'): Icons.grid_view_outlined,
+      AppLocalizations.t(context, 'skin_vitamin_c'): Icons.science_outlined,
+      AppLocalizations.t(context, 'skin_moisturizer'): Icons.opacity,
+      AppLocalizations.t(context, 'skin_sunscreen'): Icons.light_mode_outlined,
+      AppLocalizations.t(context, 'skin_retinol'): Icons.biotech_outlined,
+      AppLocalizations.t(context, 'skin_night_cream'): Icons.bedtime_outlined,
+      AppLocalizations.t(context, 'skin_lip_care'): Icons.face_retouching_natural,
+    };
+    return iconMap[name] ?? Icons.spa_outlined;
   }
 
   // ── Tip Card ────────────────────────────────────────────────────────────────
@@ -1085,9 +953,9 @@ class _SkincareScreenState extends State<SkincareScreen>
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const TextSpan(
+                  TextSpan(
                     text:
-                        'Consistency is your best skincare ingredient. Even 3 steps done daily beats 10 steps occasionally.',
+                        AppLocalizations.t(context, 'skin_pro_tip_text'),
                   ),
                 ],
               ),
@@ -1337,8 +1205,6 @@ class _ChatOverlayState extends State<_ChatOverlay>
   bool _isBusy = false;
   bool _showQuickPills = true;
   final List<Map<String, String>> _chatHistory = [];
-  String _chatMemory = '';
-  String _chatUserId = 'user_1';
 
   bool _isListening = false;
   late AnimationController _micPulseCtrl;
@@ -1347,13 +1213,7 @@ class _ChatOverlayState extends State<_ChatOverlay>
   final FocusNode _inputFocus = FocusNode();
   bool _inputFocused = false;
 
-  final _quickPills = [
-    'Best for oily skin? 💧',
-    'Morning routine order ☀️',
-    'Vitamin C tips 🍊',
-    'Retinol guide 🌙',
-    'Acne help 🌿',
-  ];
+  late List<String> _quickPills;
 
   String _ts() {
     final d = DateTime.now();
@@ -1367,10 +1227,26 @@ class _ChatOverlayState extends State<_ChatOverlay>
         'Steps done: ${widget.completedSteps}.';
   }
 
+  bool _quickPillsInited = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_quickPillsInited) {
+      _quickPills = [
+        AppLocalizations.t(context, 'skin_chip_oily'),
+        AppLocalizations.t(context, 'skin_chip_morning_order'),
+        AppLocalizations.t(context, 'skin_chip_vitamin_c'),
+        AppLocalizations.t(context, 'skin_chip_retinol'),
+        AppLocalizations.t(context, 'skin_chip_acne'),
+      ];
+      _quickPillsInited = true;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    _initChatIdentity();
     _animCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 420),
@@ -1402,15 +1278,6 @@ class _ChatOverlayState extends State<_ChatOverlay>
     });
   }
 
-  Future<void> _initChatIdentity() async {
-    try {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      final user = await appwrite.getCurrentUser();
-      if (!mounted || user == null || user.$id.isEmpty) return;
-      setState(() => _chatUserId = user.$id);
-    } catch (_) {}
-  }
-
   Future<void> _addAIGreeting() async {
     setState(() {
       _isBusy = true;
@@ -1421,26 +1288,25 @@ class _ChatOverlayState extends State<_ChatOverlay>
         'Be friendly and use 1 emoji max.';
 
     try {
-      final backend = Provider.of<BackendService>(context, listen: false);
-      final response = await backend.sendChatQuery(
-        greetPrompt,
-        _chatUserId,
-        const <Map<String, String>>[],
-        _chatMemory,
-        moduleContext: 'skincare',
-        userProfile: {
-          'skin_type': widget.skinType,
-          'concerns': widget.concerns,
-          'routine': widget.isNight ? 'night' : 'morning',
-          'completed_steps': widget.completedSteps,
-        },
+      final response = await http.post(
+        Uri.parse('https://api.anthropic.com/v1/messages'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'model': 'claude-sonnet-4-20250514',
+          'max_tokens': 120,
+          'system': 'You are AHVI, a warm expert skincare advisor.',
+          'messages': [
+            {'role': 'user', 'content': greetPrompt},
+          ],
+        }),
       );
-      if (response['updated_memory'] != null) {
-        _chatMemory = response['updated_memory'].toString();
-      }
+      final data = await compute(_parseSkincareJsonMap, response.body);
       final text =
-          response['message']?['content']?.toString().trim() ??
-          response['content']?.toString().trim();
+          (data['content'] as List?)?.firstWhere(
+                (b) => b['type'] == 'text',
+                orElse: () => null,
+              )?['text']
+              as String?;
 
       if (mounted && text != null) {
         setState(() {
@@ -1454,9 +1320,7 @@ class _ChatOverlayState extends State<_ChatOverlay>
       if (mounted) {
         setState(() {
           _isBusy = false;
-          const greeting =
-              "Hi! I'm your AHVI skincare advisor ✦\n\n"
-              "Ask me about routines, ingredients, or skin concerns!";
+          final greeting = AppLocalizations.t(context, 'skin_ahvi_greeting');
           _messages.add(
             _ChatMessage(isUser: false, text: greeting, time: _ts()),
           );
@@ -1506,47 +1370,47 @@ class _ChatOverlayState extends State<_ChatOverlay>
     });
     _scrollToBottom();
 
-    try {
-      final backend = Provider.of<BackendService>(context, listen: false);
-      final historyForBackend = _chatHistory.length > 1
-          ? List<Map<String, String>>.from(
-              _chatHistory.sublist(0, _chatHistory.length - 1),
-            )
-          : <Map<String, String>>[];
-      final response = await backend.sendChatQuery(
-        text.trim(),
-        _chatUserId,
-        historyForBackend,
-        _chatMemory,
-        moduleContext: 'skincare',
-        userProfile: {
-          'skin_type': widget.skinType,
-          'concerns': widget.concerns,
-          'routine': widget.isNight ? 'night' : 'morning',
-          'completed_steps': widget.completedSteps,
-          'context': _getCtx(),
-        },
-      );
+    final systemPrompt =
+        'You are AHVI, a warm expert skincare advisor. '
+        'Context: ${_getCtx()} '
+        'Give concise, personalised, science-backed skincare advice in 2-4 sentences. '
+        'Use light friendly language with 1-2 emojis max.';
 
-      if (response['updated_memory'] != null) {
-        _chatMemory = response['updated_memory'].toString();
-      }
+    try {
+      final response = await http.post(
+        Uri.parse('https://api.anthropic.com/v1/messages'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'model': 'claude-sonnet-4-20250514',
+          'max_tokens': 380,
+          'system': systemPrompt,
+          'messages': _chatHistory,
+        }),
+      );
+      final data = await compute(_parseSkincareJsonMap, response.body);
       final aiText =
-          response['message']?['content']?.toString().trim() ??
-          response['content']?.toString().trim() ??
-          response['error']?.toString().trim() ??
-          "I couldn't reach AHVI backend right now.";
+          (data['content'] as List?)?.firstWhere(
+                (b) => b['type'] == 'text',
+                orElse: () => null,
+              )?['text']
+              as String?;
 
       if (mounted) {
+        final reply = aiText ?? "I'm having a moment — please try again ✦";
         setState(() {
           _isBusy = false;
-          _messages.add(_ChatMessage(isUser: false, text: aiText, time: _ts()));
-          _chatHistory.add({'role': 'assistant', 'content': aiText});
+          _messages.add(_ChatMessage(isUser: false, text: reply, time: _ts()));
+          _chatHistory.add({'role': 'assistant', 'content': reply});
         });
         _scrollToBottom();
       }
     } catch (_) {
-      const fallback = "I couldn't reach AHVI backend right now.";
+      final fallbacks = [
+        'For oily skin, a lightweight niacinamide serum is transformative — it regulates sebum and minimises pores. 💧',
+        'Always apply SPF last in your morning routine. Reapply every 2 hours outdoors! ☀️',
+        'Retinol is best introduced gradually — start 2× per week at a low concentration to avoid irritation. 🌙',
+      ];
+      final fallback = fallbacks[DateTime.now().second % fallbacks.length];
       if (mounted) {
         setState(() {
           _isBusy = false;
@@ -1658,7 +1522,7 @@ class _ChatOverlayState extends State<_ChatOverlay>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'AHVI Skincare',
+                  AppLocalizations.t(context, 'skin_chat_title'),
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
@@ -1684,7 +1548,7 @@ class _ChatOverlayState extends State<_ChatOverlay>
                     ),
                     const SizedBox(width: 5),
                     Text(
-                      'Your AI skincare advisor',
+                      AppLocalizations.t(context, 'skin_chat_subtitle'),
                       style: TextStyle(fontSize: 11, color: _muted),
                     ),
                   ],
@@ -1763,7 +1627,7 @@ class _ChatOverlayState extends State<_ChatOverlay>
         ),
         const SizedBox(height: 8),
         Text(
-          'Skincare Advisor',
+          AppLocalizations.t(context, 'skin_chat_welcome_title'),
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w700,
@@ -1772,7 +1636,7 @@ class _ChatOverlayState extends State<_ChatOverlay>
         ),
         const SizedBox(height: 8),
         Text(
-          'Ask me about routines, ingredients, skin concerns, or product recommendations.',
+          AppLocalizations.t(context, 'skin_chat_welcome_desc'),
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 13, color: _muted, height: 1.55),
         ),
@@ -1988,6 +1852,16 @@ class _ChatOverlayState extends State<_ChatOverlay>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          _SkincarePlusButton(
+            panel: _panel,
+            panel2: _panel2,
+            cardBorder: _cardBorder,
+            accent: _accent,
+            text: _text,
+            muted: _muted,
+            onCameraSelected: () => showAhviLensSheet(context, t: context.themeTokens),
+          ),
+          const SizedBox(width: 9),
           GestureDetector(
             onTap: _toggleVoice,
             child: AnimatedBuilder(
@@ -2048,8 +1922,8 @@ class _ChatOverlayState extends State<_ChatOverlay>
                 minLines: 1,
                 decoration: InputDecoration(
                   hintText: _isListening
-                      ? '🎙 Listening…'
-                      : 'Ask about skincare…',
+                      ? AppLocalizations.t(context, 'skin_chat_listening')
+                      : AppLocalizations.t(context, 'skin_chat_hint'),
                   hintStyle: TextStyle(color: _muted),
                   border: InputBorder.none,
                   isDense: true,
@@ -2400,6 +2274,7 @@ class _AskAhviFabState extends State<_AskAhviFab>
 
   @override
   Widget build(BuildContext context) {
+    context.watch<ThemeController>(); // theme change అయినప్పుడు rebuild అవుతుంది
     final t = context.themeTokens;
     return GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
@@ -2440,8 +2315,19 @@ class _AskAhviFabState extends State<_AskAhviFab>
           child: Container(
             padding: const EdgeInsets.fromLTRB(14, 13, 20, 13),
             decoration: BoxDecoration(
-              color: Colors.black,
+              gradient: LinearGradient(
+                colors: [t.accent.primary, t.accent.secondary],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
               borderRadius: BorderRadius.circular(50),
+              boxShadow: [
+                BoxShadow(
+                  color: t.accent.primary.withValues(alpha: 0.35),
+                  blurRadius: 18,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -2452,27 +2338,13 @@ class _AskAhviFabState extends State<_AskAhviFab>
                   child: const Text('✦', style: TextStyle(color: Colors.white)),
                 ),
                 const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Ask AHVI',
-                      style: GoogleFonts.anton(
-                        fontSize: 13,
-                        letterSpacing: 0.4,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const Text(
-                      'Ask AHVI',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
+                Text(
+                  AppLocalizations.t(context, 'diet_ask_ahvi'),
+                  style: GoogleFonts.anton(
+                    fontSize: 13,
+                    letterSpacing: 0.4,
+                    color: Colors.white,
+                  ),
                 ),
               ],
             ),
@@ -2482,6 +2354,205 @@ class _AskAhviFabState extends State<_AskAhviFab>
     );
   }
 }
+// ─────────────────────────────────────────────────────────────────────────────
+//  Skincare Chat Plus Button (ChatGPT-style attach menu)
+// ─────────────────────────────────────────────────────────────────────────────
+class _SkincarePlusButton extends StatefulWidget {
+  final Color panel, panel2, cardBorder, accent, text, muted;
+  final VoidCallback? onCameraSelected;
+  const _SkincarePlusButton({
+    required this.panel,
+    required this.panel2,
+    required this.cardBorder,
+    required this.accent,
+    required this.text,
+    required this.muted,
+    this.onCameraSelected,
+  });
+  @override
+  State<_SkincarePlusButton> createState() => _SkincarePlusButtonState();
+}
 
+class _SkincarePlusButtonState extends State<_SkincarePlusButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _rotateAnim;
+  bool _menuOpen = false;
+  OverlayEntry? _overlay;
 
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _rotateAnim = Tween<double>(begin: 0.0, end: 0.125)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+  }
 
+  @override
+  void dispose() {
+    _closeMenu();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _openMenu() {
+    if (_menuOpen) { _closeMenu(); return; }
+    setState(() => _menuOpen = true);
+    _ctrl.forward();
+    final renderBox = context.findRenderObject() as RenderBox;
+    final offset = renderBox.localToGlobal(Offset.zero);
+
+    final actions = [
+      (Icons.camera_alt_outlined, 'Camera', const Color(0xFFFF6B6B)),
+      (Icons.photo_library_outlined, 'Photos', const Color(0xFF4ECDC4)),
+      (Icons.attach_file_rounded, 'Files', const Color(0xFF45B7D1)),
+      (Icons.search_rounded, 'Search Skincare', const Color(0xFF96CEB4)),
+    ];
+
+    _overlay = OverlayEntry(builder: (_) {
+      return GestureDetector(
+        onTap: _closeMenu,
+        behavior: HitTestBehavior.translucent,
+        child: Stack(children: [
+          Positioned(
+            left: offset.dx - 10,
+            bottom: MediaQuery.of(context).size.height - offset.dy + 8,
+            child: GestureDetector(
+              onTap: () {},
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  width: 200,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: widget.panel,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: widget.cardBorder, width: 1),
+                    boxShadow: [BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    )],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: actions.map((a) => _SkincarePlusMenuRow(
+                      icon: a.$1,
+                      label: a.$2,
+                      color: a.$3,
+                      text: widget.text,
+                      onTap: () {
+                        _closeMenu();
+                        widget.onCameraSelected?.call();
+                      },
+                    )).toList(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      );
+    });
+    Overlay.of(context).insert(_overlay!);
+  }
+
+  void _closeMenu() {
+    _overlay?.remove();
+    _overlay = null;
+    _ctrl.reverse();
+    if (mounted) setState(() => _menuOpen = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _openMenu,
+      child: AnimatedBuilder(
+        animation: _rotateAnim,
+        builder: (_, child) => Transform.rotate(
+          angle: _rotateAnim.value * 2 * 3.14159,
+          child: child,
+        ),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: _menuOpen
+                ? widget.accent.withValues(alpha: 0.15)
+                : widget.panel,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: _menuOpen
+                  ? widget.accent.withValues(alpha: 0.5)
+                  : widget.cardBorder,
+              width: 1.5,
+            ),
+          ),
+          child: Icon(Icons.add_rounded, color: widget.accent, size: 20),
+        ),
+      ),
+    );
+  }
+}
+
+class _SkincarePlusMenuRow extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final Color color, text;
+  final VoidCallback onTap;
+  const _SkincarePlusMenuRow({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.text,
+    required this.onTap,
+  });
+  @override
+  State<_SkincarePlusMenuRow> createState() => _SkincarePlusMenuRowState();
+}
+
+class _SkincarePlusMenuRowState extends State<_SkincarePlusMenuRow> {
+  bool _hovered = false;
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _hovered = true),
+      onTapUp: (_) { setState(() => _hovered = false); widget.onTap(); },
+      onTapCancel: () => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: BoxDecoration(
+          color: _hovered
+              ? widget.color.withValues(alpha: 0.12)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: widget.color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(widget.icon, color: widget.color, size: 16),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            widget.label,
+            style: TextStyle(
+              color: widget.text,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}

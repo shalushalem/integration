@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:appwrite/models.dart' as appwrite_models;
 import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart';
-import 'package:myapp/style_board_detail.dart';
+import 'package:myapp/app_localizations.dart';
 
-class Screen4 extends StatefulWidget {
-  const Screen4({super.key});
+class PartyLooksScreen extends StatefulWidget {
+  const PartyLooksScreen({super.key});
 
   @override
-  State<Screen4> createState() => _Screen4State();
+  State<PartyLooksScreen> createState() => _PartyLooksScreenState();
 }
 
-class _Screen4State extends State<Screen4> {
+class _PartyLooksScreenState extends State<PartyLooksScreen> {
   bool _isLoading = true;
-  List<Map<String, dynamic>> _boards = [];
+  List<appwrite_models.Document> _boards = [];
 
   @override
   void initState() {
@@ -24,22 +25,15 @@ class _Screen4State extends State<Screen4> {
   Future<void> _fetchPartyBoards() async {
     try {
       final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      // 🔥 Fetching specifically 'Party' occasion boards!
       final boards = await appwrite.getSavedBoardsByOccasion('Party');
-      final boardMaps = boards
-          .map((doc) => <String, dynamic>{r'$id': doc.$id, ...doc.data})
-          .toList();
-      
       if (mounted) {
         setState(() {
-          _boards = boardMaps;
+          _boards = boards;
           _isLoading = false;
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -53,7 +47,8 @@ class _Screen4State extends State<Screen4> {
         children: [
           // ── Header ──
           Container(
-            padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 12, 20, 14),
+            padding: EdgeInsets.fromLTRB(
+                20, MediaQuery.of(context).padding.top + 12, 20, 14),
             child: Row(
               children: [
                 GestureDetector(
@@ -66,7 +61,8 @@ class _Screen4State extends State<Screen4> {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: t.cardBorder),
                     ),
-                    child: Icon(Icons.chevron_left_rounded, color: t.textPrimary, size: 22),
+                    child: Icon(Icons.chevron_left_rounded,
+                        color: t.textPrimary, size: 22),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -74,7 +70,7 @@ class _Screen4State extends State<Screen4> {
                   text: TextSpan(
                     children: [
                       TextSpan(
-                        text: 'Party ',
+                        text: '${context.tr('calendar_occasion_party')} ',
                         style: TextStyle(
                           fontFamily: 'Inter',
                           fontSize: 17,
@@ -84,7 +80,7 @@ class _Screen4State extends State<Screen4> {
                         ),
                       ),
                       TextSpan(
-                        text: 'Looks',
+                        text: context.tr('boards_party_looks_sub'),
                         style: TextStyle(
                           fontFamily: 'Inter',
                           fontSize: 17,
@@ -102,7 +98,8 @@ class _Screen4State extends State<Screen4> {
           // ── Body ──
           Expanded(
             child: _isLoading
-                ? Center(child: CircularProgressIndicator(color: t.accent.primary))
+                ? Center(
+                    child: CircularProgressIndicator(color: t.accent.primary))
                 : _boards.isEmpty
                     ? _buildEmptyState(t)
                     : _buildBoardsGrid(t),
@@ -124,11 +121,12 @@ class _Screen4State extends State<Screen4> {
               shape: BoxShape.circle,
               border: Border.all(color: t.cardBorder),
             ),
-            child: Icon(Icons.celebration_rounded, size: 48, color: t.accent.secondary),
+            child: Icon(Icons.celebration_rounded,
+                size: 48, color: t.accent.secondary),
           ),
           const SizedBox(height: 24),
           Text(
-            "No Party Looks Yet!",
+            context.tr('boards_party_looks'),
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
@@ -137,7 +135,7 @@ class _Screen4State extends State<Screen4> {
           ),
           const SizedBox(height: 8),
           Text(
-            "Generate style boards with the AI\nand they will appear here.",
+            context.tr('wardrobe_insight_empty'),
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 14,
@@ -154,25 +152,19 @@ class _Screen4State extends State<Screen4> {
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2, // 2 columns
+        crossAxisCount: 2,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 0.65, // Taller, Pinterest-style aspect ratio
+        childAspectRatio: 0.65,
       ),
       itemCount: _boards.length,
       itemBuilder: (context, index) {
         final board = _boards[index];
-        final imageUrl = (board['imageUrl'] ?? board['image_url'] ?? '').toString();
-        
+        final imageUrl = board.data['imageUrl'] ?? '';
+
         return GestureDetector(
           onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => StyleBoardDetailPage(
-                  board: Map<String, dynamic>.from(board),
-                ),
-              ),
-            );
+            // TODO: Open fullscreen view
           },
           child: Container(
             decoration: BoxDecoration(
@@ -181,13 +173,12 @@ class _Screen4State extends State<Screen4> {
               color: t.panel,
               image: imageUrl.isNotEmpty
                   ? DecorationImage(
-                      image: NetworkImage(imageUrl),
-                      fit: BoxFit.cover,
-                    )
+                      image: NetworkImage(imageUrl), fit: BoxFit.cover)
                   : null,
             ),
             child: imageUrl.isEmpty
-                ? Center(child: Icon(Icons.image_not_supported, color: t.mutedText))
+                ? Center(
+                    child: Icon(Icons.image_not_supported, color: t.mutedText))
                 : null,
           ),
         );

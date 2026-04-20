@@ -1,9 +1,11 @@
 import 'dart:io';
-import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:myapp/app_localizations.dart';
 import 'dart:ui';
 import 'package:image_picker/image_picker.dart';
 import 'theme/theme_tokens.dart';
+import 'package:myapp/widgets/ahvi_home_text.dart';
+import 'package:myapp/widgets/ahvi_chat_prompt_bar.dart';
 // ─── DATA MODELS ──────────────────────────────────────────────────────────────
 class WorkoutCategory {
   final String id;
@@ -39,11 +41,13 @@ class WorkoutOutfit {
 class ChatMessage {
   final String text;
   final bool isBot;
+  final bool isGreeting;
   final DateTime time;
   final WorkoutStyleboard? styleboard;
   ChatMessage({
     required this.text,
     required this.isBot,
+    this.isGreeting = false,
     DateTime? time,
     this.styleboard,
   }) : time = time ?? DateTime.now();
@@ -85,7 +89,7 @@ const kGlassBorder = Color(0x30FFFFFF);
 extension FitnessTheme on BuildContext {
   AppThemeTokens get _t => Theme.of(this).extension<AppThemeTokens>()!;
   Color get fText => _t.textPrimary;
-  Color get fTextSoft => _t.textPrimary.withOpacity(0.85);
+  Color get fTextSoft => _t.textPrimary.withValues(alpha: 0.85);
   Color get fMuted => _t.mutedText;
   Color get fSurface => _t.backgroundSecondary;
   Color get fCard => _t.card;
@@ -133,12 +137,17 @@ class _WorkoutStudioScreenState extends State<WorkoutStudioScreen> {
   String _activePage = 'home';
   String _selectedTab = 'all';
   
-  final List<WorkoutCategory> _categories = [
-    const WorkoutCategory(id: 'running', label: 'Running', emoji: '🏃', color: Color(0xD9F5C842), accent: Colors.black),
-    const WorkoutCategory(id: 'gym', label: 'Gym / Weights', emoji: '🏋️', color: Color(0xE6A8D4F0), accent: Colors.black),
-    const WorkoutCategory(id: 'yoga', label: 'Yoga', emoji: '🧘', color: Color(0xE6C8B0F5), accent: Colors.black),
-    const WorkoutCategory(id: 'hiit', label: 'HIIT / Cardio', emoji: '⚡', color: Color(0xE6F068B0), accent: Colors.white),
-  ];
+  late List<WorkoutCategory> _categories;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _categories = [
+      WorkoutCategory(id: 'running', label: AppLocalizations.t(context, 'fitness_cat_running'), emoji: '🏃', color: const Color(0xD9F5C842), accent: Colors.black),
+      WorkoutCategory(id: 'gym', label: AppLocalizations.t(context, 'fitness_cat_gym'), emoji: '🏋️', color: const Color(0xE6A8D4F0), accent: Colors.black),
+      WorkoutCategory(id: 'yoga', label: AppLocalizations.t(context, 'fitness_cat_yoga'), emoji: '🧘', color: const Color(0xE6C8B0F5), accent: Colors.black),
+      WorkoutCategory(id: 'hiit', label: AppLocalizations.t(context, 'fitness_cat_hiit'), emoji: '⚡', color: const Color(0xE6F068B0), accent: Colors.white),
+    ];
+  }
   void _addCategory(WorkoutCategory c) {
     setState(() => _categories.add(c));
   }
@@ -161,29 +170,34 @@ class _WorkoutStudioScreenState extends State<WorkoutStudioScreen> {
           const _BgOrbs(),
           // Main View
           SafeArea(
-            child: IndexedStack(
-              index: _activePage == 'home' ? 0 : 1,
-              children: [
-                _HomeView(
-                  categories: _categories,
-                  outfits: _outfits,
-                  selectedTab: _selectedTab,
-                  onTabSelected: (id) => setState(() => _selectedTab = id),
-                  onShowPage: (name) => setState(() => _activePage = name),
-                  onAddOutfit: _addOutfit,
-                  onDeleteOutfit: _deleteOutfit,
-                  onAddCategory: _addCategory,
-                ),
-                _ChatView(
-                  onBack: () => setState(() => _activePage = 'home'),
-                ),
-              ],
+            child: _HomeView(
+              categories: _categories,
+              outfits: _outfits,
+              selectedTab: _selectedTab,
+              onTabSelected: (id) => setState(() => _selectedTab = id),
+              onShowPage: (name) => setState(() => _activePage = name),
+              onAddOutfit: _addOutfit,
+              onDeleteOutfit: _deleteOutfit,
+              onAddCategory: _addCategory,
             ),
           ),
-          // FAB (only on home)
+          // Chat view slides up from bottom
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 380),
+            curve: Curves.easeInOutCubic,
+            left: 0, right: 0,
+            top: _activePage == 'chat' ? 0 : MediaQuery.of(context).size.height,
+            bottom: _activePage == 'chat' ? 0 : -MediaQuery.of(context).size.height,
+            child: SafeArea(
+              child: _ChatView(
+                onBack: () => setState(() => _activePage = 'home'),
+              ),
+            ),
+          ),
+          // FAB (only on home) — pinned bottom-right
           if (_activePage == 'home')
             Positioned(
-              bottom: 28,
+              bottom: MediaQuery.of(context).padding.bottom + 28,
               right: 28,
               child: _AskAhviFab(onTap: () => setState(() => _activePage = 'chat')),
             ),
@@ -208,7 +222,7 @@ class _BgOrbs extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: RadialGradient(
-                colors: [const Color(0xFFB4A0F0).withOpacity(0.35), Colors.transparent],
+                colors: [const Color(0xFFB4A0F0).withValues(alpha: 0.35), Colors.transparent],
               ),
             ),
           ),
@@ -222,7 +236,7 @@ class _BgOrbs extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: RadialGradient(
-                colors: [const Color(0xFFC8AAFA).withOpacity(0.30), Colors.transparent],
+                colors: [const Color(0xFFC8AAFA).withValues(alpha: 0.30), Colors.transparent],
               ),
             ),
           ),
@@ -268,11 +282,10 @@ class _HomeView extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Your Outfits — ${outfits.length} saved',
+              Text('${AppLocalizations.t(context, 'fitness_your_routines')} — ${outfits.length} ${AppLocalizations.t(context, 'fitness_saved')}',
                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 1.2, color: context.fMuted)),
               ElevatedButton(
                 onPressed: () => _openAddOutfit(context),
-                child: const Text('+ Add Outfit'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: context.fAccent,
                   foregroundColor: Colors.white,
@@ -280,6 +293,7 @@ class _HomeView extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 0),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
                 ),
+                child: Text(AppLocalizations.t(context, 'fitness_add_routine')),
               ),
             ],
           ),
@@ -333,7 +347,21 @@ class _HomeView extends StatelessWidget {
   }
 }
 // ─── HERO CARD: DRESS WELL, TRAIN BETTER ──────────────────────────────────────
-class _HeroCard extends StatelessWidget {
+// Quote keys — values live in assets/l10n/*.json
+const _kFitnessQuoteKeys = [
+  (quoteKey: 'fitness_hero_quote_1', subKey: 'fitness_hero_sub_1', captionKey: 'fitness_hero_caption_1'),
+  (quoteKey: 'fitness_hero_quote_2', subKey: 'fitness_hero_sub_2', captionKey: 'fitness_hero_caption_2'),
+  (quoteKey: 'fitness_hero_quote_3', subKey: 'fitness_hero_sub_3', captionKey: 'fitness_hero_caption_3'),
+  (quoteKey: 'fitness_hero_quote_4', subKey: 'fitness_hero_sub_4', captionKey: 'fitness_hero_caption_4'),
+  (quoteKey: 'fitness_hero_quote_5', subKey: 'fitness_hero_sub_5', captionKey: 'fitness_hero_caption_5'),
+];
+
+class _HeroCard extends StatefulWidget {
+  @override
+  State<_HeroCard> createState() => _HeroCardState();
+}
+
+class _HeroCardState extends State<_HeroCard> {
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -342,12 +370,13 @@ class _HeroCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF9B7FD4),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFC8B4F5).withOpacity(0.5)),
-        boxShadow: [BoxShadow(color: const Color(0xFF9B7FD4).withOpacity(0.2), blurRadius: 20, offset: const Offset(0, 8))],
+        border: Border.all(color: const Color(0xFFC8B4F5).withValues(alpha: 0.5)),
+        boxShadow: [BoxShadow(color: const Color(0xFF9B7FD4).withValues(alpha: 0.2), blurRadius: 20, offset: const Offset(0, 8))],
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
+          // Right-side image
           Positioned(
             right: 0,
             bottom: 0,
@@ -356,40 +385,80 @@ class _HeroCard extends StatelessWidget {
             child: Opacity(
               opacity: 0.9,
               child: Image.asset(
-                'assets/images/hero_outfit.jpg', // assets/images/ లో add చేయండి
+                'assets/images/hero_outfit.jpg',
                 fit: BoxFit.contain,
                 alignment: Alignment.bottomRight,
-                errorBuilder: (context, error, stackTrace) {
-                  return const Center(
-                    child: Icon(Icons.image_outlined, color: Colors.white24, size: 48),
-                  );
-                },
+                errorBuilder: (context, error, stackTrace) =>
+                    const Center(child: Icon(Icons.image_outlined, color: Colors.white24, size: 48)),
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(26),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                RichText(
-                  text: const TextSpan(
-                    style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: Colors.white, height: 1.1, letterSpacing: -0.8),
-                    children: [
-                      TextSpan(text: 'Dress well,\n'),
-                      TextSpan(text: 'train better.', style: TextStyle(color: Colors.white70)),
-                    ],
-                  ),
+          // Left-side gradient overlay so text is always readable
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: MediaQuery.of(context).size.width * 0.58,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    const Color(0xFF9B7FD4).withValues(alpha: 1.0),
+                    const Color(0xFF9B7FD4).withValues(alpha: 0.85),
+                    Colors.transparent,
+                  ],
+                  stops: const [0.0, 0.65, 1.0],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
                 ),
-                const SizedBox(height: 10),
-                const SizedBox(
-                  width: 200,
-                  child: Text(
-                    'Organize your workout outfits. Chat with AHVI for AI-powered style advice.',
-                    style: TextStyle(fontSize: 12, color: Colors.white54, height: 1.5, fontWeight: FontWeight.w300),
+              ),
+            ),
+          ),
+          // Quote text — constrained to left half, rendered above gradient
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: MediaQuery.of(context).size.width * 0.52,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(26, 0, 12, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    AppLocalizations.t(context, _kFitnessQuoteKeys[0].quoteKey),
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      height: 1.2,
+                      letterSpacing: -0.3,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  Text(
+                    AppLocalizations.t(context, _kFitnessQuoteKeys[0].subKey),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w400,
+                      color: Colors.white.withValues(alpha: 0.80),
+                      letterSpacing: 0.2,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    AppLocalizations.t(context, _kFitnessQuoteKeys[0].captionKey),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -406,39 +475,36 @@ class _AskAhviFab extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+        padding: const EdgeInsets.fromLTRB(10, 10, 18, 10),
         decoration: BoxDecoration(
-          color: const Color(0xFF1A1A1A),
+          gradient: LinearGradient(
+            colors: [context.fAccent2, context.fAccent],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
           borderRadius: BorderRadius.circular(50),
+          border: Border.all(color: context.fAccent.withValues(alpha: 0.35)),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 28, offset: const Offset(0, 8)),
-            BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 2)),
+            BoxShadow(color: context.fAccent2.withValues(alpha: 0.45), blurRadius: 22, offset: const Offset(0, 6)),
           ],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.28),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withOpacity(0.55), width: 1.5)),
-              child: const Center(child: Icon(Icons.auto_awesome, color: Colors.white, size: 22)),
+            CircleAvatar(
+              radius: 14,
+              backgroundColor: Colors.white.withValues(alpha: 0.20),
+              child: const Text('✦', style: TextStyle(color: Colors.white, fontSize: 14)),
             ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Text('ASK AHVI',
-                    style: TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: 0.8)),
-                Text('YOUR AI STYLIST',
-                    style: TextStyle(
-                        fontSize: 9, fontWeight: FontWeight.w600, color: Colors.white70, letterSpacing: 1.8)),
-              ],
+            const SizedBox(width: 10),
+            Text(
+              AppLocalizations.t(context, 'diet_ask_ahvi'),
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+                letterSpacing: 0.4,
+              ),
             ),
           ],
         ),
@@ -467,7 +533,7 @@ class _CategoryTabs extends StatelessWidget {
       child: Row(
         children: [
           _TabItem(
-            label: 'All',
+            label: AppLocalizations.t(context, 'wardrobe_all'),
             n: totalCount,
             selected: selectedId == 'all',
             onTap: () => onSelect('all'),
@@ -506,14 +572,14 @@ class _TabItem extends StatelessWidget {
         margin: const EdgeInsets.only(right: 6),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
-          color: selected ? color.withOpacity(0.22) : Colors.white12,
+          color: selected ? color.withValues(alpha: 0.22) : Colors.white12,
           borderRadius: BorderRadius.circular(50),
           border: Border.all(
-            color: selected ? color.withOpacity(0.7) : Colors.white24,
+            color: selected ? color.withValues(alpha: 0.7) : Colors.white24,
             width: selected ? 1.5 : 1,
           ),
           boxShadow: selected
-              ? [BoxShadow(color: color.withOpacity(0.25), blurRadius: 10, offset: const Offset(0, 3))]
+              ? [BoxShadow(color: color.withValues(alpha: 0.25), blurRadius: 10, offset: const Offset(0, 3))]
               : null,
         ),
         child: Row(
@@ -550,9 +616,9 @@ class _AddTypeBtn extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white10,
           borderRadius: BorderRadius.circular(50),
-          border: Border.all(color: const Color(0xFF9B7FD4).withOpacity(0.38), style: BorderStyle.solid),
+          border: Border.all(color: const Color(0xFF9B7FD4).withValues(alpha: 0.38), style: BorderStyle.solid),
         ),
-        child: const Text('+ Add type', style: TextStyle(fontSize: 13, color: Color(0xFF9B7FD4))),
+        child: Text(AppLocalizations.t(context, 'fitness_add_type'), style: const TextStyle(fontSize: 13, color: Color(0xFF9B7FD4))),
       ),
     );
   }
@@ -565,7 +631,7 @@ class _AddTypeBtn extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: ctx.fSurface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Add Workout Type', style: TextStyle(color: ctx.fText, fontSize: 16, fontWeight: FontWeight.w700)),
+        title: Text(AppLocalizations.t(context, 'fitness_add_workout_type'), style: TextStyle(color: ctx.fText, fontSize: 16, fontWeight: FontWeight.w700)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -573,12 +639,12 @@ class _AddTypeBtn extends StatelessWidget {
               controller: nameController,
               style: TextStyle(color: ctx.fText),
               decoration: InputDecoration(
-                hintText: 'e.g. Swimming',
+                hintText: AppLocalizations.t(context, 'fitness_eg_swimming'),
                 hintStyle: TextStyle(color: ctx.fMuted),
                 filled: true,
                 fillColor: ctx.fCard,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                labelText: 'Type Name',
+                labelText: AppLocalizations.t(context, 'fitness_type_name'),
                 labelStyle: TextStyle(color: ctx.fMuted, fontSize: 12),
               ),
             ),
@@ -591,7 +657,7 @@ class _AddTypeBtn extends StatelessWidget {
                 filled: true,
                 fillColor: ctx.fCard,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                labelText: 'Emoji',
+                labelText: AppLocalizations.t(context, 'fitness_emoji'),
                 labelStyle: TextStyle(color: ctx.fMuted, fontSize: 12),
               ),
             ),
@@ -600,7 +666,7 @@ class _AddTypeBtn extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel', style: TextStyle(color: ctx.fMuted)),
+            child: Text(AppLocalizations.t(context, 'common_cancel'), style: TextStyle(color: ctx.fMuted)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -628,7 +694,7 @@ class _AddTypeBtn extends StatelessWidget {
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            child: const Text('Add'),
+            child: Text(AppLocalizations.t(context, 'fitness_add')),
           ),
         ],
       ),
@@ -660,26 +726,26 @@ class _OutfitCard extends StatelessWidget {
         // Page bg (0xFF0F0F18) కి match అయ్యే deep navy gradient glass
         gradient: LinearGradient(
           colors: [
-            const Color(0xFF0D1428).withOpacity(0.92), // deep navy — page bg shade
-            const Color(0xFF111830).withOpacity(0.95), // slightly lighter navy
+            const Color(0xFF0D1428).withValues(alpha: 0.92), // deep navy — page bg shade
+            const Color(0xFF111830).withValues(alpha: 0.95), // slightly lighter navy
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: kNavyBright.withOpacity(0.28),
+          color: kNavyBright.withValues(alpha: 0.28),
           width: 1.2,
         ),
         boxShadow: [
           // Deep navy glow — page bg తో blend అవుతుంది
           BoxShadow(
-            color: kNavyMid.withOpacity(0.45),
+            color: kNavyMid.withValues(alpha: 0.45),
             blurRadius: 18,
             offset: const Offset(0, 6),
           ),
           BoxShadow(
-            color: const Color(0xFF0A1020).withOpacity(0.6),
+            color: const Color(0xFF0A1020).withValues(alpha: 0.6),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -699,8 +765,8 @@ class _OutfitCard extends StatelessWidget {
                           // No image — navy gradient placeholder (page bg తో match)
                           gradient: LinearGradient(
                             colors: [
-                              kNavyMid.withOpacity(0.7),
-                              kNavyDeep.withOpacity(0.9),
+                              kNavyMid.withValues(alpha: 0.7),
+                              kNavyDeep.withValues(alpha: 0.9),
                             ],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
@@ -716,7 +782,7 @@ class _OutfitCard extends StatelessWidget {
                                 width: 28,
                                 height: 2,
                                 decoration: BoxDecoration(
-                                  color: kNavyLight.withOpacity(0.5),
+                                  color: kNavyLight.withValues(alpha: 0.5),
                                   borderRadius: BorderRadius.circular(2),
                                 ),
                               ),
@@ -730,9 +796,9 @@ class _OutfitCard extends StatelessWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(8, 7, 8, 8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0A1020).withOpacity(0.97),
+                  color: const Color(0xFF0A1020).withValues(alpha: 0.97),
                   border: Border(
-                    top: BorderSide(color: kNavyBright.withOpacity(0.22), width: 1),
+                    top: BorderSide(color: kNavyBright.withValues(alpha: 0.22), width: 1),
                   ),
                 ),
                 child: Column(
@@ -755,9 +821,9 @@ class _OutfitCard extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: kNavyMid.withOpacity(0.45),
+                        color: kNavyMid.withValues(alpha: 0.45),
                         borderRadius: BorderRadius.circular(50),
-                        border: Border.all(color: kNavyLight.withOpacity(0.45), width: 1),
+                        border: Border.all(color: kNavyLight.withValues(alpha: 0.45), width: 1),
                       ),
                       child: Text(
                         '${category.emoji} ${category.label}',
@@ -778,7 +844,7 @@ class _OutfitCard extends StatelessWidget {
                           'PALETTE',
                           style: TextStyle(
                             fontSize: 7,
-                            color: kNavySoft.withOpacity(0.5),
+                            color: kNavySoft.withValues(alpha: 0.5),
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.8,
                           ),
@@ -824,9 +890,9 @@ class _OutfitCard extends StatelessWidget {
                 width: 22,
                 height: 22,
                 decoration: BoxDecoration(
-                  color: kNavyDeep.withOpacity(0.85),
+                  color: kNavyDeep.withValues(alpha: 0.85),
                   shape: BoxShape.circle,
-                  border: Border.all(color: kNavyLight.withOpacity(0.3), width: 1),
+                  border: Border.all(color: kNavyLight.withValues(alpha: 0.3), width: 1),
                 ),
                 child: const Icon(Icons.close, color: kNavySoft, size: 13),
               ),
@@ -844,10 +910,10 @@ class _EmptyGrid extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('✦', style: TextStyle(fontSize: 40, color: context.fMuted.withOpacity(0.3))),
+          Text('✦', style: TextStyle(fontSize: 40, color: context.fMuted.withValues(alpha: 0.3))),
           const SizedBox(height: 12),
-          Text('No workouts here yet', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: context.fText.withOpacity(0.7))),
-          Text('Add an outfit or ask AHVI for suggestions', style: TextStyle(fontSize: 13, color: context.fMuted)),
+          Text(AppLocalizations.t(context, 'fitness_no_routines'), style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: context.fText.withValues(alpha: 0.7))),
+          Text(AppLocalizations.t(context, 'fitness_add_routine_hint'), style: TextStyle(fontSize: 13, color: context.fMuted)),
         ],
       ),
     );
@@ -865,8 +931,8 @@ class _AddOutfitSheetState extends State<_AddOutfitSheet> {
   final _notesController = TextEditingController();
   final _itemInpController = TextEditingController();
   String _selectedCatId = '';
-  List<String> _items = [];
-  List<String> _images = [];
+  final List<String> _items = [];
+  final List<String> _images = [];
   @override
   void initState() {
     super.initState();
@@ -900,20 +966,20 @@ class _AddOutfitSheetState extends State<_AddOutfitSheet> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'New Outfit',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: kNavySoft),
+                  Text(
+                    AppLocalizations.t(context, 'fitness_new_routine'),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: context.fText),
                   ),
                   GestureDetector(
                     onTap: () => Navigator.pop(context),
                     child: Container(
                       width: 30, height: 30,
                       decoration: BoxDecoration(
-                        color: kNavyMid.withOpacity(0.5),
+                        color: context.fPanel,
                         shape: BoxShape.circle,
-                        border: Border.all(color: kNavyLight.withOpacity(0.4)),
+                        border: Border.all(color: context.fBorder),
                       ),
-                      child: const Icon(Icons.close, color: kNavySoft, size: 16),
+                      child: Icon(Icons.close, color: context.fMuted, size: 16),
                     ),
                   ),
                 ],
@@ -921,16 +987,16 @@ class _AddOutfitSheetState extends State<_AddOutfitSheet> {
               const SizedBox(height: 24),
 
               // ── Outfit Name ─────────────────────────────────────────────────
-              _Label('Outfit Name'),
+              _Label(AppLocalizations.t(context, 'fitness_routine_name')),
               TextField(
                 controller: _nameController,
-                style: const TextStyle(color: kNavySoft, fontSize: 14),
+                style: TextStyle(color: context.fText, fontSize: 14),
                 decoration: _fieldDeco('e.g. Sunday Morning Run'),
               ),
               const SizedBox(height: 20),
 
               // ── Workout Type ────────────────────────────────────────────────
-              _Label('Workout Type'),
+              _Label(AppLocalizations.t(context, 'fitness_workout_type')),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -943,7 +1009,7 @@ class _AddOutfitSheetState extends State<_AddOutfitSheet> {
               const SizedBox(height: 20),
 
               // ── Outfit Photos ───────────────────────────────────────────────
-              _Label('Outfit Photos (up to 6)'),
+              _Label(AppLocalizations.t(context, 'fitness_routine_photos')),
               if (_images.isNotEmpty)
                 Container(
                   height: 100,
@@ -960,21 +1026,21 @@ class _AddOutfitSheetState extends State<_AddOutfitSheet> {
                 ),
               Row(
                 children: [
-                  Expanded(child: _PhotoActionBtn(icon: Icons.camera_alt, label: 'Camera', onTap: _openCamera)),
+                  Expanded(child: _PhotoActionBtn(icon: Icons.camera_alt, label: AppLocalizations.t(context, 'fitness_camera'), onTap: _openCamera)),
                   const SizedBox(width: 8),
-                  Expanded(child: _PhotoActionBtn(icon: Icons.grid_view_rounded, label: 'Gallery', onTap: _openGallery)),
+                  Expanded(child: _PhotoActionBtn(icon: Icons.grid_view_rounded, label: AppLocalizations.t(context, 'fitness_gallery'), onTap: _openGallery)),
                 ],
               ),
               const SizedBox(height: 20),
 
               // ── Clothing Items ──────────────────────────────────────────────
-              _Label('Clothing Items'),
+              _Label(AppLocalizations.t(context, 'fitness_clothing_items')),
               Row(
                 children: [
                   Expanded(
                     child: TextField(
                       controller: _itemInpController,
-                      style: const TextStyle(color: kNavySoft, fontSize: 14),
+                      style: TextStyle(color: context.fText, fontSize: 14),
                       decoration: _fieldDeco('e.g. Lightweight tank top'),
                       onSubmitted: (_) => _addItem(),
                     ),
@@ -985,12 +1051,15 @@ class _AddOutfitSheetState extends State<_AddOutfitSheet> {
                     child: Container(
                       width: 44, height: 44,
                       decoration: BoxDecoration(
-                        color: kNavyMid,
+                        gradient: LinearGradient(
+                          colors: [context.fAccent2, context.fAccent],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: kNavyLight.withOpacity(0.5)),
-
+                        border: Border.all(color: context.fAccent.withValues(alpha: 0.4)),
                       ),
-                      child: const Icon(Icons.add, color: kNavySoft, size: 20),
+                      child: const Icon(Icons.add, color: Colors.white, size: 20),
                     ),
                   ),
                 ],
@@ -1013,11 +1082,11 @@ class _AddOutfitSheetState extends State<_AddOutfitSheet> {
               const SizedBox(height: 20),
 
               // ── Notes ───────────────────────────────────────────────────────
-              _Label('Notes'),
+              _Label(AppLocalizations.t(context, 'wardrobe_notes')),
               TextField(
                 controller: _notesController,
                 maxLines: 3,
-                style: const TextStyle(color: kNavySoft, fontSize: 14),
+                style: TextStyle(color: context.fText, fontSize: 14),
                 decoration: _fieldDeco('e.g. Great for hot weather...'),
               ),
               const SizedBox(height: 24),
@@ -1044,9 +1113,9 @@ class _AddOutfitSheetState extends State<_AddOutfitSheet> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                     elevation: 0,
                   ),
-                  child: const Text(
-                    'Save Outfit',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+                  child: Text(
+                    AppLocalizations.t(context, 'fitness_save_routine'),
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.5),
                   ),
                 ),
               ),
@@ -1057,7 +1126,7 @@ class _AddOutfitSheetState extends State<_AddOutfitSheet> {
   }
   InputDecoration _fieldDeco(String hint) => InputDecoration(
     hintText: hint,
-    hintStyle: TextStyle(color: context.fMuted.withOpacity(0.65), fontSize: 13),
+    hintStyle: TextStyle(color: context.fMuted.withValues(alpha: 0.65), fontSize: 13),
     filled: true,
     fillColor: context.fCard,
     border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
@@ -1067,7 +1136,7 @@ class _AddOutfitSheetState extends State<_AddOutfitSheet> {
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
-      borderSide: BorderSide(color: kAccent, width: 1.5),
+      borderSide: BorderSide(color: context.fAccent, width: 1.5),
     ),
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
   );
@@ -1155,16 +1224,16 @@ class _PhotoActionBtn extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: kNavyMid.withOpacity(0.6),
+          color: context.fPanel,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: kNavyLight.withOpacity(0.45)),
+          border: Border.all(color: context.fAccent.withValues(alpha: 0.35)),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 14, color: kNavySoft),
+            Icon(icon, size: 14, color: context.fAccent),
             const SizedBox(width: 8),
-            Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: kNavySoft)),
+            Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: context.fAccent)),
           ],
         ),
       ),
@@ -1178,7 +1247,7 @@ class _Label extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Text(text.toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.5, color: kNavyLight)),
+      child: Text(text.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.5, color: context.fAccent)),
     );
   }
 }
@@ -1194,10 +1263,10 @@ class _CatPill extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: selected ? kNavyMid : kNavyDeep.withOpacity(0.6),
+          color: selected ? context.fAccent.withValues(alpha: 0.18) : context.fPanel,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: selected ? kNavyLight : kNavyLight.withOpacity(0.25),
+            color: selected ? context.fAccent : context.fBorder,
             width: selected ? 1.5 : 1,
           ),
 
@@ -1211,7 +1280,7 @@ class _CatPill extends StatelessWidget {
               child: Center(child: Text(cat.emoji, style: const TextStyle(fontSize: 18))),
             ),
             const SizedBox(height: 6),
-            Text(cat.label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: selected ? kNavySoft : kNavySoft.withOpacity(0.6))),
+            Text(cat.label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: selected ? context.fText : context.fMuted)),
           ],
         ),
       ),
@@ -1234,16 +1303,30 @@ class _FitnessSession {
 
 class _ChatViewState extends State<_ChatView> {
   final _inputController = TextEditingController();
+  final _inputFocus = FocusNode();
   final _scrollController = ScrollController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  final List<ChatMessage> _messages = [
-    ChatMessage(
-      text: "Hi! I'm AHVI, your AI outfit stylist ✨\n\nTell me what workout you're doing, and I'll suggest the perfect outfit!",
-      isBot: true,
-    ),
-  ];
+  final List<ChatMessage> _messages = [];
   bool _isTyping = false;
   bool _showVoiceOverlay = false;
+  OverlayEntry? _overlay;
+
+  void _removeOverlay() {
+    _overlay?.remove();
+    _overlay = null;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_messages.isEmpty) {
+      _messages.add(ChatMessage(
+        text: AppLocalizations.t(context, 'fitness_ahvi_welcome'),
+        isBot: true,
+        isGreeting: true,
+      ));
+    }
+  }
 
   // ── Chat History Sessions ─────────────────────────────────────────────────
   final List<_FitnessSession> _sessions = [];
@@ -1264,7 +1347,7 @@ class _ChatViewState extends State<_ChatView> {
     setState(() {
       _saveCurrentSession();
       _currentSessionId = DateTime.now().millisecondsSinceEpoch.toString();
-      _messages..clear()..add(ChatMessage(text: "Hi! I'm AHVI, your AI outfit stylist ✨\n\nTell me what workout you're doing, and I'll suggest the perfect outfit!", isBot: true));
+      _messages..clear()..add(ChatMessage(text: AppLocalizations.t(context, 'fitness_ahvi_welcome'), isBot: true, isGreeting: true));
     });
     _scrollToBottom();
   }
@@ -1279,8 +1362,8 @@ class _ChatViewState extends State<_ChatView> {
 
   String _formatDate(DateTime dt) {
     final diff = DateTime.now().difference(dt);
-    if (diff.inDays == 0) return 'Today';
-    if (diff.inDays == 1) return 'Yesterday';
+    if (diff.inDays == 0) return AppLocalizations.t(context, 'chat_today');
+    if (diff.inDays == 1) return AppLocalizations.t(context, 'chat_yesterday');
     if (diff.inDays < 7) return '${diff.inDays} days ago';
     return '${dt.day}/${dt.month}/${dt.year}';
   }
@@ -1291,16 +1374,16 @@ class _ChatViewState extends State<_ChatView> {
       Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 16, 4),
         child: Row(children: [
-          Text('Chats', style: TextStyle(color: context.fText, fontSize: 20, fontWeight: FontWeight.w700)),
+          Text(AppLocalizations.t(context, 'common_chats'), style: TextStyle(color: context.fText, fontSize: 20, fontWeight: FontWeight.w700)),
           const Spacer(),
           GestureDetector(
             onTap: _startNewChat,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(gradient: kAccentGrad, borderRadius: BorderRadius.circular(20)),
-              child: Row(mainAxisSize: MainAxisSize.min, children: const [
-                Icon(Icons.add, color: Colors.white, size: 14), SizedBox(width: 4),
-                Text('New', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.add, color: Colors.white, size: 14), const SizedBox(width: 4),
+                Text(AppLocalizations.t(context, 'common_new'), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
               ]),
             ),
           ),
@@ -1310,7 +1393,7 @@ class _ChatViewState extends State<_ChatView> {
       Divider(color: kGlassBorder, height: 1),
       Expanded(
         child: _sessions.isEmpty
-            ? Center(child: Text('No past chats yet.\nStart a conversation!', textAlign: TextAlign.center, style: TextStyle(color: context.fMuted, fontSize: 13)))
+            ? Center(child: Text(AppLocalizations.t(context, 'fitness_no_chats'), textAlign: TextAlign.center, style: TextStyle(color: context.fMuted, fontSize: 13)))
             : ListView.builder(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 itemCount: _sessions.length,
@@ -1322,19 +1405,19 @@ class _ChatViewState extends State<_ChatView> {
                     direction: DismissDirection.endToStart,
                     background: Container(
                       alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 20),
-                      color: Colors.red.withOpacity(0.15),
+                      color: Colors.red.withValues(alpha: 0.15),
                       child: const Icon(Icons.delete_outline, color: Colors.redAccent),
                     ),
                     onDismissed: (_) => _deleteSession(s.id),
                     child: ListTile(
                       selected: isActive,
-                      selectedTileColor: context.fAccent.withOpacity(0.1),
+                      selectedTileColor: context.fAccent.withValues(alpha: 0.1),
                       onTap: () => _loadSession(s),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
                       leading: Container(
                         width: 36, height: 36,
                         decoration: BoxDecoration(
-                          color: isActive ? context.fAccent.withOpacity(0.15) : context.fPanel,
+                          color: isActive ? context.fAccent.withValues(alpha: 0.15) : context.fPanel,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(color: context.fBorder),
                         ),
@@ -1352,8 +1435,9 @@ class _ChatViewState extends State<_ChatView> {
   );
 
   void _sendMessage([String? text]) {
-    final msg = text ?? _inputController.text.trim();
-    if (msg.isEmpty) return;
+    final raw = text ?? _inputController.text.trim();
+    if (raw.isEmpty) return;
+    final msg = raw;
     setState(() {
       _messages.add(ChatMessage(text: msg, isBot: false));
       if (text == null) _inputController.clear();
@@ -1367,9 +1451,9 @@ class _ChatViewState extends State<_ChatView> {
       setState(() {
         _isTyping = false;
         if (wantsOutfit) {
-          final label = key != null ? key[0].toUpperCase() + key.substring(1) : 'Training';
+          final label = key != null ? key[0].toUpperCase() + key.substring(1) : AppLocalizations.t(context, 'fitness_training_label');
           _messages.add(ChatMessage(
-            text: "Here's your $label style board! 🎽\nPicked the best colors & vibe for your session.",
+            text: AppLocalizations.t(context, 'fitness_ahvi_styleboard_reply').replaceAll('{label}', label),
             isBot: true,
             // styleboard: null — backend connect అయినప్పుడు real data pass చేయాలి
           ));
@@ -1405,15 +1489,15 @@ class _ChatViewState extends State<_ChatView> {
   String _getGeneralReply(String text, String? workoutKey) {
     text = text.toLowerCase();
     if (text.contains('hello') || text.contains('hi') || text.contains('hey')) {
-      return "Hey! 👋 I'm AHVI, your AI outfit stylist.\nTell me what workout you're planning and I'll suggest the perfect look!";
+      return AppLocalizations.t(context, 'fitness_ahvi_greet');
     }
     if (text.contains('thank')) {
-      return "You're welcome! 💜 Let me know whenever you need a new outfit idea!";
+      return AppLocalizations.t(context, 'fitness_ahvi_thanks');
     }
     if (workoutKey != null) {
-      return "Nice! A ${workoutKey[0].toUpperCase()}${workoutKey.substring(1)} session 🔥\nWant me to suggest an outfit or look for it?";
+      return AppLocalizations.t(context, 'fitness_ahvi_workout_detected').replaceAll('{workout}', workoutKey[0].toUpperCase() + workoutKey.substring(1));
     }
-    return "I'm here to help with workout outfit ideas! 👟\nTry asking: \"Suggest an outfit for yoga\" or \"What should I wear to the gym?\"";
+    return AppLocalizations.t(context, 'fitness_ahvi_fallback');
   }
 
   String? _detectWorkoutKey(String text) {
@@ -1471,6 +1555,15 @@ class _ChatViewState extends State<_ChatView> {
       gradientColors: [Color(0xFF2D1B69), Color(0xFF7B6EF6), Color(0xFF9B8EFF)],
     );
   }
+  @override
+  void dispose() {
+    _inputController.dispose();
+    _inputFocus.dispose();
+    _removeOverlay();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
@@ -1486,6 +1579,9 @@ class _ChatViewState extends State<_ChatView> {
       drawer: _historyDrawer(),
       body: Stack(
       children: [
+        // Chat page background — full screen gradient (transparent issue fix)
+        Container(decoration: BoxDecoration(gradient: context.fPageBgGrad)),
+        const _BgOrbs(),
         Column(
           children: [
             // Header
@@ -1499,18 +1595,20 @@ class _ChatViewState extends State<_ChatView> {
                     child: Container(
                       width: 38, height: 38,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2A1F5E),
+                        color: context.fPanel,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: kAccent.withOpacity(0.35)),
+                        border: Border.all(color: context.fBorder),
                       ),
                       child: Icon(Icons.arrow_back_ios_new_rounded, color: context.fText, size: 16),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  // AHVI title — back button పక్కన
-                  Text(
-                    'AHVI',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: context.fText, letterSpacing: 1.5),
+                  // AHVI logo — same as home page
+                  AhviHomeText(
+                    color: context.fText,
+                    fontSize: 30.0,
+                    letterSpacing: 3.2,
+                    fontWeight: FontWeight.w400,
                   ),
                   const Spacer(),
                   // History Button
@@ -1519,9 +1617,9 @@ class _ChatViewState extends State<_ChatView> {
                     child: Container(
                       width: 38, height: 38,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2A1F5E),
+                        color: context.fPanel,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: kAccent.withOpacity(0.35)),
+                        border: Border.all(color: context.fBorder),
                       ),
                       child: Icon(Icons.history_rounded, color: context.fText, size: 18),
                     ),
@@ -1543,11 +1641,23 @@ class _ChatViewState extends State<_ChatView> {
             ),
 
             // Input
-            _ChatInput(
+            AhviChatPromptBar(
               controller: _inputController,
-              onSend: _sendMessage,
-              onLensTap: _showLensSheet,
-              onMicTap: () => setState(() => _showVoiceOverlay = true),
+              focusNode: _inputFocus,
+              hintText: AppLocalizations.t(context, 'fitness_chat_hint'),
+              surface: context.fSurface,
+              border: context.fBorder,
+              accent: context.fAccent,
+              accentSecondary: context.fAccent2,
+              textHeading: context.fText,
+              textMuted: context.fMuted,
+              shadowMedium: Colors.black.withValues(alpha: 0.06),
+              onAccent: Colors.white,
+              onSendMessage: (text) => _sendMessage(text),
+              themeTokens: Theme.of(context).extension<AppThemeTokens>()!,
+              onVoiceTap: () => setState(() => _showVoiceOverlay = true),
+              isListening: false,
+              onVisualSearch: _showLensSheet,
             ),
           ],
         ),
@@ -1581,14 +1691,22 @@ class _ChatBubble extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
             decoration: BoxDecoration(
-              color: message.isBot ? context.fCard.withOpacity(0.62) : context.fCard,
+              color: message.isGreeting ? null : (message.isBot ? context.fCard.withValues(alpha: 0.62) : context.fCard),
+              gradient: message.isGreeting
+                  ? LinearGradient(
+                      colors: [context.fAccent.withValues(alpha: 0.18), context.fAccent2.withValues(alpha: 0.12)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    )
+                  : null,
+              border: message.isGreeting ? Border.all(color: context.fAccent.withValues(alpha: 0.30), width: 1) : null,
               borderRadius: BorderRadius.only(
                 topLeft: const Radius.circular(18),
                 topRight: const Radius.circular(18),
                 bottomLeft: Radius.circular(message.isBot ? 6 : 18),
                 bottomRight: Radius.circular(message.isBot ? 18 : 6),
               ),
-              boxShadow: message.isBot ? null : [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 16, offset: const Offset(0, 4))],
+              boxShadow: message.isBot ? null : [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 16, offset: const Offset(0, 4))],
             ),
             child: Text(message.text, style: TextStyle(color: context.fText, fontSize: 14, height: 1.5)),
           ),
@@ -1610,8 +1728,8 @@ class _StyleboardCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A2E),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFDCD2F0).withOpacity(0.2)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 32, offset: const Offset(0, 4))],
+        border: Border.all(color: const Color(0xFFDCD2F0).withValues(alpha: 0.2)),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 32, offset: const Offset(0, 4))],
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -1634,7 +1752,7 @@ class _StyleboardCard extends StatelessWidget {
                 Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [Colors.white.withOpacity(0.05), Colors.transparent, Colors.black.withOpacity(0.2)],
+                      colors: [Colors.white.withValues(alpha: 0.05), Colors.transparent, Colors.black.withValues(alpha: 0.2)],
                       begin: Alignment.topRight,
                       end: Alignment.bottomLeft,
                     ),
@@ -1678,7 +1796,7 @@ class _StyleboardCard extends StatelessWidget {
                 ),
               )),
               const Spacer(),
-              const Text('PALETTE', style: TextStyle(fontSize: 8, color: Colors.white24, fontWeight: FontWeight.w700, letterSpacing: 1)),
+              Text(AppLocalizations.t(context, 'fitness_palette'), style: const TextStyle(fontSize: 8, color: Colors.white24, fontWeight: FontWeight.w700, letterSpacing: 1)),
             ]),
           ),
         ],
@@ -1714,11 +1832,11 @@ class _VoiceOverlayState extends State<_VoiceOverlay> with SingleTickerProviderS
           children: [
             _OrbWidget(animation: _controller),
             const SizedBox(height: 60),
-            const Text('Tap to speak', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700)),
+            Text(AppLocalizations.t(context, 'fitness_tap_to_speak'), style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700)),
             const SizedBox(height: 10),
-            const Text('Ask AHVI to style your workout outfit', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            Text(AppLocalizations.t(context, 'fitness_ask_ahvi_style'), style: const TextStyle(color: Colors.white70, fontSize: 13)),
             const SizedBox(height: 40),
-            ElevatedButton(onPressed: widget.onClose, child: const Text('Cancel'), style: ElevatedButton.styleFrom(backgroundColor: Colors.white12, foregroundColor: Colors.white)),
+            ElevatedButton(onPressed: widget.onClose, style: ElevatedButton.styleFrom(backgroundColor: Colors.white12, foregroundColor: Colors.white), child: Text(AppLocalizations.t(context, 'common_cancel'))),
           ],
         ),
       ),
@@ -1737,14 +1855,14 @@ class _OrbWidget extends AnimatedWidget {
           Container(
             width: 130 + (i * 20 * animation.value),
             height: 130 + (i * 20 * animation.value),
-            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white.withOpacity(0.25 - (i * 0.05)))),
+            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white.withValues(alpha: 0.25 - (i * 0.05)))),
           ),
         Container(
           width: 130, height: 130,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.22),
+            color: Colors.white.withValues(alpha: 0.22),
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withOpacity(0.55), width: 2),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.55), width: 2),
             boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 40)],
           ),
           child: const Center(child: Icon(Icons.mic, color: Colors.white, size: 44)),
@@ -1764,7 +1882,7 @@ class _VoiceBtn extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(color: Colors.white38, borderRadius: BorderRadius.circular(50), border: Border.all(color: kGlassBorder)),
-        child: Row(children: const [Icon(Icons.phone, size: 14), SizedBox(width: 6), Text('Voice', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500))]),
+        child: Row(children: [const Icon(Icons.phone, size: 14), const SizedBox(width: 6), Text(AppLocalizations.t(context, 'fitness_voice'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500))]),
       ),
     );
   }
@@ -1772,7 +1890,7 @@ class _VoiceBtn extends StatelessWidget {
 class _TypingIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Padding(padding: EdgeInsets.all(8.0), child: Text('AHVI is typing...', style: TextStyle(color: context.fMuted, fontSize: 12)));
+    return Padding(padding: EdgeInsets.all(8.0), child: Text(AppLocalizations.t(context, 'fitness_ahvi_typing'), style: TextStyle(color: context.fMuted, fontSize: 12)));
   }
 }
 class _SuggestionChip extends StatelessWidget {
@@ -1795,12 +1913,10 @@ class _SuggestionChip extends StatelessWidget {
 class _ChatInput extends StatelessWidget {
   final TextEditingController controller;
   final Function(String) onSend;
-  final VoidCallback onLensTap;
   final VoidCallback onMicTap;
   const _ChatInput({
     required this.controller,
     required this.onSend,
-    required this.onLensTap,
     required this.onMicTap,
   });
   @override
@@ -1808,82 +1924,230 @@ class _ChatInput extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 14),
       decoration: BoxDecoration(
-        color: context.fSurface.withOpacity(0.85),
-        border: Border(top: BorderSide(color: kAccent.withOpacity(0.12), width: 1)),
+        color: context.fSurface.withValues(alpha: 0.85),
+        border: Border(top: BorderSide(color: kAccent.withValues(alpha: 0.12), width: 1)),
       ),
-      child: Container(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Attachment preview chip (shown when file/image/search is pending)
+          Container(
+            decoration: BoxDecoration(
+              color: context.fCard,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: kAccent.withValues(alpha: 0.30), width: 1.2),
+              boxShadow: [
+                BoxShadow(color: kAccent.withValues(alpha: 0.08), blurRadius: 16, offset: const Offset(0, 2)),
+              ],
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            child: Row(
+              children: [
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    style: TextStyle(color: context.fText, fontSize: 14),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                      border: InputBorder.none,
+                      hintText: AppLocalizations.t(context, 'fitness_chat_hint'),
+                      hintStyle: TextStyle(color: context.fMuted, fontSize: 13),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                // Microphone Button
+                GestureDetector(
+                  onTap: onMicTap,
+                  child: Container(
+                    width: 30, height: 30,
+                    decoration: BoxDecoration(
+                      color: kAccent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: kAccent.withValues(alpha: 0.25), width: 1),
+                    ),
+                    child: Center(
+                      child: Icon(Icons.mic_rounded, color: kAccent, size: 16),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                // Send Button
+                IconButton(
+                  onPressed: () => onSend(controller.text),
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  style: IconButton.styleFrom(
+                    backgroundColor: context.fAccent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+                    minimumSize: const Size(38, 38),
+                    maximumSize: const Size(38, 38),
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
+            ),      // Row
+          ),    // inner Container
+        ],
+      ),        // Column
+    );
+  }
+}
+
+// ── ChatGPT-style Plus Button for Fitness ─────────────────────────────────
+class _FitnessPlusButton extends StatefulWidget {
+  final VoidCallback onLensTap;
+  const _FitnessPlusButton({required this.onLensTap});
+  @override
+  State<_FitnessPlusButton> createState() => _FitnessPlusButtonState();
+}
+
+class _FitnessPlusButtonState extends State<_FitnessPlusButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _rotateAnim;
+  bool _menuOpen = false;
+  OverlayEntry? _overlay;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
+    _rotateAnim = Tween<double>(begin: 0.0, end: 0.125)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() {
+    _closeMenu();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _openMenu() {
+    if (_menuOpen) { _closeMenu(); return; }
+    setState(() => _menuOpen = true);
+    _ctrl.forward();
+    final renderBox = context.findRenderObject() as RenderBox;
+    final offset = renderBox.localToGlobal(Offset.zero);
+
+    final actions = [
+      (Icons.camera_alt_outlined, 'Camera', const Color(0xFFFF6B6B)),
+      (Icons.photo_library_outlined, 'Photos', const Color(0xFF4ECDC4)),
+      (Icons.attach_file_rounded, 'Files', const Color(0xFF45B7D1)),
+      (Icons.search_rounded, 'Visual Search', kAccent),
+    ];
+
+    _overlay = OverlayEntry(builder: (_) {
+      return GestureDetector(
+        onTap: _closeMenu,
+        behavior: HitTestBehavior.translucent,
+        child: Stack(children: [
+          Positioned(
+            left: offset.dx - 10,
+            bottom: MediaQuery.of(context).size.height - offset.dy + 8,
+            child: GestureDetector(
+              onTap: () {},
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  width: 200,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: context.fSurface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: kAccent.withValues(alpha: 0.2)),
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 24, offset: const Offset(0, 8))],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: actions.map((a) => _FitnessMenuRow(
+                      icon: a.$1,
+                      label: a.$2,
+                      color: a.$3,
+                      onTap: () {
+                        _closeMenu();
+                        if (a.$2 == 'Visual Search') widget.onLensTap();
+                      },
+                    )).toList(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      );
+    });
+    Overlay.of(context).insert(_overlay!);
+  }
+
+  void _closeMenu() {
+    _overlay?.remove();
+    _overlay = null;
+    _ctrl.reverse();
+    if (mounted) setState(() => _menuOpen = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _openMenu,
+      child: AnimatedBuilder(
+        animation: _rotateAnim,
+        builder: (_, child) => Transform.rotate(
+          angle: _rotateAnim.value * 2 * 3.14159,
+          child: child,
+        ),
+        child: Container(
+          width: 30, height: 30,
+          decoration: BoxDecoration(
+            color: _menuOpen ? kAccent.withValues(alpha: 0.18) : kAccent.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _menuOpen ? kAccent.withValues(alpha: 0.5) : kAccent.withValues(alpha: 0.25), width: 1),
+          ),
+          child: Icon(Icons.add_rounded, color: kAccent, size: 18),
+        ),
+      ),
+    );
+  }
+}
+
+class _FitnessMenuRow extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _FitnessMenuRow({required this.icon, required this.label, required this.color, required this.onTap});
+  @override
+  State<_FitnessMenuRow> createState() => _FitnessMenuRowState();
+}
+
+class _FitnessMenuRowState extends State<_FitnessMenuRow> {
+  bool _hovered = false;
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _hovered = true),
+      onTapUp: (_) { setState(() => _hovered = false); widget.onTap(); },
+      onTapCancel: () => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
         decoration: BoxDecoration(
-          color: context.fCard,
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: kAccent.withOpacity(0.30), width: 1.2),
-          boxShadow: [
-            BoxShadow(color: kAccent.withOpacity(0.08), blurRadius: 16, offset: const Offset(0, 2)),
-          ],
+          color: _hovered ? widget.color.withValues(alpha: 0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        child: Row(
-          children: [
-            // Lens Button
-            GestureDetector(
-              onTap: onLensTap,
-              child: Container(
-                width: 30, height: 30,
-                decoration: BoxDecoration(
-                  color: kAccent.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: kAccent.withOpacity(0.25), width: 1),
-                ),
-                child: Center(
-                  child: Icon(Icons.search_rounded, color: kAccent, size: 16),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                style: TextStyle(color: context.fText, fontSize: 14),
-                decoration: InputDecoration(
-                  isDense: true,
-                  contentPadding: EdgeInsets.zero,
-                  border: InputBorder.none,
-                  hintText: 'Describe your workout or ask for a look...',
-                  hintStyle: TextStyle(color: context.fMuted, fontSize: 13),
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            // Microphone Button
-            GestureDetector(
-              onTap: onMicTap,
-              child: Container(
-                width: 30, height: 30,
-                decoration: BoxDecoration(
-                  color: kAccent.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: kAccent.withOpacity(0.25), width: 1),
-                ),
-                child: Center(
-                  child: Icon(Icons.mic_rounded, color: kAccent, size: 16),
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            // Send Button
-            IconButton(
-              onPressed: () => onSend(controller.text),
-              icon: const Icon(Icons.arrow_forward_rounded),
-              style: IconButton.styleFrom(
-                backgroundColor: context.fAccent,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
-                minimumSize: const Size(38, 38),
-                maximumSize: const Size(38, 38),
-                padding: EdgeInsets.zero,
-              ),
-            ),
-          ],
-        ),
+        child: Row(children: [
+          Container(
+            width: 30, height: 30,
+            decoration: BoxDecoration(color: widget.color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(9)),
+            child: Icon(widget.icon, color: widget.color, size: 15),
+          ),
+          const SizedBox(width: 10),
+          Text(widget.label, style: TextStyle(color: context.fText, fontSize: 13, fontWeight: FontWeight.w600)),
+        ]),
       ),
     );
   }
@@ -1897,15 +2161,15 @@ class _FitnessLensSheet extends StatelessWidget {
       decoration: BoxDecoration(
         color: context.fSurface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border.all(color: kAccent.withOpacity(0.15)),
-        boxShadow: [BoxShadow(color: kAccent.withOpacity(0.15), blurRadius: 48, offset: const Offset(0, -12))],
+        border: Border.all(color: kAccent.withValues(alpha: 0.15)),
+        boxShadow: [BoxShadow(color: kAccent.withValues(alpha: 0.15), blurRadius: 48, offset: const Offset(0, -12))],
       ),
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(width: 40, height: 4, margin: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(color: kAccent.withOpacity(0.3), borderRadius: BorderRadius.circular(2))),
+              decoration: BoxDecoration(color: kAccent.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(2))),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
             child: Row(
@@ -1914,17 +2178,17 @@ class _FitnessLensSheet extends StatelessWidget {
                 Row(children: [
                   Container(
                     width: 32, height: 32,
-                    decoration: BoxDecoration(color: kAccent.withOpacity(0.12), borderRadius: BorderRadius.circular(9), border: Border.all(color: kAccent.withOpacity(0.25))),
+                    decoration: BoxDecoration(color: kAccent.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(9), border: Border.all(color: kAccent.withValues(alpha: 0.25))),
                     child: Icon(Icons.search, color: kAccent, size: 17),
                   ),
                   const SizedBox(width: 8),
-                  Text('AHVI Lens', style: TextStyle(color: context.fText, fontSize: 16, fontWeight: FontWeight.w700)),
+                  Text(AppLocalizations.t(context, 'fitness_ahvi_lens'), style: TextStyle(color: context.fText, fontSize: 16, fontWeight: FontWeight.w700)),
                 ]),
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
                   child: Container(
                     width: 28, height: 28,
-                    decoration: BoxDecoration(shape: BoxShape.circle, color: kAccent.withOpacity(0.08), border: Border.all(color: kAccent.withOpacity(0.20))),
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: kAccent.withValues(alpha: 0.08), border: Border.all(color: kAccent.withValues(alpha: 0.20))),
                     child: Icon(Icons.close, color: context.fMuted, size: 14),
                   ),
                 ),
@@ -1934,18 +2198,18 @@ class _FitnessLensSheet extends StatelessWidget {
           Container(
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: kGlassBgStrong, border: Border.all(color: kAccent.withOpacity(0.15)), borderRadius: BorderRadius.circular(16)),
+            decoration: BoxDecoration(color: kGlassBgStrong, border: Border.all(color: kAccent.withValues(alpha: 0.15)), borderRadius: BorderRadius.circular(16)),
             child: Row(children: [
               Container(
                 width: 40, height: 40,
-                decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: kAccent.withOpacity(0.5), width: 2), color: kAccent.withOpacity(0.08)),
+                decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: kAccent.withValues(alpha: 0.5), width: 2), color: kAccent.withValues(alpha: 0.08)),
                 child: Icon(Icons.circle, color: kAccent, size: 12),
               ),
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Visual Outfit Search', style: TextStyle(color: context.fText, fontSize: 14, fontWeight: FontWeight.w600)),
+                Text(AppLocalizations.t(context, 'fitness_visual_outfit_search'), style: TextStyle(color: context.fText, fontSize: 14, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 2),
-                Text('Point at any outfit to find, save, or get styling advice.', style: TextStyle(color: context.fMuted, fontSize: 11.5, height: 1.5)),
+                Text(AppLocalizations.t(context, 'fitness_lens_desc'), style: TextStyle(color: context.fMuted, fontSize: 11.5, height: 1.5)),
               ])),
             ]),
           ),
@@ -1970,11 +2234,11 @@ class _FitnessLensTile extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: kGlassBgStrong, borderRadius: BorderRadius.circular(16), border: Border.all(color: kAccent.withOpacity(0.12))),
+        decoration: BoxDecoration(color: kGlassBgStrong, borderRadius: BorderRadius.circular(16), border: Border.all(color: kAccent.withValues(alpha: 0.12))),
         child: Row(children: [
           Container(
             width: 40, height: 40,
-            decoration: BoxDecoration(color: kAccent.withOpacity(0.12), borderRadius: BorderRadius.circular(12), border: Border.all(color: kAccent.withOpacity(0.25))),
+            decoration: BoxDecoration(color: kAccent.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12), border: Border.all(color: kAccent.withValues(alpha: 0.25))),
             child: Icon(icon, color: kAccent, size: 18),
           ),
           const SizedBox(width: 10),

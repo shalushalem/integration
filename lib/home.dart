@@ -14,13 +14,24 @@ import 'package:provider/provider.dart';
 import 'package:myapp/services/appwrite_service.dart';
 import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/chat.dart'; // 🚀 Added Chat Screen Integration
+import 'package:myapp/app_localizations.dart'; // 🆕 Localization
 
 // ─── Colors ──────────────────────────────────────────────
 
+// 🆕 Nav items are now built dynamically in _buildBottomNav() using localization
+// _homeNavItems icons only — labels come from JSON
+const _homeNavIcons = <IconData>[
+  Icons.home_outlined,
+  Icons.chat_bubble_outline_rounded,
+  Icons.dry_cleaning_outlined,
+  Icons.grid_view_rounded,
+  Icons.explore_outlined,
+];
+// Keep original for fallback / non-localized usage
 const _homeNavItems = <({IconData icon, String label})>[
+  (icon: Icons.home_outlined, label: 'Home'),
   (icon: Icons.chat_bubble_outline_rounded, label: 'Chat'),
   (icon: Icons.dry_cleaning_outlined, label: 'Wardrobe'),
-  (icon: Icons.search_rounded, label: 'Lens'),
   (icon: Icons.grid_view_rounded, label: 'Planner'),
   (icon: Icons.explore_outlined, label: 'Explore'),
 ];
@@ -29,6 +40,17 @@ Color _accent(AppThemeTokens t) => t.accent.primary;
 Color _accentSecondary(AppThemeTokens t) => t.accent.secondary;
 Color _accentTertiary(AppThemeTokens t) => t.accent.tertiary;
 
+// 🆕 AI suggestions keys — values come from JSON
+const _aiSuggestionKeys = [
+  'ai_sug_1',
+  'ai_sug_2',
+  'ai_sug_3',
+  'ai_sug_4',
+  'ai_sug_5',
+  'ai_sug_6',
+  'ai_sug_7',
+];
+// Keep original English as fallback
 const _aiSuggestions = [
   "Your 2pm meeting is in 4 hrs — want to prep an outfit?",
   "It's 14°C and partly cloudy — shall I suggest a layered look?",
@@ -39,6 +61,19 @@ const _aiSuggestions = [
   "I noticed you love minimal styles — new picks are in.",
 ];
 
+// 🆕 Prepare chips keys for localization
+const _prepareChipKeys = [
+  ('prepare_carry_on', '✈️ Carry-on Packing'),
+  ('prepare_birthday', '🎂 Birthday Party Planning'),
+  ('prepare_camping', '🏕️ Camping Trip'),
+  ('prepare_wedding', '💍 Wedding Planning'),
+  ('prepare_workout', '🏋️ Gym Workout Routine'),
+  ('prepare_meal_prep', '🍳 Weekly Meal Prep'),
+  ('prepare_dev_project', '💻 New Coding Project Setup'),
+  ('prepare_moving', '🏠 House Moving Checklist'),
+  ('prepare_study', '🎓 Exam Study Plan'),
+  ('prepare_gardening', '🌿 Garden Planting'),
+];
 const _prepareChips = [
   ('✈️ Carry-on', '✈️ Carry-on Packing'),
   ('🎂 Birthday Party', '🎂 Birthday Party Planning'),
@@ -65,8 +100,6 @@ class Screen4 extends StatefulWidget {
 }
 
 class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
-  // Keep ambient motion off by default to reduce continuous GPU/CPU drain.
-  static const bool _enableAmbientMotion = false;
   AppThemeTokens get _t => context.themeTokens;
   Color get _bgPrimary => _t.backgroundPrimary;
   Color get _bgSecondary => _t.backgroundSecondary;
@@ -102,6 +135,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   late AnimationController _aurora2Ctrl;
   late AnimationController _aurora3Ctrl;
   late AnimationController _shimmerCtrl;
+  late AnimationController _pulseCtrl;
   int _activeNavIdx = 0;
 
   late AnimationController _floatBadgeCtrl;
@@ -113,8 +147,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       ValueNotifier<_SuggestionState>((index: 0, opacity: 1.0));
   Timer? _suggestionTimer;
 
-  bool _lensSheetOpen = false;
-  late AnimationController _lensSheetCtrl;
+  // ── Plus menu (ChatGPT-style) ──────────────────────────────────────────────
+  bool _plusMenuOpen = false;
+  late AnimationController _plusMenuCtrl;
 
   bool _toastVisible = false;
   Timer? _toastTimer;
@@ -125,7 +160,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   late List<AnimationController> _navRiseCtrls;
 
   final ValueNotifier<_ClockState> _clockState = ValueNotifier<_ClockState>((
-    greeting: 'Morning',
+    greeting: 'greeting_morning', // 🆕 key గా store — display లో translate అవుతుంది
     date: '',
   ));
   Timer? _clockTimer;
@@ -152,7 +187,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
   _OverlayState _overlayState = _OverlayState.idle;
   String? _activeIntent;
-  String _chatPlaceholder = 'Ask AHVI anything…';
+  String _chatPlaceholderKey = 'ask_me'; // ✅ JSON key: "ask_me"
+  String get _chatPlaceholder => AppLocalizations.t(context, _chatPlaceholderKey);
   bool _homeCollapsed = false;
   late AnimationController _homeCollapseCtrl;
   late AnimationController _overlayFadeCtrl;
@@ -171,9 +207,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   bool _tagsRevealed = false;
 
   String _userName = '...';
-  String _userId = 'user_1';
   Uint8List? _avatarBytes;
-  Map<String, dynamic> _userProfileContext = const {};
 
   Future<void> _savePrepareExactToBoard({
     required String boardId,
@@ -187,11 +221,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     required List<bool> outfitSaved,
   }) async {
     final sectionPayload = <Map<String, dynamic>>[];
-    var totalItems = 0;
-    var completedItems = 0;
     for (var i = 0; i < sections.length; i++) {
-      totalItems += itemsState[i].length;
-      completedItems += checksState[i].where((v) => v).length;
       sectionPayload.add({
         'name': sections[i].name,
         'emoji': sections[i].emoji,
@@ -201,45 +231,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       });
     }
 
-    final occasion = _occasionFromBoardId(boardId);
-    final description =
-        '$title · $completedItems/$totalItems completed items';
-
-    final payload = <String, dynamic>{
-      'title': title.trim().isEmpty ? 'Checklist Board' : title.trim(),
-      'description': description,
-      'occasion': occasion,
-      'imageUrl': '',
-      'itemIds': const <String>[],
-      'source': 'home_prepare_checklist',
-      'checklist': {
-        'sections': sectionPayload,
-        'outfit_saved': List<bool>.from(outfitSaved),
-        'total_items': totalItems,
-        'completed_items': completedItems,
-      },
-      'created_at': DateTime.now().toIso8601String(),
-    };
-
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    await appwrite.createSavedBoard(payload);
-  }
-
-  String _occasionFromBoardId(String boardId) {
-    switch (boardId.trim().toLowerCase()) {
-      case 'party_looks':
-        return 'Party';
-      case 'occasion':
-        return 'Occasion';
-      case 'office_fit':
-        return 'Office';
-      case 'vacation':
-        return 'Vacation';
-      case 'everything_else':
-        return 'Everything Else';
-      default:
-        return 'Occasion';
-    }
+    await Future<void>.delayed(const Duration(milliseconds: 180));
   }
 
   @override
@@ -250,45 +242,33 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _aurora1Ctrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 14),
-    );
+    )..repeat(reverse: true);
     _aurora2Ctrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 18),
-    );
+    )..repeat(reverse: true);
     _aurora3Ctrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 22),
-    );
+    )..repeat(reverse: true);
     _shimmerCtrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
-    );
+    )..repeat();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    )..repeat(reverse: true);
 
     _floatBadgeCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4000),
-    );
+    )..repeat(reverse: true);
 
     _breatheCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4000),
-    );
-
-    if (_enableAmbientMotion) {
-      _aurora1Ctrl.repeat(reverse: true);
-      _aurora2Ctrl.repeat(reverse: true);
-      _aurora3Ctrl.repeat(reverse: true);
-      _shimmerCtrl.repeat();
-      _floatBadgeCtrl.repeat(reverse: true);
-      _breatheCtrl.repeat(reverse: true);
-    } else {
-      _aurora1Ctrl.value = 0.38;
-      _aurora2Ctrl.value = 0.52;
-      _aurora3Ctrl.value = 0.44;
-      _shimmerCtrl.value = 0.50;
-      _floatBadgeCtrl.value = 0.50;
-      _breatheCtrl.value = 0.50;
-    }
+    )..repeat(reverse: true);
 
     _heartPopCtrls = List.generate(
       4,
@@ -303,9 +283,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 360),
     );
 
-    _lensSheetCtrl = AnimationController(
+    _plusMenuCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 420),
+      duration: const Duration(milliseconds: 260),
     );
 
     _navRiseCtrls = List.generate(
@@ -346,6 +326,16 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
 
     _fetchUserProfile();
+
+    // 🔧 FIX: Home tab active glow — first frame లో animate చేయి
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _navRiseCtrls[0].animateTo(
+          1.0,
+          curve: const Cubic(0.34, 1.56, 0.64, 1.0),
+        );
+      }
+    });
   }
 
   Future<void> _fetchUserProfile() async {
@@ -360,27 +350,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
       setState(() {
         _userName = firstName;
-        _userId = user.$id;
         _avatarBytes = avatar;
       });
     }
-
-    try {
-      final profile = await appwrite.getUserProfile();
-      if (!mounted) return;
-      setState(() {
-        _userProfileContext = {
-          'name': profile.data['name'] ?? _userName,
-          'username': profile.data['username'],
-          'gender': profile.data['gender'],
-          'skinTone': profile.data['skinTone'],
-          'bodyShape': profile.data['bodyShape'],
-          'styles': profile.data['styles'],
-          'shopPrefs': profile.data['shopPrefs'],
-          'lang': profile.data['lang'],
-        };
-      });
-    } catch (_) {}
   }
 
   void _updateClock() {
@@ -388,31 +360,22 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     final now = DateTime.now();
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
-    String greeting;
+    // 🆕 Greeting key — translated in _buildGreetingBlock()
+    String greetingKey;
     if (now.hour >= 5 && now.hour < 12) {
-      greeting = 'Morning';
+      greetingKey = 'greeting_morning';
     } else if (now.hour >= 12 && now.hour < 17) {
-      greeting = 'Afternoon';
+      greetingKey = 'greeting_afternoon';
     } else if (now.hour >= 17 && now.hour < 21) {
-      greeting = 'Evening';
+      greetingKey = 'greeting_evening';
     } else {
-      greeting = 'Night';
+      greetingKey = 'greeting_night';
     }
     _clockState.value = (
-      greeting: greeting,
+      greeting: greetingKey,
       date: '${days[now.weekday % 7]}, ${now.day} ${months[now.month - 1]}',
     );
   }
@@ -445,40 +408,16 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
   // ── Voice methods ──────────────────────────────────────────────────────────
   Future<void> _initSpeech() async {
-    try {
-      _speechAvailable = await _speech.initialize(
-        onStatus: (status) {
-          if (status == 'done' || status == 'notListening') {
-            if (mounted) setState(() => _isListening = false);
-          }
-        },
-        onError: (_) {
+    _speechAvailable = await _speech.initialize(
+      onStatus: (status) {
+        if (status == 'done' || status == 'notListening') {
           if (mounted) setState(() => _isListening = false);
-        },
-      );
-    } on PlatformException catch (e) {
-      if (e.code == 'multipleRequests') {
-        await Future.delayed(const Duration(milliseconds: 350));
-        try {
-          _speechAvailable = await _speech.initialize(
-            onStatus: (status) {
-              if (status == 'done' || status == 'notListening') {
-                if (mounted) setState(() => _isListening = false);
-              }
-            },
-            onError: (_) {
-              if (mounted) setState(() => _isListening = false);
-            },
-          );
-        } catch (_) {
-          _speechAvailable = false;
         }
-      } else {
-        _speechAvailable = false;
-      }
-    } catch (_) {
-      _speechAvailable = false;
-    }
+      },
+      onError: (_) {
+        if (mounted) setState(() => _isListening = false);
+      },
+    );
     if (mounted) setState(() {});
   }
 
@@ -518,13 +457,14 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     _aurora2Ctrl.dispose();
     _aurora3Ctrl.dispose();
     _shimmerCtrl.dispose();
+    _pulseCtrl.dispose();
     _floatBadgeCtrl.dispose();
     _breatheCtrl.dispose();
     for (final c in _heartPopCtrls) {
       c.dispose();
     }
     _seeAllCtrl.dispose();
-    _lensSheetCtrl.dispose();
+    _plusMenuCtrl.dispose();
     for (final c in _navRiseCtrls) {
       c.dispose();
     }
@@ -559,22 +499,48 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   // 🚀 FIXED: Chat Navigation logic for the Bottom Nav Bar
   void _handleNavTap(int idx) {
     if (idx == 0) {
+      // Home tab — already here, just ensure active
+      if (_activeNavIdx != 0) {
+        _navRiseCtrls[_activeNavIdx].animateTo(0.0, curve: const Cubic(0.4, 0.0, 0.2, 1.0));
+        _navRiseCtrls[0].animateTo(1.0, curve: const Cubic(0.34, 1.56, 0.64, 1.0));
+        setState(() => _activeNavIdx = 0);
+      } else {
+        // 🔧 FIX: Already on home tab — rise animation ensure చేయి
+        _navRiseCtrls[0].animateTo(1.0, curve: const Cubic(0.34, 1.56, 0.64, 1.0));
+      }
+      if (widget.onShellNavTap != null) widget.onShellNavTap!(0);
+      return;
+    }
+
+    // Highlight the tapped tab immediately before navigating
+    void _activateTab(int i) {
+      _navRiseCtrls[_activeNavIdx].animateTo(0.0, curve: const Cubic(0.4, 0.0, 0.2, 1.0));
+      _navRiseCtrls[i].animateTo(1.0, curve: const Cubic(0.34, 1.56, 0.64, 1.0));
+      setState(() => _activeNavIdx = i);
+    }
+
+    if (idx == 1) {
+      _activateTab(1);
       _openNavScreen(const ChatScreen());
       return;
     }
-    if (idx == 1) {
+    if (idx == 2) {
+      // 🔧 FIX: Shell కి delegate చేసే ముందు local tab highlight చేయి
+      _navRiseCtrls[_activeNavIdx].animateTo(0.0, curve: const Cubic(0.4, 0.0, 0.2, 1.0));
+      _navRiseCtrls[2].animateTo(1.0, curve: const Cubic(0.34, 1.56, 0.64, 1.0));
+      setState(() => _activeNavIdx = 2);
       if (widget.onShellNavTap != null) {
-        widget.onShellNavTap!(1);
+        widget.onShellNavTap!(2);
         return;
       }
       _openNavScreen(const WardrobeScreen());
       return;
     }
-    if (idx == 2) {
-      _openLensSheet();
-      return;
-    }
     if (idx == 3) {
+      // 🔧 FIX: Shell కి delegate చేసే ముందు local tab highlight చేయి
+      _navRiseCtrls[_activeNavIdx].animateTo(0.0, curve: const Cubic(0.4, 0.0, 0.2, 1.0));
+      _navRiseCtrls[3].animateTo(1.0, curve: const Cubic(0.34, 1.56, 0.64, 1.0));
+      setState(() => _activeNavIdx = 3);
       if (widget.onShellNavTap != null) {
         widget.onShellNavTap!(3);
         return;
@@ -588,30 +554,27 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     }
     if (idx == _activeNavIdx) return;
 
-    _navRiseCtrls[_activeNavIdx].animateTo(
-      0.0,
-      curve: const Cubic(0.4, 0.0, 0.2, 1.0),
-    );
-    _navRiseCtrls[idx].animateTo(
-      1.0,
-      curve: const Cubic(0.34, 1.56, 0.64, 1.0),
-    );
-
+    _navRiseCtrls[_activeNavIdx].animateTo(0.0, curve: const Cubic(0.4, 0.0, 0.2, 1.0));
+    _navRiseCtrls[idx].animateTo(1.0, curve: const Cubic(0.34, 1.56, 0.64, 1.0));
     setState(() => _activeNavIdx = idx);
   }
 
-  void _openLensSheet() {
-    setState(() => _lensSheetOpen = true);
-    _lensSheetCtrl.animateTo(
+  void _openPlusMenu() {
+    if (_plusMenuOpen) {
+      _closePlusMenu();
+      return;
+    }
+    HapticFeedback.lightImpact();
+    setState(() => _plusMenuOpen = true);
+    _plusMenuCtrl.animateTo(
       1.0,
-      duration: const Duration(milliseconds: 420),
       curve: const Cubic(0.16, 1.0, 0.3, 1.0),
     );
   }
 
-  void _closeLensSheet() {
-    _lensSheetCtrl.reverse().then((_) {
-      if (mounted) setState(() => _lensSheetOpen = false);
+  void _closePlusMenu() {
+    _plusMenuCtrl.reverse().then((_) {
+      if (mounted) setState(() => _plusMenuOpen = false);
     });
   }
 
@@ -639,12 +602,28 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           );
         },
       ),
-    );
+    ).then((_) {
+      // Back వచ్చినప్పుడు Home tab active గా reset చేయి
+      if (!mounted) return;
+      final prevIdx = _activeNavIdx;
+      if (prevIdx != 0) {
+        _navRiseCtrls[prevIdx].animateTo(
+          0.0,
+          curve: const Cubic(0.4, 0.0, 0.2, 1.0),
+        );
+      }
+      _navRiseCtrls[0].animateTo(
+        1.0,
+        curve: const Cubic(0.34, 1.56, 0.64, 1.0),
+      );
+      setState(() => _activeNavIdx = 0);
+    });
   }
 
   void _openModuleChat(String moduleKey) {
-    final normalized = moduleKey == 'prepare' ? 'plan' : moduleKey;
-    _openNavScreen(ChatScreen(moduleContext: normalized));
+    // Overlay తెరవకుండా directly ChatScreen కి navigate చేయి
+    final module = (moduleKey == 'plan') ? 'prepare' : moduleKey;
+    _openNavScreen(ChatScreen(moduleContext: module));
   }
 
   void _openChatWithPrompt(String prompt) {
@@ -655,19 +634,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       return;
     }
     _openNavScreen(ChatScreen(moduleContext: module, initialPrompt: text));
-  }
-
-  String _backendModuleContextForIntent(String intent) {
-    switch (intent.trim().toLowerCase()) {
-      case 'style':
-        return 'style';
-      case 'organize':
-        return 'organize';
-      case 'prepare':
-        return 'plan';
-      default:
-        return 'chat';
-    }
   }
 
   void _openPickSheet(String name, String tag) {
@@ -745,57 +711,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   void _submitQuery(String query) {
-    if (query.isEmpty && _overlayState == _OverlayState.idle) {
-      _triggerIntent('chat');
-      return;
-    }
-
-    if (_overlayState == _OverlayState.idle) {
-      _activeIntent = 'chat';
-      final cfg = _intentConfig['chat']!;
-      _setPlaceholder('chat');
-
-      setState(() {
-        _homeCollapsed = true;
-        _overlayBrandSub = cfg.brandSub;
-      });
-
-      _homeCollapseCtrl.animateTo(
-        1.0,
-        duration: const Duration(milliseconds: 600),
-        curve: const Cubic(0.16, 1.0, 0.3, 1.0),
-      );
-
-      Future.delayed(const Duration(milliseconds: 420), () {
-        if (!mounted) return;
-
-        if (query.isNotEmpty) {
-          _overlayFadeCtrl.animateTo(
-            1.0,
-            duration: const Duration(milliseconds: 380),
-            curve: const Cubic(0.16, 1.0, 0.3, 1.0),
-          );
-
-          _handleQuery(query, 'chat');
-        } else {
-          setState(() {
-            _stopThinkingAnimation();
-            _overlayState = _OverlayState.suggestions;
-            _overlaySuggestions = cfg.suggestions;
-            _responses.clear();
-            _tagsRevealed = false;
-          });
-          _overlayFadeCtrl.animateTo(
-            1.0,
-            duration: const Duration(milliseconds: 380),
-            curve: const Cubic(0.16, 1.0, 0.3, 1.0),
-          );
-        }
-      });
-    } else if (_overlayState == _OverlayState.suggestions ||
-        _overlayState == _OverlayState.response) {
-      _handleQuery(query, _activeIntent ?? 'chat');
-    }
+    // Overlay తెరవకుండా directly ChatScreen కి navigate చేయి
+    _openChatWithPrompt(query);
   }
 
   // 🚀 FIXED FUNCTION: REAL API CALL WITH HISTORY & MEMORY
@@ -815,7 +732,12 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
     _ResponseData? resp;
 
-    try {
+    final isPrepareQuickChip =
+        intent == 'prepare' && _prepareChips.any((chip) => chip.$2 == question);
+    if (isPrepareQuickChip) {
+      resp = _buildPrepareChipResponse(question);
+    } else {
+      try {
         final backend = Provider.of<BackendService>(context, listen: false);
 
         // Grab the history payload we've been secretly storing
@@ -823,11 +745,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
 
         final apiResult = await backend.sendChatQuery(
           question,
-          _userId,
+          'user_$_userName',
           historyPayload,
           _runningMemory,
-          moduleContext: _backendModuleContextForIntent(intent),
-          userProfile: _userProfileContext,
         );
 
         // Store user's question into history
@@ -890,6 +810,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           intro: "Backend Connection Failed.\n\n$errorMsg",
         );
       }
+    }
 
     if (!mounted) return;
 
@@ -941,14 +862,15 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       _overlaySuggestions = [];
       _responses.clear();
       _tagsRevealed = false;
-      _chatPlaceholder = 'Ask AHVI anything…';
+      _chatPlaceholderKey = 'ask_me'; // ✅
     });
   }
 
   void _setPlaceholder(String intent) {
+    // 🆕 Key store చేస్తున్నాం — getter లో translate అవుతుంది
     setState(
-      () =>
-          _chatPlaceholder = _intentPlaceholder[intent] ?? 'Ask AHVI anything…',
+      () => _chatPlaceholderKey =
+          'placeholder_$intent',
     );
   }
 
@@ -976,13 +898,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   bool get _hasTransientUi =>
-      _lensSheetOpen || _seeAllOpen || _overlayState != _OverlayState.idle;
+      _seeAllOpen || _overlayState != _OverlayState.idle;
 
   void _handleBackNavigation() {
-    if (_lensSheetOpen) {
-      _closeLensSheet();
-      return;
-    }
     if (_seeAllOpen) {
       _closeSeeAll();
       return;
@@ -1003,7 +921,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           _handleBackNavigation();
         }
       },
-      child: Scaffold(backgroundColor: _bgPrimary, body: _buildPhoneScreen()),
+      child: Scaffold(backgroundColor: _bgPrimary, resizeToAvoidBottomInset: false, body: _buildPhoneScreen()),
     );
   }
 
@@ -1040,49 +958,95 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             child: SafeArea(
               top: true,
               bottom: false,
-              child: Column(
-                children: [
-                  Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final safeBottom = MediaQuery.of(context).padding.bottom;
+                  // Total reserved at bottom:
+                  // nav bar (86) + nav margin (16) + chat bar (64) + chat gap (16) + safeBottom
+                  final reservedBottom = safeBottom + 182.0;
+                  // Available height for content (below SafeArea top)
+                  final usableH = constraints.maxHeight - reservedBottom;
+                  // Hero card gets whatever remains after fixed items:
+                  // topBar(~60) + greeting(~60) + suggestion(~58) + secondary(90) + spacers(10+8) = ~286
+                  // Clamp so it looks good on both small and large screens
+                  final heroH = (usableH - 286.0).clamp(130.0, 260.0);
+                  return SizedBox(
+                    height: usableH,
                     child: Padding(
-                      padding: const EdgeInsets.only(left: 20, right: 20),
+                      padding: const EdgeInsets.only(left: 20.0, right: 20.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _buildTopBar(),
                           _buildGreetingBlock(),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 200),
-                            child: _buildHeroCard(),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 10.0),
+                              child: _buildHeroCard(),
+                            ),
                           ),
-                          const SizedBox(height: 10),
-                          _buildSecondaryRow(),
+                          SizedBox(
+                            height: 90.0,
+                            child: _buildSecondaryRow(),
+                          ),
                         ],
                       ),
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
             ),
           ),
 
           if (_overlayState != _OverlayState.idle) _buildAiOverlay(),
 
-          Positioned(left: 0, right: 0, bottom: 120, child: _buildChatWrap()),
+          Builder(
+            builder: (context) {
+              final keyboardH = MediaQuery.of(context).viewInsets.bottom;
+              final safeBottom = MediaQuery.of(context).padding.bottom;
+              // standalone: above nav bar → safeBottom + 102
+              // shell: no nav bar → just above safe area → safeBottom + 16
+              final chatBottom = keyboardH > 0
+                  ? keyboardH + 8
+                  : widget.onShellNavTap != null
+                      ? safeBottom + 16.0
+                      : safeBottom + 102.0;
+              return Positioned(
+                left: 0,
+                right: 0,
+                bottom: chatBottom,
+                child: _buildChatWrap(),
+              );
+            },
+          ),
 
           if (_activeIntent == 'prepare' &&
               (_overlayState == _OverlayState.suggestions ||
                   _overlayState == _OverlayState.response))
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 196,
-              child: _buildPrepareBottomQuickChips(),
+            Builder(
+              builder: (context) {
+                final keyboardH = MediaQuery.of(context).viewInsets.bottom;
+                final chipsBottom = keyboardH > 0 ? keyboardH + 72 : (MediaQuery.of(context).size.height * 0.23).clamp(160.0, 210.0);
+                return Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: chipsBottom,
+                  child: _buildPrepareBottomQuickChips(),
+                );
+              },
             ),
 
-          Positioned(left: 16, right: 16, bottom: 16, child: _buildBottomNav()),
+          if (_plusMenuOpen) _buildPlusMenu(),
+
+          // Only show nav bar when NOT inside a Shell (Shell has its own nav bar)
+          if (widget.onShellNavTap == null)
+Builder(builder: (ctx) {
+              final safeB = MediaQuery.of(ctx).padding.bottom;
+              return Positioned(left: 16, right: 16, bottom: safeB + 16, child: _buildBottomNav());
+            }),
 
           if (_seeAllOpen) _buildSeeAllPanel(),
-          if (_lensSheetOpen) _buildLensSheet(),
+
           _buildComingSoonToast(),
         ],
       ),
@@ -1165,16 +1129,28 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   Widget _buildTopBar() {
+    final screenH = MediaQuery.of(context).size.height;
+    final screenW = MediaQuery.of(context).size.width;
+    const double topPad = 10.0;
+    const double botPad = 6.0;
+    const double logoFontSize = 30.0;
     return Padding(
-      padding: const EdgeInsets.only(top: 10, bottom: 6),
+      padding: EdgeInsets.only(top: topPad, bottom: botPad),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          AhviHomeText(
-            color: _textHeading,
-            fontSize: 36,
-            letterSpacing: 3.2,
-            fontWeight: FontWeight.w400,
+          GestureDetector(
+            onTap: () {
+              HapticFeedback.lightImpact();
+              if (_seeAllOpen) _closeSeeAll();
+              if (_overlayState != _OverlayState.idle) _dismissOverlay();
+            },
+            child: AhviHomeText(
+              color: _textHeading,
+              fontSize: logoFontSize,
+              letterSpacing: 3.2,
+              fontWeight: FontWeight.w400,
+            ),
           ),
           _buildProfileAvatar(),
         ],
@@ -1236,11 +1212,16 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   Widget _buildGreetingBlock() {
+    final screenH = MediaQuery.of(context).size.height;
+    const double greetFontSize = 24.0;
+    const double botPad = 6.0;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: EdgeInsets.only(bottom: botPad),
       child: ValueListenableBuilder<_ClockState>(
         valueListenable: _clockState,
         builder: (context, clock, _) {
+          // 🆕 greeting key ని translate చేస్తున్నాం
+          final greetingText = AppLocalizations.t(context, clock.greeting);
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1253,29 +1234,29 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                   letterSpacing: 0.1,
                 ),
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: 3.0),
               RichText(
                 text: TextSpan(
                   style: TextStyle(
-                    fontSize: 28,
+                    fontSize: greetFontSize,
                     fontWeight: FontWeight.w400,
                     color: _textHeading,
                     letterSpacing: -0.56,
                     height: 1.1,
                   ),
                   children: [
-                    TextSpan(text: '${clock.greeting}, '),
+                    TextSpan(text: '$greetingText, '), // 🆕 translated
                     WidgetSpan(
                       child: _GradientText(
                         '$_userName.',
-                        fontSize: 28,
+                        fontSize: greetFontSize,
                         fontWeight: FontWeight.w400,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 6.0),
               ValueListenableBuilder<_SuggestionState>(
                 valueListenable: _suggestionState,
                 builder: (context, suggestion, _) {
@@ -1333,7 +1314,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                               opacity: suggestion.opacity,
                               duration: const Duration(milliseconds: 350),
                               child: Text(
-                                _aiSuggestions[suggestion.index],
+                                // 🆕 suggestion key translate చేస్తున్నాం
+                                AppLocalizations.t(context, _aiSuggestionKeys[suggestion.index]),
                                 style: TextStyle(
                                   color: _textSub,
                                   fontSize: 12.5,
@@ -1363,12 +1345,13 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   Widget _buildPromptChipsRow() {
+    // 🆕 Chips localized
     final chips = [
-      ('✦', 'Outfit idea', 'Suggest an outfit for today'),
-      ('◎', 'Daily plan', 'Plan my day'),
-      ('⊹', 'Workout', 'What workout should I do today?'),
-      ('◈', 'Meal plan', 'Suggest a meal plan for this week'),
-      ('◷', 'Schedule', "What's on my schedule today?"),
+      ('✦', AppLocalizations.t(context, 'chip_outfit_idea'), AppLocalizations.t(context, 'chip_prompt_outfit')),
+      ('◎', AppLocalizations.t(context, 'chip_daily_plan'), AppLocalizations.t(context, 'chip_prompt_daily_plan')),
+      ('⊹', AppLocalizations.t(context, 'chip_workout'), AppLocalizations.t(context, 'chip_prompt_workout')),
+      ('◈', AppLocalizations.t(context, 'chip_meal_plan'), AppLocalizations.t(context, 'chip_prompt_meal_plan')),
+      ('◷', AppLocalizations.t(context, 'chip_schedule'), AppLocalizations.t(context, 'chip_prompt_schedule')),
     ];
     return SizedBox(
       height: 40,
@@ -1431,12 +1414,13 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
-        itemCount: _prepareChips.length,
+        itemCount: _prepareChipKeys.length,
         separatorBuilder: (_, _) => const SizedBox(width: 7),
         itemBuilder: (_, i) {
+          // 🆕 label localized, prompt English గా పంపుతున్నాం
           return _PrepareQuickChip(
-            label: _prepareChips[i].$1,
-            onSend: () => _handlePrepareChipSend(_prepareChips[i].$2),
+            label: AppLocalizations.t(context, _prepareChipKeys[i].$1),
+            onSend: () => _handlePrepareChipSend(_prepareChipKeys[i].$2),
             accent: _accent,
             accentSecondary: _accentSecondary,
             panel: _panel,
@@ -1455,11 +1439,9 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         animation: Listenable.merge([
           _shimmerCtrl,
           _breatheCtrl,
-          _floatBadgeCtrl,
         ]),
         builder: (context, _) {
           final breatheOpacity = 0.14 + 0.12 * _breatheCtrl.value;
-          final badgeOffset = -2.5 * math.sin(_floatBadgeCtrl.value * math.pi);
 
           return _CardPressable(
             onTap: () => _openModuleChat('style'),
@@ -1586,140 +1568,140 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                       ],
                     ),
                   ),
-                  Positioned(
-                    top: 18 + badgeOffset,
-                    right: 18,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 11,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _accentTertiary.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(100),
-                        border: Border.all(
-                          color: _accentTertiary.withValues(alpha: 0.35),
-                          width: 1,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _accentTertiary.withValues(alpha: 0.20),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
-                      child: Text(
-                        'New Drops',
-                        style: TextStyle(
-                          color: _accentTertiary,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.7,
-                        ),
-                      ),
-                    ),
-                  ),
+
                   Positioned(
                     left: 0,
                     top: 0,
                     bottom: 0,
                     width: 220,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 24, 20, 20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
+                    child: LayoutBuilder(
+                      builder: (context, heroConstraints) {
+                        final heroH = heroConstraints.maxHeight;
+                        // All values scale proportionally to available height
+                        // heroH is typically 113–160px depending on device
+                        final pad = (heroH * 0.11).clamp(8.0, 20.0);
+                        final titleFontSize = (heroH * 0.21).clamp(18.0, 40.0);
+                        final subtitleFontSize = (heroH * 0.065).clamp(8.0, 12.0);
+                        final gap1 = (heroH * 0.014).clamp(1.0, 4.0);
+                        final gap2 = (heroH * 0.022).clamp(2.0, 7.0);
+                        final btnPadH = (heroH * 0.088).clamp(8.0, 17.0);
+                        final btnPadV = (heroH * 0.030).clamp(3.0, 9.0);
+                        return ClipRect(
+                          child: Padding(
+                          padding: EdgeInsets.fromLTRB(pad, pad, pad * 0.7, pad * 0.7),
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            mainAxisSize: MainAxisSize.max,
                             children: [
-                              Text(
-                                'AI Stylist',
-                                style: TextStyle(
-                                  color: _accent.withValues(alpha: 0.85),
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 1.4,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              ShaderMask(
-                                shaderCallback: (b) =>
-                                    _accentGradient.createShader(b),
-                                child: Text(
-                                  'Style',
-                                  style: TextStyle(
-                                    color: _textHeading,
-                                    fontSize: 42,
-                                    fontWeight: FontWeight.w300,
-                                    letterSpacing: -1.05,
-                                    height: 0.93,
+                              Expanded(
+                                child: OverflowBox(
+                                  alignment: Alignment.topLeft,
+                                  maxHeight: double.infinity,
+                                  child: ClipRect(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          AppLocalizations.t(context, 'hero_ai_stylist_label'), // 🆕
+                                          style: TextStyle(
+                                            color: _accent.withValues(alpha: 0.85),
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                            letterSpacing: 1.4,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        SizedBox(height: gap1),
+                                        ShaderMask(
+                                          shaderCallback: (b) =>
+                                              _accentGradient.createShader(b),
+                                          child: Text(
+                                            AppLocalizations.t(context, 'hero_style_title'), // 🆕
+                                            style: TextStyle(
+                                              color: _textHeading,
+                                              fontSize: titleFontSize,
+                                              fontWeight: FontWeight.w300,
+                                              letterSpacing: -1.05,
+                                              height: 0.93,
+                                            ),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        SizedBox(height: gap2),
+                                        Text(
+                                          AppLocalizations.t(context, 'hero_style_subtitle'), // 🆕
+                                          style: TextStyle(
+                                            color: _textSub.withValues(alpha: 0.80),
+                                            fontSize: subtitleFontSize,
+                                            fontWeight: FontWeight.w300,
+                                            height: 1.4,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Create outfits that feel like you.',
-                                style: TextStyle(
-                                  color: _textSub.withValues(alpha: 0.80),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w300,
-                                  height: 1.55,
+                              _AnimatedPressable(
+                                liftY: -2.0,
+                                scalePressed: 0.95,
+                                onTap: () => _openModuleChat('style'),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    gradient: _accentGradient,
+                                    borderRadius: BorderRadius.circular(100),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: _accent.withValues(alpha: 0.40),
+                                        blurRadius: 20,
+                                        offset: const Offset(0, 6),
+                                      ),
+                                      BoxShadow(
+                                        color: _accentTertiary.withValues(
+                                          alpha: 0.25,
+                                        ),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: btnPadH,
+                                    vertical: btnPadV,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        AppLocalizations.t(context, 'hero_start_styling'), // 🆕
+                                        style: TextStyle(
+                                          color: _onAccent,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 0.36,
+                                        ),
+                                      ),
+                                      SizedBox(width: 5),
+                                      Icon(
+                                        Icons.arrow_forward_rounded,
+                                        color: _onAccent,
+                                        size: 11,
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
                           ),
-                          _AnimatedPressable(
-                            liftY: -2.0,
-                            scalePressed: 0.95,
-                            onTap: () => _openModuleChat('style'),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                gradient: _accentGradient,
-                                borderRadius: BorderRadius.circular(100),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: _accent.withValues(alpha: 0.40),
-                                    blurRadius: 20,
-                                    offset: const Offset(0, 6),
-                                  ),
-                                  BoxShadow(
-                                    color: _accentTertiary.withValues(
-                                      alpha: 0.25,
-                                    ),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 17,
-                                vertical: 9,
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    'Start styling',
-                                    style: TextStyle(
-                                      color: _onAccent,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: 0.36,
-                                    ),
-                                  ),
-                                  SizedBox(width: 7),
-                                  Icon(
-                                    Icons.arrow_forward_rounded,
-                                    color: _onAccent,
-                                    size: 12,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -1732,16 +1714,17 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   Widget _buildSecondaryRow() {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final screenH = MediaQuery.of(context).size.height;
+    final screenW = MediaQuery.of(context).size.width;
+    final isTablet = screenW >= 600;
+    return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
             child: _buildSecCard(
               icon: Icons.grid_view_rounded,
-              title: 'Organize',
-              subtitle: 'Everything you already own',
+              title: AppLocalizations.t(context, 'sec_organize_title'), // 🆕
+              subtitle: AppLocalizations.t(context, 'sec_organize_subtitle'), // 🆕
               accentColor: _accent,
               intent: 'organize',
             ),
@@ -1750,15 +1733,26 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           Expanded(
             child: _buildSecCard(
               icon: Icons.calendar_month_outlined,
-              title: 'Plan',
-              subtitle: 'Trips, events, daily plans',
+              title: AppLocalizations.t(context, 'sec_plan_title'), // 🆕
+              subtitle: AppLocalizations.t(context, 'sec_plan_subtitle'), // 🆕
               accentColor: _accentSecondary,
               intent: 'plan',
             ),
           ),
+          if (isTablet) ...[
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildSecCard(
+                icon: Icons.auto_awesome_outlined,
+                title: AppLocalizations.t(context, 'sec_organize_title'),
+                subtitle: AppLocalizations.t(context, 'sec_organize_subtitle'),
+                accentColor: _accentTertiary,
+                intent: 'style',
+              ),
+            ),
+          ],
         ],
-      ),
-    );
+      );
   }
 
   Widget _buildSecCard({
@@ -1768,11 +1762,12 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     required Color accentColor,
     required String intent,
   }) {
+    final screenH = MediaQuery.of(context).size.height;
     return _CardPressable(
       onTap: () => _openModuleChat(intent),
       builder: (isHovered) {
         return Container(
-          constraints: const BoxConstraints(minHeight: 70),
+          height: double.infinity,
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
@@ -1793,24 +1788,25 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               ),
             ],
           ),
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    width: 34,
-                    height: 34,
+                    width: 28,
+                    height: 28,
                     decoration: BoxDecoration(
                       color: accentColor.withValues(
                         alpha: isHovered ? 0.16 : 0.08,
                       ),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                         color: accentColor.withValues(alpha: 0.15),
                         width: 1,
@@ -1819,13 +1815,13 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     child: Icon(
                       icon,
                       color: isHovered ? _accent : _textMuted,
-                      size: 15,
+                      size: 13,
                     ),
                   ),
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    width: 22,
-                    height: 22,
+                    width: 18,
+                    height: 18,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: _accent.withValues(alpha: isHovered ? 0.18 : 0.06),
@@ -1839,31 +1835,35 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                       child: Icon(
                         Icons.chevron_right_rounded,
                         color: isHovered ? _accent : _textMuted,
-                        size: 12,
+                        size: 10,
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 5),
               Text(
                 title,
                 style: TextStyle(
                   color: _textHeading,
-                  fontSize: 14,
+                  fontSize: 12.0,
                   fontWeight: FontWeight.w600,
                   letterSpacing: -0.15,
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 1),
               Text(
                 subtitle,
                 style: TextStyle(
                   color: _textMuted,
-                  fontSize: 11,
+                  fontSize: 9.5,
                   fontWeight: FontWeight.w300,
-                  height: 1.4,
+                  height: 1.3,
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -1873,15 +1873,18 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   Widget _buildSectionHead() {
+    final screenH = MediaQuery.of(context).size.height;
+    const double topPad = 18.0;
+    const double botPad = 12.0;
     return Padding(
-      padding: const EdgeInsets.only(top: 24, bottom: 12),
+      padding: EdgeInsets.only(top: topPad, bottom: botPad),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             children: [
               Text(
-                "Today's Picks",
+                AppLocalizations.t(context, 'picks_section_title'), // 🆕
                 style: TextStyle(
                   color: _textHeading,
                   fontSize: 15,
@@ -1901,7 +1904,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                   ),
                 ),
                 child: Text(
-                  'AI Curated',
+                  AppLocalizations.t(context, 'picks_ai_curated'), // 🆕
                   style: TextStyle(
                     color: _accent,
                     fontSize: 10,
@@ -1915,7 +1918,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           GestureDetector(
             onTap: _openSeeAll,
             child: Text(
-              'See all',
+              AppLocalizations.t(context, 'picks_see_all'), // 🆕
               style: TextStyle(
                 color: _textMuted,
                 fontSize: 12,
@@ -1929,30 +1932,35 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   Widget _buildPicksStrip() {
+    // 🆕 Picks localized
     final picks = [
       (
-        'Minimal Chic',
-        'Casual · Today',
+        AppLocalizations.t(context, 'pick_minimal_chic'),
+        AppLocalizations.t(context, 'pick_minimal_chic_tag'),
         'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=220&h=260&fit=crop&crop=top&auto=format',
       ),
       (
-        'Street Edit',
-        'Urban · Weekend',
+        AppLocalizations.t(context, 'pick_street_edit'),
+        AppLocalizations.t(context, 'pick_street_edit_tag'),
         'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=220&h=260&fit=crop&crop=top&auto=format',
       ),
       (
-        'Office Look',
-        'Smart · Monday',
+        AppLocalizations.t(context, 'pick_office_look'),
+        AppLocalizations.t(context, 'pick_office_look_tag'),
         'https://images.unsplash.com/photo-1591369822096-ffd140ec948f?w=220&h=260&fit=crop&crop=top&auto=format',
       ),
       (
-        'Evening',
-        'Party · Dinner',
+        AppLocalizations.t(context, 'pick_evening'),
+        AppLocalizations.t(context, 'pick_evening_tag'),
         'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=220&h=260&fit=crop&crop=top&auto=format',
       ),
     ];
+    final screenW = MediaQuery.of(context).size.width;
+    final isTablet = screenW >= 600;
     return SizedBox(
-      height: 175,
+      height: isTablet
+          ? (MediaQuery.of(context).size.height * 0.26).clamp(200.0, 280.0)
+          : (MediaQuery.of(context).size.height * 0.22).clamp(150.0, 190.0),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.zero,
@@ -1978,13 +1986,19 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     required String imageUrl,
     required bool liked,
   }) {
+    // Responsive card width: tablet=22%, phone=28%, clamped per form factor
+    final screenW = MediaQuery.of(context).size.width;
+    final isTablet = screenW >= 600;
+    final cardW = isTablet
+        ? (screenW * 0.18).clamp(140.0, 200.0)
+        : (screenW * 0.28).clamp(88.0, 130.0);
     return _AnimatedPressable(
       liftY: -4.0,
       scaleHover: 1.03,
       scalePressed: 0.97,
       onTap: () => _openPickSheet(name, tag),
       child: Container(
-        width: 112,
+        width: cardW,
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -2108,7 +2122,6 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     );
   }
 
-  // 🚀 FIXED: Reroutes perfectly to the dedicated Chat Screen
   Widget _buildChatWrap() {
     return AhviChatPromptBar(
       controller: _chatController,
@@ -2125,33 +2138,134 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       onAccent: _onAccent,
       onVoiceTap: _toggleListening,
       isListening: _isListening,
-      onSubmitted: (value) {
-        if (value.trim().isNotEmpty) {
-          _openChatWithPrompt(value.trim());
-          _chatController.clear();
-        }
+      onSendMessage: (text) {
+        _chatFocusNode.unfocus();
+        _openChatWithPrompt(text);
       },
-      onSend: () {
-        final text = _chatController.text.trim();
-        if (text.isNotEmpty) {
-          _openChatWithPrompt(text);
-          _chatController.clear();
-        }
-      },
-      onEmptySend: () => _submitQuery(''),
-      onAddTap: _openLensSheet,
+      themeTokens: _t,
+      onVisualSearch: null,
+      onFindSimilar: null,
+      onAddToWardrobe: null,
+    );
+  }
+
+  // ── ChatGPT-style plus menu ───────────────────────────────────────────────
+  Widget _buildPlusMenu() {
+    final safeBottom = MediaQuery.of(context).padding.bottom;
+    // Position it just above the chat bar
+    final menuBottom = safeBottom + 86.0 + 72.0 + 8.0;
+
+    const menuItems = [
+      (Icons.camera_alt_outlined,      'Camera',         'Take a photo'),
+      (Icons.photo_library_outlined,   'Photo Library',  'Choose from gallery'),
+      (Icons.insert_drive_file_outlined,'Files',          'Upload a document'),
+      (Icons.browse_gallery_outlined,  'Browse',         'Search the web'),
+    ];
+
+    return Positioned.fill(
+      child: GestureDetector(
+        onTap: _closePlusMenu,
+        behavior: HitTestBehavior.translucent,
+        child: Stack(
+          children: [
+            Positioned(
+              left: 20,
+              bottom: menuBottom,
+              child: AnimatedBuilder(
+                animation: _plusMenuCtrl,
+                builder: (context, _) {
+                  final t = _plusMenuCtrl.value;
+                  return Transform.translate(
+                    offset: Offset(0, 16 * (1 - t)),
+                    child: Opacity(
+                      opacity: t.clamp(0.0, 1.0),
+                      child: GestureDetector(
+                        onTap: () {}, // prevent tap-through
+                        child: Container(
+                          width: 220,
+                          decoration: BoxDecoration(
+                            color: _surface,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: _accent.withValues(alpha: 0.18),
+                              width: 1,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: _bgPrimary.withValues(alpha: 0.40),
+                                blurRadius: 32,
+                                offset: const Offset(0, 8),
+                              ),
+                              BoxShadow(
+                                color: _accent.withValues(alpha: 0.08),
+                                blurRadius: 16,
+                              ),
+                            ],
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(menuItems.length, (i) {
+                              final item = menuItems[i];
+                              final isLast = i == menuItems.length - 1;
+                              return _PlusMenuItem(
+                                icon: item.$1,
+                                title: item.$2,
+                                subtitle: item.$3,
+                                accent: _accent,
+                                accentSecondary: _accentSecondary,
+                                textHeading: _textHeading,
+                                textMuted: _textMuted,
+                                panel: _panel,
+                                border: _border,
+                                showDivider: !isLast,
+                                delayT: (i * 0.06).clamp(0.0, 0.3),
+                                animT: t,
+                                onTap: () {
+                                  _closePlusMenu();
+                                  _showComingSoon();
+                                },
+                              );
+                            }),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _buildBottomNav() {
+    // 🆕 Nav labels localized
+    final navLabelKeys = [
+      'nav_home', 'nav_chat', 'nav_wardrobe', 'nav_planner', 'nav_explore',
+    ];
     final items = _homeNavItems;
-    const pillH = 64.0;
-    const maxBulge = 18.0;
-    const totalH = pillH + maxBulge + 6.0;
+    final screenH = MediaQuery.of(context).size.height;
+    final screenW = MediaQuery.of(context).size.width;
+    final isTablet = screenW >= 600;
+    const double pillH = 62.0;
+    const double maxBulge = 18.0;
+    const double totalH = pillH + maxBulge + 6.0;
+    const double iconContainerSize = 42.0;
+    const double iconSize = 20.0;
+
+    // On tablet, constrain nav to a max width and center it
+    final navMaxW = isTablet ? 480.0 : double.infinity;
 
     return SizedBox(
       height: totalH,
-      child: AnimatedBuilder(
+      child: Align(
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: navMaxW),
+          child: AnimatedBuilder(
         animation: Listenable.merge(_navRiseCtrls),
         builder: (context, _) {
           final activeIdx = _activeNavIdx;
@@ -2201,24 +2315,20 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 220),
                                 curve: Curves.easeOut,
-                                width: 44,
-                                height: 44,
+                                width: iconContainerSize,
+                                height: iconContainerSize,
                                 decoration: active
                                     ? BoxDecoration(
                                         shape: BoxShape.circle,
                                         gradient: _accentGradient2,
                                         boxShadow: [
                                           BoxShadow(
-                                            color: _accent.withValues(
-                                              alpha: 0.45,
-                                            ),
+                                            color: _accent.withValues(alpha: 0.45),
                                             blurRadius: 16,
                                             offset: const Offset(0, 4),
                                           ),
                                           BoxShadow(
-                                            color: _accent.withValues(
-                                              alpha: 0.25,
-                                            ),
+                                            color: _accent.withValues(alpha: 0.25),
                                             blurRadius: 28,
                                           ),
                                         ],
@@ -2227,7 +2337,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                 child: Icon(
                                   items[i].icon,
                                   color: active ? _onAccent : _textMuted,
-                                  size: active ? 21 : 20,
+                                  size: active ? iconSize + 1 : iconSize,
                                 ),
                               ),
                             ),
@@ -2243,7 +2353,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                       : FontWeight.w500,
                                   letterSpacing: -0.01,
                                 ),
-                                child: Text(items[i].label),
+                                // 🆕 label localized
+                                child: Text(AppLocalizations.t(context, navLabelKeys[i])),
                               ),
                             ),
                           ],
@@ -2257,11 +2368,15 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           );
         },
       ),
+        ),
+      ),
     );
   }
 
   Widget _buildAiOverlay() {
-    const bottomClearance = 170.0;
+    final screenH = MediaQuery.of(context).size.height;
+    final bottomClearance = (screenH * 0.20).clamp(140.0, 190.0);
+    final overlayTopOffset = (screenH * 0.072).clamp(50.0, 72.0);
 
     return Positioned.fill(
       child: AnimatedBuilder(
@@ -2286,7 +2401,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
               Positioned(
                 left: 0,
                 right: 0,
-                top: 60,
+                top: overlayTopOffset,
                 bottom: bottomClearance,
                 child: Column(
                   children: [
@@ -2307,7 +2422,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _overlayBrandSub,
+                          // 🆕 brandSub ఇప్పుడు key — translate చేస్తున్నాం
+                          AppLocalizations.t(context, _overlayBrandSub),
                           style: TextStyle(
                             color: _textMuted,
                             fontSize: 12,
@@ -2346,7 +2462,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Suggested for you',
+              AppLocalizations.t(context, 'overlay_suggested_for_you'), // 🆕
               style: TextStyle(
                 color: _textMuted,
                 fontSize: 11,
@@ -2358,7 +2474,11 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             ..._overlaySuggestions.map(
               (q) => _AnimatedPressable(
                 scalePressed: 0.97,
-                onTap: () => _handleQuery(q, _activeIntent ?? 'chat'),
+                // 🆕 q ఇప్పుడు key — translate చేసి API కి పంపుతున్నాం
+                onTap: () => _handleQuery(
+                  AppLocalizations.t(context, q),
+                  _activeIntent ?? 'chat',
+                ),
                 child: Container(
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.symmetric(
@@ -2384,7 +2504,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          q,
+                          AppLocalizations.t(context, q), // 🆕 translated
                           style: TextStyle(
                             color: _textSub,
                             fontSize: 14,
@@ -2516,7 +2636,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
         Align(
           alignment: Alignment.centerRight,
           child: Container(
-            constraints: const BoxConstraints(maxWidth: 260),
+            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
             decoration: BoxDecoration(
@@ -2615,7 +2735,8 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                         (tag) => _AnimatedPressable(
                           scalePressed: 0.96,
                           liftY: -1.5,
-                          onTap: () => _submitQuery(tag),
+                          // 🆕 tag key translate చేసి submit చేస్తున్నాం
+                          onTap: () => _submitQuery(AppLocalizations.t(context, tag)),
                           child: Container(
                             constraints: BoxConstraints(
                               maxWidth: MediaQuery.of(context).size.width - 60,
@@ -2632,7 +2753,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                               ),
                             ),
                             child: Text(
-                              tag,
+                              AppLocalizations.t(context, tag), // 🆕 translated
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -2659,8 +2780,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     switch (resp.type) {
       case 'outfits':
+        final outfitCardW = (MediaQuery.of(context).size.width * 0.22).clamp(76.0, 96.0);
+        final outfitStripH = (MediaQuery.of(context).size.height * 0.185).clamp(138.0, 168.0);
         return SizedBox(
-          height: 155,
+          height: outfitStripH,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: resp.outfits.length,
@@ -2668,7 +2791,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
             itemBuilder: (_, i) {
               final o = resp.outfits[i];
               return Container(
-                width: 86,
+                width: outfitCardW,
                 decoration: BoxDecoration(
                   color: _card,
                   borderRadius: BorderRadius.circular(12),
@@ -2679,16 +2802,16 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     SizedBox(
-                      height: 96,
+                      height: outfitStripH * 0.62,
                       child: Image.network(
                         o.imageUrl,
                         fit: BoxFit.cover,
                         width: double.infinity,
                         cacheWidth:
-                            (86 * MediaQuery.of(context).devicePixelRatio)
+                            (outfitCardW * MediaQuery.of(context).devicePixelRatio)
                                 .round(),
                         cacheHeight:
-                            (96 * MediaQuery.of(context).devicePixelRatio)
+                            (outfitStripH * 0.62 * MediaQuery.of(context).devicePixelRatio)
                                 .round(),
                         filterQuality: FilterQuality.low,
                         errorBuilder: (_, _, _) =>
@@ -3474,35 +3597,19 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                                       return;
                                     }
                                     Navigator.pop(context);
-                                    try {
-                                      await _savePrepareExactToBoard(
-                                        boardId: boardId,
-                                        title: title,
-                                        sections: sections,
-                                        itemsState: itemsState,
-                                        checksState: checksState,
-                                        outfitSaved: outfitSaved,
-                                      );
-                                      if (!mounted) return;
-                                      checklistSetState(
-                                        () => _prepareExactSavedByTitle[title] =
-                                            true,
-                                      );
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Board saved to cloud'),
-                                        ),
-                                      );
-                                    } catch (e) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            'Failed to save board: $e',
-                                          ),
-                                        ),
-                                      );
-                                    }
+                                    await _savePrepareExactToBoard(
+                                      boardId: boardId,
+                                      title: title,
+                                      sections: sections,
+                                      itemsState: itemsState,
+                                      checksState: checksState,
+                                      outfitSaved: outfitSaved,
+                                    );
+                                    if (!mounted) return;
+                                    checklistSetState(
+                                      () => _prepareExactSavedByTitle[title] =
+                                          true,
+                                    );
                                   },
                                   child: Container(
                                     margin: const EdgeInsets.only(bottom: 8),
@@ -3749,25 +3856,26 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
   }
 
   Widget _buildSeeAllPanel() {
+    // 🆕 seeAll picks localized
     final seeAllPicks = [
       (
-        'Minimal Chic',
-        'Casual · Today',
+        AppLocalizations.t(context, 'pick_minimal_chic'),
+        AppLocalizations.t(context, 'pick_minimal_chic_tag'),
         'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=300&h=280&fit=crop&crop=top&auto=format',
       ),
       (
-        'Street Edit',
-        'Urban · Weekend',
+        AppLocalizations.t(context, 'pick_street_edit'),
+        AppLocalizations.t(context, 'pick_street_edit_tag'),
         'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=300&h=280&fit=crop&crop=top&auto=format',
       ),
       (
-        'Office Look',
-        'Smart · Monday',
+        AppLocalizations.t(context, 'pick_office_look'),
+        AppLocalizations.t(context, 'pick_office_look_tag'),
         'https://images.unsplash.com/photo-1591369822096-ffd140ec948f?w=300&h=280&fit=crop&crop=top&auto=format',
       ),
       (
-        'Evening',
-        'Party · Dinner',
+        AppLocalizations.t(context, 'pick_evening'),
+        AppLocalizations.t(context, 'pick_evening_tag'),
         'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=300&h=280&fit=crop&crop=top&auto=format',
       ),
       (
@@ -3818,7 +3926,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                         ),
                         const SizedBox(width: 12),
                         Text(
-                          "Today's Picks",
+                          AppLocalizations.t(context, 'picks_section_title'), // 🆕
                           style: TextStyle(
                             color: _textHeading,
                             fontSize: 24,
@@ -3935,315 +4043,10 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
       },
     );
   }
-
-  Widget _buildLensSheet() {
-    return GestureDetector(
-      onTap: _closeLensSheet,
-      child: AnimatedBuilder(
-        animation: _lensSheetCtrl,
-        builder: (context, _) {
-          return Stack(
-            children: [
-              Positioned.fill(
-                child: Container(
-                  color: _accent.withValues(alpha: 0.15 * _lensSheetCtrl.value),
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: Transform.translate(
-                  offset: Offset(0, (1 - _lensSheetCtrl.value) * 400),
-                  child: GestureDetector(
-                    onTap: () {},
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [_surface, _bgSecondary],
-                        ),
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(24),
-                        ),
-                        border: Border.all(
-                          color: _accent.withValues(alpha: 0.15),
-                          width: 1,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _accent.withValues(alpha: 0.15),
-                            blurRadius: 48,
-                            offset: const Offset(0, -12),
-                          ),
-                        ],
-                      ),
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 4,
-                            margin: const EdgeInsets.symmetric(vertical: 12),
-                            decoration: BoxDecoration(
-                              color: _accent.withValues(alpha: 0.30),
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 2,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    Container(
-                                      width: 32,
-                                      height: 32,
-                                      decoration: BoxDecoration(
-                                        color: _accent.withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(9),
-                                        border: Border.all(
-                                          color: _accent.withValues(
-                                            alpha: 0.25,
-                                          ),
-                                          width: 1,
-                                        ),
-                                      ),
-                                      child: Icon(
-                                        Icons.search,
-                                        color: _accent,
-                                        size: 17,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'AHVI Lens',
-                                      style: TextStyle(
-                                        color: _textHeading,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                GestureDetector(
-                                  onTap: _closeLensSheet,
-                                  child: Container(
-                                    width: 28,
-                                    height: 28,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: _accent.withValues(alpha: 0.08),
-                                      border: Border.all(
-                                        color: _accent.withValues(alpha: 0.20),
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: Icon(
-                                      Icons.close,
-                                      color: _textMuted,
-                                      size: 14,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: _panel,
-                              border: Border.all(
-                                color: _accent.withValues(alpha: 0.15),
-                                width: 1,
-                              ),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Row(
-                              children: [
-                                AnimatedBuilder(
-                                  animation: _aurora1Ctrl,
-                                  builder: (context, _) {
-                                    return Transform.rotate(
-                                      angle: _aurora1Ctrl.value * math.pi * 2,
-                                      child: Container(
-                                        width: 40,
-                                        height: 40,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                            color: _accent.withValues(
-                                              alpha: 0.5,
-                                            ),
-                                            width: 2,
-                                          ),
-                                          color: _accent.withValues(
-                                            alpha: 0.08,
-                                          ),
-                                        ),
-                                        child: Icon(
-                                          Icons.circle,
-                                          color: _accent,
-                                          size: 12,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Visual AI Search',
-                                        style: TextStyle(
-                                          color: _textHeading,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      SizedBox(height: 2),
-                                      Text(
-                                        'Point at any item to find, save, or get styling advice.',
-                                        style: TextStyle(
-                                          color: _textMuted,
-                                          fontSize: 11.5,
-                                          height: 1.5,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          ...[
-                            (
-                              Icons.search,
-                              'Find Similar',
-                              'Discover similar items with shopping links',
-                              _accent,
-                              'find',
-                            ),
-                            (
-                              Icons.add_photo_alternate_outlined,
-                              'Add to Wardrobe',
-                              'Save to your collection',
-                              _accentSecondary,
-                              'add',
-                            ),
-                          ].map(
-                            (opt) => _buildLensOption(
-                              opt.$1,
-                              opt.$2,
-                              opt.$3,
-                              opt.$4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildLensOption(
-    IconData icon,
-    String name,
-    String desc,
-    Color color,
-  ) {
-    return _AnimatedPressable(
-      scalePressed: 0.98,
-      onTap: () {},
-      builder: (isHovered, isPressed) {
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isHovered ? color.withValues(alpha: 0.08) : _panel,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isHovered
-                  ? color.withValues(alpha: 0.30)
-                  : _accent.withValues(alpha: 0.12),
-              width: 1,
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: color.withValues(alpha: 0.25),
-                    width: 1,
-                  ),
-                ),
-                child: Icon(icon, color: color, size: 18),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      style: TextStyle(
-                        color: _textHeading,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      desc,
-                      style: TextStyle(color: _textMuted, fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                transform: Matrix4.translationValues(
-                  isHovered ? 3.0 : 0.0,
-                  0,
-                  0,
-                ),
-                child: Icon(
-                  Icons.chevron_right_rounded,
-                  color: isHovered ? color : _textMuted,
-                  size: 20,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildComingSoonToast() {
+    final screenH = MediaQuery.of(context).size.height;
     return Positioned(
-      bottom: 110,
+      bottom: 110.0,
       left: 0,
       right: 0,
       child: Center(
@@ -4271,7 +4074,7 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
                     Icon(Icons.access_time_rounded, color: _accent, size: 15),
                     SizedBox(width: 7),
                     Text(
-                      'Coming Soon',
+                      AppLocalizations.t(context, 'coming_soon'), // 🆕
                       style: TextStyle(
                         color: _textHeading,
                         fontSize: 13,
@@ -4285,6 +4088,133 @@ class _Screen4State extends State<Screen4> with TickerProviderStateMixin {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── Plus Menu Item ────────────────────────────────────────────────────────────
+class _PlusMenuItem extends StatefulWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color accent;
+  final Color accentSecondary;
+  final Color textHeading;
+  final Color textMuted;
+  final Color panel;
+  final Color border;
+  final bool showDivider;
+  final double delayT;
+  final double animT;
+  final VoidCallback? onTap;
+
+  const _PlusMenuItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.accent,
+    required this.accentSecondary,
+    required this.textHeading,
+    required this.textMuted,
+    required this.panel,
+    required this.border,
+    required this.showDivider,
+    required this.delayT,
+    required this.animT,
+    this.onTap,
+  });
+
+  @override
+  State<_PlusMenuItem> createState() => _PlusMenuItemState();
+}
+
+class _PlusMenuItemState extends State<_PlusMenuItem> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    // Staggered per-item fade: each item fades in slightly after the previous
+    final itemT = ((widget.animT - widget.delayT) / (1.0 - widget.delayT))
+        .clamp(0.0, 1.0);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          onTap: widget.onTap,
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapUp: (_) => setState(() => _pressed = false),
+          onTapCancel: () => setState(() => _pressed = false),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            color: _pressed
+                ? widget.accent.withValues(alpha: 0.08)
+                : Colors.transparent,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+            child: Opacity(
+              opacity: itemT,
+              child: Transform.translate(
+                offset: Offset(0, 6 * (1 - itemT)),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: widget.accent.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: widget.accent.withValues(alpha: 0.20),
+                          width: 1,
+                        ),
+                      ),
+                      child: Icon(
+                        widget.icon,
+                        color: widget.accent,
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.title,
+                            style: TextStyle(
+                              color: widget.textHeading,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.1,
+                            ),
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            widget.subtitle,
+                            style: TextStyle(
+                              color: widget.textMuted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w400,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (widget.showDivider)
+          Divider(
+            height: 1,
+            thickness: 1,
+            color: widget.border.withValues(alpha: 0.6),
+            indent: 16,
+            endIndent: 16,
+          ),
+      ],
     );
   }
 }
@@ -4441,56 +4371,55 @@ class _PlanSection {
   const _PlanSection(this.title, this.color, this.items);
 }
 
+// 🆕 Intent config ఇప్పుడు localization keys use చేస్తోంది
+// Runtime లో AppLocalizations.t() తో translate అవుతాయి
 const _intentConfig = {
   'style': _IntentConfig(
     suggestions: [
-      'What should I wear today?',
-      'Build a rooftop party outfit',
-      'Show trending casual looks',
+      'intent_style_s1',
+      'intent_style_s2',
+      'intent_style_s3',
     ],
-    brandSub: 'Your AI Stylist',
-    responseTags: ['Outfit Builder', 'Style Tips', 'Trending Now'],
+    brandSub: 'intent_style_sub',
+    responseTags: ['intent_style_tag1', 'intent_style_tag2', 'intent_style_tag3'],
   ),
   'organize': _IntentConfig(
     suggestions: [
-      "Today's meals",
-      'My medicines',
-      'Pending bills',
-      "Today's workout",
-      'Upcoming events',
-      "Today's events",
-      'Morning skincare',
-      'My life goals',
+      'intent_organize_s1',
+      'intent_organize_s2',
+      'intent_organize_s3',
+      'intent_organize_s4',
+      'intent_organize_s5',
+      'intent_organize_s6',
+      'intent_organize_s7',
+      'intent_organize_s8',
     ],
-    brandSub: 'Your AI Organiser',
+    brandSub: 'intent_organize_sub',
     responseTags: [],
   ),
   'prepare': _IntentConfig(
     suggestions: [
-      'Plan a 3-day Goa trip',
-      'Pack for business travel',
-      'Create a wedding checklist',
+      'intent_prepare_s1',
+      'intent_prepare_s2',
+      'intent_prepare_s3',
     ],
-    brandSub: 'Your AI Planner',
-    responseTags: ['Trip Plans', 'Checklists', 'Pack Lists'],
+    brandSub: 'intent_prepare_sub',
+    responseTags: ['intent_prepare_tag1', 'intent_prepare_tag2', 'intent_prepare_tag3'],
   ),
   'chat': _IntentConfig(
     suggestions: [
-      'Help me plan my day',
-      'Suggest something for tonight',
-      'What should I focus on?',
+      'intent_chat_s1',
+      'intent_chat_s2',
+      'intent_chat_s3',
     ],
-    brandSub: 'Always here for you',
-    responseTags: ['Daily Plan', 'Tonight', 'Focus Mode'],
+    brandSub: 'intent_chat_sub',
+    responseTags: ['intent_chat_tag1', 'intent_chat_tag2', 'intent_chat_tag3'],
   ),
 };
 
-const _intentPlaceholder = {
-  'chat': 'Ask AHVI anything…',
-  'style': 'Describe your vibe or occasion…',
-  'organize': 'What would you like to organize?',
-  'prepare': 'What are you planning for?',
-};
+// 🆕 _intentPlaceholder ఇప్పుడు JSON keys — AppLocalizations.t() తో translate అవుతాయి
+// placeholder_chat, placeholder_style, placeholder_organize, placeholder_prepare
+// _setPlaceholder('chat') → 'placeholder_chat' → JSON లో translate అవుతుంది
 
 class _GradientText extends StatelessWidget {
   final String text;
@@ -4536,8 +4465,8 @@ class _EntryFadeSlide extends StatefulWidget {
   const _EntryFadeSlide({
     super.key,
     required this.child,
-    this.duration = const Duration(milliseconds: 500),
-    this.curve = Curves.easeOutCubic,
+    this.duration = const Duration(milliseconds: 400),
+    this.curve = Curves.easeOut,
     this.dy = 24.0,
     this.delay = Duration.zero,
   });

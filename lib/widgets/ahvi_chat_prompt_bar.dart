@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:myapp/theme/theme_tokens.dart';
+import 'package:myapp/widgets/ahvi_lens_sheet.dart';
 
 class AhviChatPromptBar extends StatelessWidget {
   final TextEditingController controller;
@@ -16,10 +18,18 @@ class AhviChatPromptBar extends StatelessWidget {
   final Color shadowMedium;
   final Color onAccent;
   final EdgeInsetsGeometry padding;
-  final VoidCallback onSend;
-  final VoidCallback onEmptySend;
-  final ValueChanged<String> onSubmitted;
-  final VoidCallback? onAddTap;
+
+  /// Called with the trimmed message text after send is confirmed.
+  /// Parent should navigate to chat page inside this callback.
+  final ValueChanged<String> onSendMessage;
+
+  // ── Lens sheet (plus button తో trigger అవుతుంది) ──────────────────────
+  final AppThemeTokens themeTokens;
+  final VoidCallback? onVisualSearch;
+  final VoidCallback? onFindSimilar;
+  final VoidCallback? onAddToWardrobe;
+
+  // ── Voice ─────────────────────────────────────────────────────────────
   final VoidCallback? onVoiceTap;
   final bool isListening;
 
@@ -38,20 +48,39 @@ class AhviChatPromptBar extends StatelessWidget {
     required this.textMuted,
     required this.shadowMedium,
     required this.onAccent,
-    required this.onSend,
-    required this.onEmptySend,
-    required this.onSubmitted,
-    this.onAddTap,
+    required this.onSendMessage,
+    required this.themeTokens,
+    this.onVisualSearch,
+    this.onFindSimilar,
+    this.onAddToWardrobe,
     this.onVoiceTap,
     this.isListening = false,
     this.padding = const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
   });
 
   LinearGradient get _accentGradient2 => LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [accent, accentSecondary],
-  );
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [accent, accentSecondary],
+      );
+
+  void _openLensSheet(BuildContext context) {
+    showAhviLensSheet(
+      context,
+      t: themeTokens,
+      onVisualSearch: onVisualSearch,
+      onFindSimilar: onFindSimilar,
+      onAddToWardrobe: onAddToWardrobe,
+    );
+  }
+
+  /// Sends only if text is non-empty; clears the field and calls [onSendMessage].
+  void _trySend() {
+    final text = controller.text.trim();
+    if (text.isEmpty) return;
+    controller.clear();
+    onSendMessage(text);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -81,23 +110,35 @@ class AhviChatPromptBar extends StatelessWidget {
             final compact = constraints.maxWidth < 320;
             return Row(
               children: [
+                // ── Plus button → Lens sheet open చేస్తుంది ───────────
                 if (!compact) ...[
-                  GestureDetector(
-                    onTap: onAddTap ?? () {},
-                    child: SizedBox(
-                      width: 26,
-                      height: 26,
-                      child: Center(
-                        child: Icon(
-                          Icons.search_rounded,
-                          color: accent,
-                          size: 20,
+                  Builder(
+                    builder: (btnCtx) => _ChatPromptPressable(
+                      scalePressed: 0.88,
+                      onTap: () => _openLensSheet(btnCtx),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOutCubic,
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              accent.withValues(alpha: 0.18),
+                              accentSecondary.withValues(alpha: 0.18),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(13),
                         ),
+                        child: Icon(Icons.add_rounded, color: accent, size: 20),
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
                 ],
+                // ── Text field ────────────────────────────────────────
+                // onTap intentionally omitted — keyboard opens normally,
+                // navigation happens only after send.
                 Expanded(
                   child: TextField(
                     controller: controller,
@@ -123,11 +164,12 @@ class AhviChatPromptBar extends StatelessWidget {
                     cursorColor: accent,
                     cursorWidth: 1.5,
                     cursorRadius: const Radius.circular(1),
-                    onSubmitted: onSubmitted,
+                    // Keyboard "send" key → same behaviour as send button
+                    onSubmitted: (_) => _trySend(),
                   ),
                 ),
                 const SizedBox(width: 6),
-                // ── Voice Button ──────────────────────────────────
+                // ── Voice button ──────────────────────────────────────
                 _ChatPromptPressable(
                   scalePressed: 0.90,
                   onTap: onVoiceTap,
@@ -168,27 +210,19 @@ class AhviChatPromptBar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
+                // ── Send button ───────────────────────────────────────
                 _ChatPromptPressable(
                   liftY: -1.5,
                   scalePressed: 0.90,
-                  onTap: () {
-                    final text = controller.text.trim();
-                    if (text.isNotEmpty) {
-                      onSend();
-                    } else {
-                      onEmptySend();
-                    }
-                  },
+                  onTap: _trySend,
                   child: ValueListenableBuilder<TextEditingValue>(
                     valueListenable: hasTextListenable ?? controller,
                     builder: (context, value, _) {
                       final effectiveHasText =
                           hasText ?? value.text.trim().isNotEmpty;
-                      // Pick icon color that contrasts with the button bg
-                      // in both light and dark mode
                       final iconColor = accent.computeLuminance() > 0.4
-                          ? const Color(0xFF1A1A2E) // dark icon on light accent
-                          : Colors.white;            // white icon on dark accent
+                          ? const Color(0xFF1A1A2E)
+                          : Colors.white;
                       return AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
                         curve: Curves.easeOutCubic,
@@ -239,10 +273,12 @@ class AhviChatPromptBar extends StatelessWidget {
   }
 }
 
+// ── Pressable wrapper ──────────────────────────────────────────────────────
 class _ChatPromptPressable extends StatefulWidget {
   final Widget? child;
   final Widget Function(bool isHovered, bool isPressed)? builder;
   final VoidCallback? onTap;
+  final VoidCallback? onTapDown;
   final double liftY;
   final double scaleHover;
   final double scalePressed;
@@ -251,8 +287,9 @@ class _ChatPromptPressable extends StatefulWidget {
     this.child,
     this.builder,
     this.onTap,
+    this.onTapDown,
     this.liftY = 0.0,
-    this.scaleHover = 1.05,
+    this.scaleHover = 1.0,
     this.scalePressed = 0.97,
   }) : assert(child != null || builder != null);
 
@@ -283,7 +320,10 @@ class _ChatPromptPressableState extends State<_ChatPromptPressable> {
       }),
       child: GestureDetector(
         onTap: widget.onTap,
-        onTapDown: (_) => setState(() => _isPressed = true),
+        onTapDown: (_) {
+          widget.onTapDown?.call();
+          setState(() => _isPressed = true);
+        },
         onTapUp: (_) => setState(() => _isPressed = false),
         onTapCancel: () => setState(() => _isPressed = false),
         child: AnimatedContainer(
@@ -293,8 +333,9 @@ class _ChatPromptPressableState extends State<_ChatPromptPressable> {
           curve: _isPressed
               ? const Cubic(0.4, 0.0, 1.0, 1.0)
               : const Cubic(0.34, 1.40, 0.64, 1.0),
-          transform: Matrix4.translationValues(0.0, _isPressed ? 0.0 : dy, 0.0)
-            ..multiply(Matrix4.diagonal3Values(scale, scale, 1.0)),
+          transform:
+              Matrix4.translationValues(0.0, _isPressed ? 0.0 : dy, 0.0)
+                ..multiply(Matrix4.diagonal3Values(scale, scale, 1.0)),
           transformAlignment: Alignment.center,
           child: widget.builder != null
               ? widget.builder!(_isHovered, _isPressed)
@@ -305,12 +346,60 @@ class _ChatPromptPressableState extends State<_ChatPromptPressable> {
   }
 }
 
-// ── Pulsing mic icon when listening ─────────────────────────────────────────
-class _PulsingMicIcon extends StatelessWidget {
+// ── Pulsing mic icon when listening ───────────────────────────────────────
+class _PulsingMicIcon extends StatefulWidget {
   const _PulsingMicIcon();
 
   @override
+  State<_PulsingMicIcon> createState() => _PulsingMicIconState();
+}
+
+class _PulsingMicIconState extends State<_PulsingMicIcon>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..repeat(reverse: true);
+    _scale = Tween<double>(begin: 0.85, end: 1.15).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Icon(Icons.mic_rounded, color: Colors.white, size: 18);
+    return ScaleTransition(
+      scale: _scale,
+      child: const Icon(Icons.mic_rounded, color: Colors.white, size: 18),
+    );
   }
 }
+
+// ── Usage example (parent widget లో ఇలా వాడండి) ──────────────────────────
+//
+// AhviChatPromptBar(
+//   controller: _controller,
+//   focusNode: _focusNode,
+//   hintText: 'Search or ask anything...',
+//   onSendMessage: (message) {
+//     // 1. Chat page కి navigate చేయండి
+//     Navigator.push(
+//       context,
+//       MaterialPageRoute(
+//         builder: (_) => ChatPage(initialMessage: message),
+//       ),
+//     );
+//   },
+//   // ... other required params
+// )

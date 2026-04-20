@@ -3,91 +3,60 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:myapp/bills_page.dart' as bills_page;
 import 'package:myapp/calendar.dart' as calendar_page;
 import 'package:myapp/daily_wear.dart' as daily_wear_page;
-import 'package:myapp/diet_fitness.dart' as diet_fitness_page;
 import 'package:myapp/medi_tracker.dart' as medi_tracker_page;
+import 'package:myapp/app_localizations.dart';
+import 'package:myapp/widgets/ahvi_chat_prompt_bar.dart';
+import 'package:myapp/widgets/ahvi_home_text.dart';
 import 'package:myapp/services/appwrite_service.dart';
 import 'package:myapp/services/backend_service.dart';
 import 'package:myapp/skincare.dart' as skincare_page;
-import 'package:myapp/style_board_detail.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:provider/provider.dart';
 
-const _chipsByModule = <String, List<String>>{
+Map<String, List<String>> _getChipsByModule(BuildContext context) => {
   'style': [
-    'What should I wear today?',
-    'Build a rooftop party outfit',
-    'Show trending casual looks',
+    AppLocalizations.t(context, 'intent_style_s1'),
+    AppLocalizations.t(context, 'intent_style_s2'),
+    AppLocalizations.t(context, 'intent_style_s3'),
   ],
   'organize': [
-    'Today\'s meals',
-    'My medicines',
-    'Pending bills',
-    'Today\'s workout',
-    'Upcoming events',
-    'Today\'s events',
-    'Morning skincare',
-    'My life goals',
+    AppLocalizations.t(context, 'intent_organize_s1'),
+    AppLocalizations.t(context, 'intent_organize_s2'),
+    AppLocalizations.t(context, 'intent_organize_s3'),
+    AppLocalizations.t(context, 'intent_organize_s4'),
+    AppLocalizations.t(context, 'intent_organize_s5'),
+    AppLocalizations.t(context, 'intent_organize_s6'),
+    AppLocalizations.t(context, 'intent_organize_s7'),
+    AppLocalizations.t(context, 'intent_organize_s8'),
   ],
   'plan': [
-    'Plan a 3-day Goa trip',
-    'Pack for business travel',
-    'Create a wedding checklist',
+    AppLocalizations.t(context, 'intent_prepare_s1'),
+    AppLocalizations.t(context, 'intent_prepare_s2'),
+    AppLocalizations.t(context, 'intent_prepare_s3'),
   ],
 };
 
 class _ChatMessage {
   final String text;
   final bool isMe;
+  final bool isGreeting;
   final List<dynamic> chips;
-  final List<Map<String, dynamic>> cards;
   final String? boardId;
   final String? packId;
   final _LocalResponse? local;
   _ChatMessage({
     required this.text,
     required this.isMe,
+    this.isGreeting = false,
     this.chips = const [],
-    this.cards = const [],
     this.boardId,
     this.packId,
     this.local,
   });
-
-  Map<String, dynamic> toJson() => {
-        'text': text,
-        'isMe': isMe,
-        'chips': chips,
-        'cards': cards,
-        'boardId': boardId,
-        'packId': packId,
-      };
-
-  factory _ChatMessage.fromJson(Map<String, dynamic> json) {
-    final chipsRaw = json['chips'];
-    final cardsRaw = json['cards'];
-    return _ChatMessage(
-      text: (json['text'] ?? '').toString(),
-      isMe: json['isMe'] == true,
-      chips: chipsRaw is List ? List<dynamic>.from(chipsRaw) : const [],
-      cards: cardsRaw is List
-          ? cardsRaw
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList()
-          : const <Map<String, dynamic>>[],
-      boardId: (json['boardId'] ?? '').toString().trim().isEmpty
-          ? null
-          : json['boardId'].toString(),
-      packId: (json['packId'] ?? '').toString().trim().isEmpty
-          ? null
-          : json['packId'].toString(),
-    );
-  }
 }
 
 enum _RespType { outfits, plan, card, checklist }
@@ -111,7 +80,10 @@ class _Outfit {
   final String name;
   final List<String> tags;
   final String image;
-  const _Outfit(this.name, this.tags, this.image);
+  final String description;
+  bool saved;
+  _Outfit(this.name, this.tags, this.image,
+      {this.description = '', this.saved = false});
 }
 
 class _Plan {
@@ -137,7 +109,7 @@ class _CardRow {
   const _CardRow(this.done, this.main, this.sub, this.tag);
 }
 
-const _local = <String, _LocalResponse>{
+final _local = <String, _LocalResponse>{
   'What should I wear today?': _LocalResponse(
     type: _RespType.outfits,
     intro:
@@ -147,16 +119,19 @@ const _local = <String, _LocalResponse>{
         'Layered Minimal',
         ['Casual', 'Today'],
         'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=220&h=260&fit=crop&crop=top&auto=format',
+        description: 'A light knit layered over a crisp tee with slim trousers. Comfortable yet polished for a cool day.',
       ),
       _Outfit(
         'Smart Casual',
         ['Office', 'Versatile'],
         'https://images.unsplash.com/photo-1591369822096-ffd140ec948f?w=220&h=260&fit=crop&crop=top&auto=format',
+        description: 'Tailored chinos paired with a structured shirt. Effortless transition from desk to dinner.',
       ),
       _Outfit(
         'Street Edit',
         ['Urban', 'Fresh'],
         'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=220&h=260&fit=crop&crop=top&auto=format',
+        description: 'Wide-leg joggers with an oversized graphic tee and clean sneakers. Relaxed city energy.',
       ),
     ],
   ),
@@ -169,16 +144,19 @@ const _local = <String, _LocalResponse>{
         'Evening Glow',
         ['Party', 'Night'],
         'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=220&h=260&fit=crop&crop=top&auto=format',
+        description: 'A sleek satin slip dress with strappy heels. Warm-toned accessories complete the golden-hour vibe.',
       ),
       _Outfit(
         'Rooftop Chic',
         ['Elevated', 'Cool'],
         'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=220&h=260&fit=crop&crop=top&auto=format',
+        description: 'Tailored wide-leg trousers with a cropped blazer. Sharp, confident and built for the skyline.',
       ),
       _Outfit(
         'Bold Statement',
         ['Trendy', 'Standout'],
         'https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=220&h=260&fit=crop&crop=top&auto=format',
+        description: 'A vibrant co-ord set that commands attention. Minimal jewellery lets the colour do the talking.',
       ),
     ],
   ),
@@ -191,16 +169,19 @@ const _local = <String, _LocalResponse>{
         'Quiet Luxury',
         ['Trending', 'Minimal'],
         'https://images.unsplash.com/photo-1538805060514-97d9cc17730c?w=220&h=260&fit=crop&crop=top&auto=format',
+        description: 'Cream wide-leg trousers with a fine-knit cardigan. Understated elegance that speaks volumes.',
       ),
       _Outfit(
         'Soft Tones',
         ['Casual', 'Neutral'],
         'https://images.unsplash.com/photo-1594938298603-c8148c4b9c2b?w=220&h=260&fit=crop&crop=top&auto=format',
+        description: 'Dusty beige linen set with white sneakers. Easy, breathable and endlessly wearable.',
       ),
       _Outfit(
         'Classic Ease',
         ['Everyday', 'Fresh'],
         'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=220&h=260&fit=crop&crop=top&auto=format',
+        description: 'A white oversized button-down tucked into straight jeans. The perfect no-fuss uniform.',
       ),
     ],
   ),
@@ -421,14 +402,12 @@ class _ChatSession {
   String title;
   final DateTime createdAt;
   final List<Map<String, String>> history; // [{role, content}]
-  final List<_ChatMessage> messages;
 
   _ChatSession({
     required this.id,
     required this.title,
     required this.createdAt,
     required this.history,
-    required this.messages,
   });
 
   Map<String, dynamic> toJson() => {
@@ -436,7 +415,6 @@ class _ChatSession {
         'title': title,
         'createdAt': createdAt.toIso8601String(),
         'history': history,
-        'messages': messages.map((m) => m.toJson()).toList(),
       };
 
   factory _ChatSession.fromJson(Map<String, dynamic> j) => _ChatSession(
@@ -446,12 +424,6 @@ class _ChatSession {
         history: (j['history'] as List)
             .map((e) => Map<String, String>.from(e as Map))
             .toList(),
-        messages: (j['messages'] is List)
-            ? (j['messages'] as List)
-                .whereType<Map>()
-                .map((e) => _ChatMessage.fromJson(Map<String, dynamic>.from(e)))
-                .toList()
-            : <_ChatMessage>[],
       );
 }
 
@@ -471,7 +443,8 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen>
+    with TickerProviderStateMixin {
   final TextEditingController _chatController = TextEditingController();
   final FocusNode _chatFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
@@ -481,19 +454,10 @@ class _ChatScreenState extends State<ChatScreen> {
   String _runningMemory = '';
   bool _isTyping = false;
   String _userName = 'User';
-  String _userId = 'user_1';
-  Map<String, dynamic> _userProfileContext = const {};
   final Map<String, List<List<bool>>> _checklistChecksByTitle = {};
   final Map<String, List<List<String>>> _checklistItemsByTitle = {};
   final Map<String, List<TextEditingController>> _checklistAddCtrlsByTitle = {};
   final Map<String, bool> _checklistSavedByTitle = {};
-  final Map<String, String> _boardIdByLabel = const {
-    'Party Looks': 'party_looks',
-    'Occasion': 'occasion',
-    'Office Fit': 'office_fit',
-    'Vacation': 'vacation',
-    'Everything Else': 'everything_else',
-  };
 
   // ── Voice ──────────────────────────────────────────────────────────────────
   final stt.SpeechToText _speech = stt.SpeechToText();
@@ -503,90 +467,38 @@ class _ChatScreenState extends State<ChatScreen> {
   // ── History ────────────────────────────────────────────────────────────────
   List<_ChatSession> _sessions = [];
   late String _currentSessionId;
+  bool _greetingAdded = false;
   String get _module => widget.moduleContext.toLowerCase().trim() == 'prepare'
       ? 'plan'
       : widget.moduleContext.toLowerCase().trim();
-
-  String _occasionFromBoardId(String boardId) {
-    switch (boardId.trim().toLowerCase()) {
-      case 'party_looks':
-        return 'Party';
-      case 'occasion':
-        return 'Occasion';
-      case 'office_fit':
-        return 'Office';
-      case 'vacation':
-        return 'Vacation';
-      case 'everything_else':
-        return 'Everything Else';
-      default:
-        return 'Occasion';
-    }
-  }
-
-  Future<void> _saveChecklistToBoard({
-    required String boardId,
-    required String title,
-    required List<({String name, String emoji, Color color, List<String> items})>
-        sections,
-    required List<List<String>> itemsState,
-    required List<List<bool>> checksState,
-  }) async {
-    final sectionPayload = <Map<String, dynamic>>[];
-    var totalItems = 0;
-    var completedItems = 0;
-    for (var i = 0; i < sections.length; i++) {
-      totalItems += itemsState[i].length;
-      completedItems += checksState[i].where((v) => v).length;
-      sectionPayload.add({
-        'name': sections[i].name,
-        'emoji': sections[i].emoji,
-        'color': sections[i].color.value,
-        'items': List<String>.from(itemsState[i]),
-        'checked': List<bool>.from(checksState[i]),
-      });
-    }
-
-    final occasion = _occasionFromBoardId(boardId);
-    final description = '$title · $completedItems/$totalItems completed items';
-
-    final payload = <String, dynamic>{
-      'title': title.trim().isEmpty ? 'Checklist Board' : title.trim(),
-      'description': description,
-      'occasion': occasion,
-      'imageUrl': '',
-      'itemIds': const <String>[],
-      'source': 'chat_checklist',
-      'checklist': {
-        'sections': sectionPayload,
-        'total_items': totalItems,
-        'completed_items': completedItems,
-      },
-      'created_at': DateTime.now().toIso8601String(),
-    };
-
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    await appwrite.createSavedBoard(payload);
-  }
 
   @override
   void initState() {
     super.initState();
     _currentSessionId = DateTime.now().millisecondsSinceEpoch.toString();
-    _fetchUser();
     _loadSessions();
     _initSpeech();
-    _messages.add(
-      _ChatMessage(
-        text: "Hi! I'm AHVI. How can I help you style or plan your day?",
-        isMe: false,
-      ),
-    );
-    final pendingPrompt = widget.initialPrompt?.trim();
-    if (pendingPrompt != null && pendingPrompt.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _sendMessage(pendingPrompt);
-      });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_greetingAdded) {
+      _greetingAdded = true;
+      _fetchUser();
+      _messages.add(
+        _ChatMessage(
+          text: '',
+          isMe: false,
+          isGreeting: true,
+        ),
+      );
+      final pendingPrompt = widget.initialPrompt?.trim();
+      if (pendingPrompt != null && pendingPrompt.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _sendMessage(pendingPrompt);
+        });
+      }
     }
   }
 
@@ -595,77 +507,24 @@ class _ChatScreenState extends State<ChatScreen> {
     final user = await appwrite.getCurrentUser();
     if (user != null && mounted) {
       setState(
-        () {
-          _userName = user.name.isNotEmpty ? user.name.split(' ').first : 'Stylist';
-          _userId = user.$id;
-        },
+        () => _userName = user.name.isNotEmpty
+            ? user.name.split(' ').first
+            : 'Stylist',
       );
-    }
-    await _fetchUserProfileContext();
-  }
-
-  Future<void> _fetchUserProfileContext() async {
-    try {
-      final appwrite = Provider.of<AppwriteService>(context, listen: false);
-      final doc = await appwrite.getUserProfile();
-      final data = doc.data;
-      final contextPayload = <String, dynamic>{
-        'name': data['name'] ?? _userName,
-        'username': data['username'],
-        'gender': data['gender'],
-        'skinTone': data['skinTone'],
-        'bodyShape': data['bodyShape'],
-        'styles': data['styles'],
-        'shopPrefs': data['shopPrefs'],
-        'lang': data['lang'],
-      };
-      if (!mounted) return;
-      setState(() {
-        _userProfileContext = contextPayload;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _userProfileContext = {'name': _userName};
-      });
     }
   }
 
   Future<void> _initSpeech() async {
-    try {
-      _speechAvailable = await _speech.initialize(
-        onStatus: (status) {
-          if (status == 'done' || status == 'notListening') {
-            if (mounted) setState(() => _isListening = false);
-          }
-        },
-        onError: (e) {
+    _speechAvailable = await _speech.initialize(
+      onStatus: (status) {
+        if (status == 'done' || status == 'notListening') {
           if (mounted) setState(() => _isListening = false);
-        },
-      );
-    } on PlatformException catch (e) {
-      if (e.code == 'multipleRequests') {
-        await Future.delayed(const Duration(milliseconds: 350));
-        try {
-          _speechAvailable = await _speech.initialize(
-            onStatus: (status) {
-              if (status == 'done' || status == 'notListening') {
-                if (mounted) setState(() => _isListening = false);
-              }
-            },
-            onError: (err) {
-              if (mounted) setState(() => _isListening = false);
-            },
-          );
-        } catch (_) {
-          _speechAvailable = false;
         }
-      } else {
-        _speechAvailable = false;
-      }
-    } catch (_) {
-      _speechAvailable = false;
-    }
+      },
+      onError: (e) {
+        if (mounted) setState(() => _isListening = false);
+      },
+    );
     if (mounted) setState(() {});
   }
 
@@ -736,9 +595,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ..clear()
         ..addAll(_chatHistory);
       _sessions[existing].title = title;
-      _sessions[existing].messages
-        ..clear()
-        ..addAll(_messages);
     } else {
       _sessions.insert(
         0,
@@ -747,7 +603,6 @@ class _ChatScreenState extends State<ChatScreen> {
           title: title,
           createdAt: DateTime.now(),
           history: List.from(_chatHistory),
-          messages: List<_ChatMessage>.from(_messages),
         ),
       );
     }
@@ -774,8 +629,9 @@ class _ChatScreenState extends State<ChatScreen> {
       _messages
         ..clear()
         ..add(_ChatMessage(
-          text: "Hi! I'm AHVI. How can I help you style or plan your day?",
+          text: '',
           isMe: false,
+          isGreeting: true,
         ));
       _chatHistory.clear();
       _runningMemory = '';
@@ -791,26 +647,17 @@ class _ChatScreenState extends State<ChatScreen> {
         ..clear()
         ..addAll(session.history);
       _messages.clear();
-      // Prefer rich payload (cards/buttons) when available.
-      if (session.messages.isNotEmpty) {
-        _messages.addAll(session.messages);
-      } else {
-        // Backward-compatible fallback for old stored sessions.
+      // Rebuild _messages from history for display
+      _messages.add(_ChatMessage(
+        text: '',
+        isMe: false,
+        isGreeting: true,
+      ));
+      for (final h in session.history) {
         _messages.add(_ChatMessage(
-          text: "Hi! I'm AHVI. How can I help you style or plan your day?",
-          isMe: false,
+          text: h['content'] ?? '',
+          isMe: h['role'] == 'user',
         ));
-        for (final h in session.history) {
-          final isUser = h['role'] == 'user';
-          final content = h['content'] ?? '';
-          _messages.add(_ChatMessage(
-            text: content,
-            isMe: isUser,
-            cards: isUser
-                ? const <Map<String, dynamic>>[]
-                : _inferLegacyCardsFromAssistantText(content),
-          ));
-        }
       }
       _runningMemory = '';
     });
@@ -818,79 +665,13 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _handleChipTap(String chip) {
-    _sendMessage(chip);
-  }
-
-  List<Map<String, dynamic>> _inferLegacyCardsFromAssistantText(String text) {
-    final lowered = text.toLowerCase();
-    final matches = RegExp(r'outfit\s*\d+', caseSensitive: false).allMatches(text);
-    final labels = <String>{};
-    for (final m in matches) {
-      final value = (m.group(0) ?? '').trim();
-      if (value.isNotEmpty) labels.add(value);
-    }
-    if (labels.isNotEmpty) {
-      return labels
-          .map(
-            (label) => <String, dynamic>{
-              'title': label,
-              'kind': 'style',
-            },
-          )
-          .toList();
-    }
-    if (lowered.contains('style board')) {
-      return <Map<String, dynamic>>[
-        {
-          'title': 'Outfit 1',
-          'kind': 'style',
-        }
-      ];
-    }
-    return const <Map<String, dynamic>>[];
-  }
-
-  List<Map<String, dynamic>> _cardsFromBoardIds(String? boardIds) {
-    final ids = (boardIds ?? '')
-        .split(',')
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
-    return ids.asMap().entries.map((entry) {
-      final idx = entry.key + 1;
-      final id = entry.value;
-      return <String, dynamic>{
-        'title': 'Outfit $idx',
-        'kind': 'style',
-        'board_id': id,
-      };
-    }).toList();
-  }
-
-  List<Map<String, dynamic>> _mergeCardsWithBoardIds(
-    List<Map<String, dynamic>> cards,
-    String? boardIds,
-  ) {
-    final fallbackCards = _cardsFromBoardIds(boardIds);
-    if (fallbackCards.isEmpty) return cards;
-    if (cards.isEmpty) return fallbackCards;
-
-    final merged = cards.map((e) => Map<String, dynamic>.from(e)).toList();
-    for (var i = 0; i < fallbackCards.length; i++) {
-      final boardId = (fallbackCards[i]['board_id'] ?? '').toString().trim();
-      if (boardId.isEmpty) continue;
-      if (i < merged.length) {
-        final existing = (merged[i]['board_id'] ?? merged[i]['saved_board_id'] ?? merged[i]['outfit_id'] ?? '')
-            .toString()
-            .trim();
-        if (existing.isEmpty) {
-          merged[i]['board_id'] = boardId;
-        }
-      } else {
-        merged.add(fallbackCards[i]);
-      }
-    }
-    return merged;
+    final local = _local[chip];
+    if (local == null) return _sendMessage(chip);
+    setState(() {
+      _messages.add(_ChatMessage(text: chip, isMe: true));
+      _messages.add(_ChatMessage(text: local.intro, isMe: false, local: local));
+    });
+    _scrollToBottom();
   }
 
   void _sendMessage([String? chipText]) async {
@@ -907,11 +688,9 @@ class _ChatScreenState extends State<ChatScreen> {
       final backend = Provider.of<BackendService>(context, listen: false);
       final response = await backend.sendChatQuery(
         text,
-        _userId,
+        'user_$_userName',
         List<Map<String, String>>.from(_chatHistory),
         _runningMemory,
-        moduleContext: _module,
-        userProfile: _userProfileContext,
       );
       if (!mounted) return;
       if (response['updated_memory'] != null) {
@@ -919,20 +698,7 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       final aiText =
           response['message']?['content']?.toString() ??
-          response['content']?.toString() ??
-          response['error']?.toString() ??
-          "I'm having trouble connecting.";
-      final boardIds = (response['board_ids'] ?? '').toString().trim();
-      var cards = response['cards'] is List
-          ? (response['cards'] as List)
-                .whereType<Map>()
-                .map((e) => Map<String, dynamic>.from(e))
-                .toList()
-          : const <Map<String, dynamic>>[];
-      cards = _mergeCardsWithBoardIds(cards, boardIds);
-      debugPrint(
-        'AHVI chat payload cards=${cards.length} boardIds=${boardIds.isEmpty ? 0 : boardIds.split(",").where((e) => e.trim().isNotEmpty).length} rawBoardIds=$boardIds',
-      );
+          AppLocalizations.t(context, 'chat_connection_error');
       _chatHistory.add({'role': 'assistant', 'content': aiText});
       setState(
         () => _messages.add(
@@ -940,8 +706,7 @@ class _ChatScreenState extends State<ChatScreen> {
             text: aiText,
             isMe: false,
             chips: response['chips'] ?? [],
-            cards: cards,
-            boardId: boardIds.isEmpty ? null : boardIds,
+            boardId: response['board_ids'],
             packId: response['pack_ids'],
           ),
         ),
@@ -951,7 +716,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       setState(
         () => _messages.add(
-          _ChatMessage(text: 'Connection Error: $e', isMe: false),
+          _ChatMessage(text: '${AppLocalizations.t(context, 'chat_error_prefix')}: $e', isMe: false),
         ),
       );
     } finally {
@@ -974,25 +739,20 @@ class _ChatScreenState extends State<ChatScreen> {
     Widget? page;
     switch (pageKey) {
       case 'meal':
-        page = const diet_fitness_page.DietAndFitnessScreen();
-        break;
-      case 'medi':
-        page = const medi_tracker_page.MediTrackScreen();
+        page = daily_wear_page.DailyWearScreen();
+        page = medi_tracker_page.MediTrackScreen();
         break;
       case 'bill':
         page = const bills_page.BillsScreen();
         break;
       case 'workout':
-        page = const diet_fitness_page.DietAndFitnessScreen();
+        page = daily_wear_page.DailyWearScreen();
         break;
       case 'calendar':
         page = const calendar_page.CalendarShell();
         break;
       case 'skincare':
         page = const skincare_page.SkincareScreen();
-        break;
-      case 'tryon':
-        page = const daily_wear_page.DailyWearScreen();
         break;
     }
     if (page == null) return;
@@ -1028,40 +788,24 @@ class _ChatScreenState extends State<ChatScreen> {
         leading: widget.showBackButton
             ? IconButton(
                 icon: const Icon(Icons.arrow_back_ios_new_rounded),
-                tooltip: 'Back',
+                tooltip: AppLocalizations.t(context, 'chat_back'),
                 onPressed: () => Navigator.of(context).pop(),
               )
-            : Padding(
-                padding: const EdgeInsets.only(left: 16),
-                child: Text(
-                  'AHVI',
-                  style: GoogleFonts.anton(
-                    color: t.textPrimary,
-                    fontSize: 36,
-                    fontWeight: FontWeight.w400,
-                    letterSpacing: 3.2,
-                    height: 1.0,
-                  ),
-                ),
-              ),
-        leadingWidth: widget.showBackButton ? 56 : 100,
-        title: widget.showBackButton
-            ? Text(
-                'AHVI',
-                style: GoogleFonts.anton(
-                  color: t.textPrimary,
-                  fontSize: 36,
-                  fontWeight: FontWeight.w400,
-                  letterSpacing: 3.2,
-                  height: 1.0,
-                ),
-              )
             : null,
-        centerTitle: true,
+        title: Padding(
+          padding: const EdgeInsets.only(left: 4),
+          child: AhviHomeText(
+            color: t.textPrimary,
+            fontSize: 30.0,
+            letterSpacing: 3.2,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+        centerTitle: false,
         actions: [
           IconButton(
             icon: const Icon(Icons.history_rounded),
-            tooltip: 'Chat History',
+            tooltip: AppLocalizations.t(context, 'chat_history_btn'),
             onPressed: () => _scaffoldKey.currentState?.openDrawer(),
           ),
         ],
@@ -1086,7 +830,7 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'AHVI is typing...',
+                  AppLocalizations.t(context, 'chat_typing'),
                   style: TextStyle(color: t.mutedText, fontSize: 12),
                 ),
               ),
@@ -1114,7 +858,7 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Row(
                 children: [
                   Text(
-                    'Chats',
+                    AppLocalizations.t(context, 'chat_history_title'),
                     style: TextStyle(
                       color: t.textPrimary,
                       fontSize: 20,
@@ -1138,9 +882,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         children: [
                           const Icon(Icons.add, color: Colors.white, size: 14),
                           const SizedBox(width: 4),
-                          const Text(
-                            'New',
-                            style: TextStyle(
+                          Text(
+                            AppLocalizations.t(context, 'chat_new'),
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -1160,7 +904,7 @@ class _ChatScreenState extends State<ChatScreen> {
               child: _sessions.isEmpty
                   ? Center(
                       child: Text(
-                        'No past chats yet.\nStart a conversation!',
+                        AppLocalizations.t(context, 'chat_no_history'),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: t.mutedText, fontSize: 13),
                       ),
@@ -1237,8 +981,8 @@ class _ChatScreenState extends State<ChatScreen> {
   String _formatDate(DateTime dt) {
     final now = DateTime.now();
     final diff = now.difference(dt);
-    if (diff.inDays == 0) return 'Today';
-    if (diff.inDays == 1) return 'Yesterday';
+    if (diff.inDays == 0) return AppLocalizations.t(context, 'chat_today');
+    if (diff.inDays == 1) return AppLocalizations.t(context, 'chat_yesterday');
     if (diff.inDays < 7) return '${diff.inDays} days ago';
     return '${dt.day}/${dt.month}/${dt.year}';
   }
@@ -1267,7 +1011,9 @@ class _ChatScreenState extends State<ChatScreen> {
             border: m.isMe ? null : Border.all(color: t.cardBorder),
           ),
           child: Text(
-            m.text,
+            m.isGreeting
+                ? AppLocalizations.t(context, 'chat_greeting')
+                : m.text,
             style: TextStyle(
               color: m.isMe ? Colors.white : t.textPrimary,
               fontSize: 14.5,
@@ -1277,7 +1023,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
       if (!m.isMe && m.local != null) _localView(m.local!, t),
-      if (!m.isMe && m.cards.isNotEmpty) _backendCardsView(m, t),
       if (!m.isMe && m.chips.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(bottom: 16, left: 4),
@@ -1297,463 +1042,154 @@ class _ChatScreenState extends State<ChatScreen> {
     ],
   );
 
-  Widget _backendCardsView(_ChatMessage message, AppThemeTokens t) {
-    final cards = _mergeCardsWithBoardIds(message.cards, message.boardId);
-    final fallbackBoardIds = (message.boardId ?? '')
-        .split(',')
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
-    return Column(
-      children: cards.asMap().entries.map((entry) {
-        final idx = entry.key;
-        final fallback = idx < fallbackBoardIds.length ? fallbackBoardIds[idx] : null;
-        return _backendCard(
-          entry.value,
-          t,
-          fallbackBoardId: fallback,
-          allCards: cards,
-          cardIndex: idx,
-          fallbackBoardIds: fallbackBoardIds,
-        );
-      }).toList(),
-    );
-  }
-
-  Future<void> _openStyleBoardFromCard(
-    Map<String, dynamic> card, {
-    String? fallbackBoardId,
-    List<Map<String, dynamic>>? allCards,
-    int selectedIndex = 0,
-    List<String>? fallbackBoardIds,
-  }) async {
-    final preview = card['preview'] is Map
-        ? Map<String, dynamic>.from(card['preview'] as Map)
-        : const <String, dynamic>{};
-    final boardId = (card['board_id'] ??
-            card['saved_board_id'] ??
-            card['outfit_id'] ??
-            fallbackBoardId ??
-            '')
-        .toString()
-        .trim();
-
-    String pickFromPreview(Map<String, dynamic> map, List<String> keys) {
-      for (final key in keys) {
-        final value = (map[key] ?? '').toString().trim();
-        if (value.isNotEmpty) return value;
-      }
-      return '';
-    }
-
-    String imageFromPreview(Map<String, dynamic> map) {
-      final top = map['top'] is Map ? Map<String, dynamic>.from(map['top'] as Map) : const <String, dynamic>{};
-      final bottom =
-          map['bottom'] is Map ? Map<String, dynamic>.from(map['bottom'] as Map) : const <String, dynamic>{};
-      final shoes = map['shoes'] is Map ? Map<String, dynamic>.from(map['shoes'] as Map) : const <String, dynamic>{};
-
-      String img(Map<String, dynamic> p) => pickFromPreview(p, const [
-            'masked_url',
-            'image_url',
-            'imageUrl',
-            'raw_image_url',
-            'rawImageUrl',
-          ]);
-
-      final values = [img(top), img(bottom), img(shoes), img(map)];
-      for (final v in values) {
-        if (v.isNotEmpty) return v;
-      }
-      return '';
-    }
-
-    List<Map<String, String>> imageSlotsFromPreview(Map<String, dynamic> map) {
-      final top = map['top'] is Map ? Map<String, dynamic>.from(map['top'] as Map) : const <String, dynamic>{};
-      final bottom =
-          map['bottom'] is Map ? Map<String, dynamic>.from(map['bottom'] as Map) : const <String, dynamic>{};
-      final shoes = map['shoes'] is Map ? Map<String, dynamic>.from(map['shoes'] as Map) : const <String, dynamic>{};
-
-      List<String> urlCandidates(Map<String, dynamic> p) => [
-            (p['masked_url'] ?? '').toString(),
-            (p['image_url'] ?? '').toString(),
-            (p['imageUrl'] ?? '').toString(),
-            (p['raw_image_url'] ?? '').toString(),
-            (p['rawImageUrl'] ?? '').toString(),
-          ].map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-
-      String label(Map<String, dynamic> p, String fallback) => ((p['sub_category'] ??
-                  p['subCategory'] ??
-                  p['category'] ??
-                  p['name'] ??
-                  fallback)
-              .toString()
-              .trim())
-          .isEmpty
-          ? fallback
-          : (p['sub_category'] ?? p['subCategory'] ?? p['category'] ?? p['name'] ?? fallback).toString().trim();
-
-      final out = <Map<String, String>>[];
-      final seen = <String>{};
-      void addPart(Map<String, dynamic> part, String fallback) {
-        for (final u in urlCandidates(part)) {
-          if (seen.contains(u)) continue;
-          seen.add(u);
-          out.add({'url': u, 'label': label(part, fallback)});
-          return;
-        }
-      }
-
-      addPart(top, 'top');
-      addPart(bottom, 'bottom');
-      addPart(shoes, 'shoes');
-      return out;
-    }
-
-    List<String> itemIdsFromPreview(Map<String, dynamic> map) {
-      final ids = <String>[];
-      for (final key in const ['top', 'bottom', 'shoes']) {
-        final part = map[key] is Map ? Map<String, dynamic>.from(map[key] as Map) : const <String, dynamic>{};
-        final id = pickFromPreview(part, const ['\$id', 'id', 'item_id', 'itemId']);
-        if (id.isNotEmpty && !ids.contains(id)) ids.add(id);
-      }
-      return ids;
-    }
-
-    Map<String, dynamic> boardFromCard(Map<String, dynamic> src, String? fallbackId) {
-      final p = src['preview'] is Map
-          ? Map<String, dynamic>.from(src['preview'] as Map)
-          : const <String, dynamic>{};
-      final id = (src['board_id'] ?? src['saved_board_id'] ?? src['outfit_id'] ?? fallbackId ?? '').toString().trim();
-      return <String, dynamic>{
-        'title': (src['title'] ?? 'Style Board').toString(),
-        'occasion': (p['occasion'] ?? p['master_type'] ?? 'Occasion').toString(),
-        'imageUrl': imageFromPreview(p),
-        'images': imageSlotsFromPreview(p),
-        'preview': p,
-        'itemIds': itemIdsFromPreview(p),
-        if (id.isNotEmpty) '\$id': id,
-      };
-    }
-
-    final cards = allCards ?? <Map<String, dynamic>>[card];
-    final boards = cards.asMap().entries.map((entry) {
-      final i = entry.key;
-      final fb = (fallbackBoardIds != null && i < fallbackBoardIds.length) ? fallbackBoardIds[i] : null;
-      return boardFromCard(entry.value, fb);
-    }).toList();
-
-    final appwrite = Provider.of<AppwriteService>(context, listen: false);
-    final fetchJobs = <Future<void>>[];
-    for (var i = 0; i < boards.length; i++) {
-      final id = (boards[i]['\$id'] ?? '').toString().trim();
-      if (id.isEmpty || id.startsWith('preview-')) continue;
-      fetchJobs.add(() async {
-        final doc = await appwrite.getSavedBoardById(id);
-        if (doc != null && doc.isNotEmpty && i >= 0 && i < boards.length) {
-          boards[i] = doc;
-        }
-      }());
-    }
-    if (fetchJobs.isNotEmpty) {
-      await Future.wait(fetchJobs);
-    }
-
-    final safeIndex = selectedIndex.clamp(0, boards.isEmpty ? 0 : boards.length - 1).toInt();
-    final board = boards.isNotEmpty ? boards[safeIndex] : boardFromCard(card, fallbackBoardId);
-    if (!mounted) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => StyleBoardDetailPage(
-          board: board,
-          boards: boards,
-          initialIndex: safeIndex,
-        ),
-      ),
-    );
-  }
-
-  Widget _backendCard(
-    Map<String, dynamic> card,
-    AppThemeTokens t, {
-    String? fallbackBoardId,
-    List<Map<String, dynamic>>? allCards,
-    int cardIndex = 0,
-    List<String>? fallbackBoardIds,
-  }) {
-    final title = (card['title'] ?? 'Checklist').toString().trim();
-    final subtitle = (card['subtitle'] ?? '').toString().trim();
-    final kind = (card['kind'] ?? '').toString().trim().toLowerCase();
-    final items = _extractCardItems(card['items']);
-    final actionPageKey = _extractActionPageKey(card['action']);
-    final hasPreview = card['preview'] is Map;
-    final looksLikeOutfitCard = title.toLowerCase().startsWith('outfit');
-    final hasBoardId = ((card['board_id'] ??
-                card['saved_board_id'] ??
-                card['outfit_id'] ??
-                fallbackBoardId ??
-                '')
-            .toString()
-            .trim()
-            .isNotEmpty);
-    final canOpenStyleBoard = hasPreview || looksLikeOutfitCard || hasBoardId;
-
-    return Container(
-      margin: const EdgeInsets.only(left: 4, right: 28, bottom: 12),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
-        color: t.card,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: t.cardBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title.isEmpty ? 'Checklist' : title,
-                  style: TextStyle(
-                    color: t.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              if (kind.isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: t.accent.primary.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: t.accent.primary.withValues(alpha: 0.25)),
-                  ),
-                  child: Text(
-                    kind,
-                    style: TextStyle(
-                      color: t.accent.primary,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          if (subtitle.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: TextStyle(
-                color: t.mutedText,
-                fontSize: 11.5,
-              ),
-            ),
-          ],
-          if (items.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            ...items.map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Icon(
-                        Icons.circle,
-                        size: 6,
-                        color: t.accent.secondary,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        item,
-                        style: TextStyle(
-                          color: t.textPrimary,
-                          fontSize: 12.5,
-                          height: 1.35,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          if (canOpenStyleBoard) ...[
-            const SizedBox(height: 8),
-            GestureDetector(
-              onTap: () => _openStyleBoardFromCard(
-                card,
-                fallbackBoardId: fallbackBoardId,
-                allCards: allCards,
-                selectedIndex: cardIndex,
-                fallbackBoardIds: fallbackBoardIds,
-              ),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                decoration: BoxDecoration(
-                  color: t.panel,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: t.cardBorder),
-                ),
-                child: Text(
-                  'Open Style Board',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: t.accent.primary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-          ] else if (actionPageKey != null) ...[
-            const SizedBox(height: 8),
-            GestureDetector(
-              onTap: () => _openOrganizePage(actionPageKey),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: t.panel,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: t.cardBorder),
-                ),
-                child: Text(
-                  'Open',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: t.accent.primary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  List<String> _extractCardItems(dynamic rawItems) {
-    if (rawItems is! List) return const <String>[];
-    final items = <String>[];
-    for (final item in rawItems) {
-      if (item == null) continue;
-      if (item is String) {
-        final text = item.trim();
-        if (text.isNotEmpty) items.add(text);
-        continue;
-      }
-      if (item is Map) {
-        final mapped = Map<String, dynamic>.from(item);
-        final text = (mapped['text'] ??
-                mapped['title'] ??
-                mapped['label'] ??
-                mapped['name'] ??
-                '')
-            .toString()
-            .trim();
-        if (text.isNotEmpty) items.add(text);
-        continue;
-      }
-      final text = item.toString().trim();
-      if (text.isNotEmpty) items.add(text);
-    }
-    return items;
-  }
-
-  String? _extractActionPageKey(dynamic rawAction) {
-    if (rawAction is! Map) return null;
-    final action = Map<String, dynamic>.from(rawAction);
-    final module = (action['module'] ?? '').toString().trim().toLowerCase();
-    final route = (action['route'] ?? '').toString().trim().toLowerCase();
-
-    if (module.contains('meal')) return 'meal';
-    if (module.contains('medi')) return 'medi';
-    if (module.contains('bill')) return 'bill';
-    if (module.contains('workout')) return 'workout';
-    if (module.contains('calendar')) return 'calendar';
-    if (module.contains('skincare') || module.contains('skin')) return 'skincare';
-
-    if (route.contains('meal')) return 'meal';
-    if (route.contains('med')) return 'medi';
-    if (route.contains('bill')) return 'bill';
-    if (route.contains('workout')) return 'workout';
-    if (route.contains('calendar')) return 'calendar';
-    if (route.contains('skincare') || route.contains('skin')) return 'skincare';
-
-    if (module.contains('tryon') || module.contains('try-on') || module.contains('try_on')) return 'tryon';
-    if (route.contains('tryon') || route.contains('try-on') || route.contains('try_on')) return 'tryon';
-    return null;
-  }
-
   Widget _localView(_LocalResponse r, AppThemeTokens t) {
     if (r.type == _RespType.outfits) {
+      final screenW = MediaQuery.of(context).size.width;
+      final screenH = MediaQuery.of(context).size.height;
+      final outfitCardW = (screenW * 0.30).clamp(100.0, 140.0);
+      final outfitStripH = (screenH * 0.22).clamp(155.0, 195.0);
+      final outfitImgH = outfitStripH * 0.62;
       return SizedBox(
-        height: 155,
+        height: outfitStripH,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           itemCount: r.outfits.length,
-          separatorBuilder: (context, index) => const SizedBox(width: 8),
+          separatorBuilder: (_, __) => const SizedBox(width: 10),
           itemBuilder: (context, i) {
             final o = r.outfits[i];
-            return Container(
-              width: 86,
-              decoration: BoxDecoration(
-                color: t.card,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: t.cardBorder),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    height: 96,
-                    child: Image.network(
-                      o.image,
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      cacheWidth: 260,
-                      cacheHeight: 288,
-                      errorBuilder: (context, error, stackTrace) => Container(
-                        color: t.accent.primary.withValues(alpha: 0.1),
+            final heroTag = 'outfit_hero_${o.name}_$i';
+            return GestureDetector(
+              onTap: () {
+                HapticFeedback.lightImpact();
+                Navigator.of(context).push(
+                  PageRouteBuilder<void>(
+                    opaque: false,
+                    barrierColor: Colors.transparent,
+                    transitionDuration: const Duration(milliseconds: 420),
+                    reverseTransitionDuration: const Duration(milliseconds: 320),
+                    pageBuilder: (ctx, animation, _) => FadeTransition(
+                      opacity: CurvedAnimation(
+                        parent: animation,
+                        curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
+                      ),
+                      child: _OutfitDetailPage(
+                        outfit: o,
+                        heroTag: heroTag,
+                        t: t,
+                        onSaveChanged: (saved) =>
+                            setState(() => o.saved = saved),
                       ),
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+                );
+              },
+              child: Hero(
+                tag: heroTag,
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    width: outfitCardW,
+                    decoration: BoxDecoration(
+                      color: t.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: t.cardBorder),
+                      boxShadow: [
+                        BoxShadow(
+                          color: t.backgroundPrimary.withValues(alpha: 0.20),
+                          blurRadius: 14,
+                          offset: const Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                    clipBehavior: Clip.antiAlias,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          o.name,
-                          style: TextStyle(
-                            color: t.textPrimary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Wrap(
-                          spacing: 3,
-                          children: o.tags
-                              .map(
-                                (tag) => Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 5,
-                                    vertical: 1,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: t.accent.primary.withValues(
-                                      alpha: 0.10,
+                        // Image
+                        Expanded(
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.network(
+                                o.image,
+                                fit: BoxFit.cover,
+                                alignment: Alignment.topCenter,
+                                cacheWidth: 280,
+                                errorBuilder: (_, __, ___) => Container(
+                                  color: t.accent.primary.withValues(alpha: 0.1),
+                                  child: Icon(Icons.image_outlined,
+                                      color: t.mutedText, size: 28),
+                                ),
+                              ),
+                              // Saved badge
+                              if (o.saved)
+                                Positioned(
+                                  top: 7,
+                                  right: 7,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: t.accent.primary
+                                          .withValues(alpha: 0.88),
                                     ),
+                                    child: Icon(Icons.bookmark_rounded,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onPrimary,
+                                        size: 10),
+                                  ),
+                                ),
+                              // Bottom gradient
+                              Positioned(
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                height: 32,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Colors.transparent,
+                                        t.backgroundPrimary
+                                            .withValues(alpha: 0.40),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Label
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(9, 7, 9, 9),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                o.name,
+                                style: TextStyle(
+                                  color: t.textPrimary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.1,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                              const SizedBox(height: 4),
+                              Wrap(
+                                spacing: 4,
+                                runSpacing: 3,
+                                children: o.tags.take(2).map((tag) => Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: t.accent.primary
+                                        .withValues(alpha: 0.10),
                                     borderRadius: BorderRadius.circular(100),
                                   ),
                                   child: Text(
@@ -1764,14 +1200,15 @@ class _ChatScreenState extends State<ChatScreen> {
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
-                                ),
-                              )
-                              .toList(),
+                                )).toList(),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
                   ),
-                ],
+                ),
               ),
             );
           },
@@ -1815,6 +1252,8 @@ class _ChatScreenState extends State<ChatScreen> {
                             fontSize: 12.5,
                             height: 1.5,
                           ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ),
@@ -1832,7 +1271,11 @@ class _ChatScreenState extends State<ChatScreen> {
     final accent = t.accent.primary;
     final done = d.rows.where((x) => x.done).length;
     return Container(
-      margin: const EdgeInsets.only(left: 4, right: 28, bottom: 16),
+      margin: EdgeInsets.only(
+        left: 4,
+        right: (MediaQuery.of(context).size.width * 0.07).clamp(16.0, 28.0),
+        bottom: 16,
+      ),
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
       decoration: BoxDecoration(
         color: t.card,
@@ -1914,11 +1357,15 @@ class _ChatScreenState extends State<ChatScreen> {
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                           ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
                         Text(
                           x.sub,
                           style: TextStyle(color: t.mutedText, fontSize: 11),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
@@ -2077,7 +1524,11 @@ class _ChatScreenState extends State<ChatScreen> {
         final progress = totalItems == 0 ? 0.0 : totalChecked / totalItems;
 
         return Container(
-          margin: const EdgeInsets.only(left: 4, right: 28, bottom: 16),
+          margin: EdgeInsets.only(
+            left: 4,
+            right: (MediaQuery.of(context).size.width * 0.07).clamp(16.0, 28.0),
+            bottom: 16,
+          ),
           decoration: BoxDecoration(
             color: t.backgroundSecondary,
             borderRadius: BorderRadius.circular(18),
@@ -2288,7 +1739,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   fontSize: 12,
                                 ),
                                 decoration: InputDecoration(
-                                  hintText: '+ Add item…',
+                                  hintText: AppLocalizations.t(context, 'chat_add_item'),
                                   hintStyle: TextStyle(
                                     color: t.mutedText,
                                     fontSize: 12,
@@ -2364,7 +1815,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 children: [
                                   const SizedBox(height: 12),
                                   Text(
-                                    'Save to a Style Board',
+                                    AppLocalizations.t(context, 'save_to_board_title'),
                                     style: TextStyle(
                                       color: t.textPrimary,
                                       fontSize: 15,
@@ -2377,7 +1828,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                     'Occasion',
                                     'Office Fit',
                                     'Vacation',
-                                    'Everything Else',
                                   ].map(
                                     (b) => ListTile(
                                       title: Text(
@@ -2388,44 +1838,12 @@ class _ChatScreenState extends State<ChatScreen> {
                                         Icons.chevron_right_rounded,
                                         color: t.mutedText,
                                       ),
-                                      onTap: () async {
-                                        final boardId = _boardIdByLabel[b];
+                                      onTap: () {
                                         Navigator.pop(context);
-                                        if (boardId == null) return;
-                                        try {
-                                          await _saveChecklistToBoard(
-                                            boardId: boardId,
-                                            title: title,
-                                            sections: sections,
-                                            itemsState: itemsState,
-                                            checksState: checksState,
-                                          );
-                                          if (!mounted) return;
-                                          checklistSetState(
-                                            () => _checklistSavedByTitle[title] =
-                                                true,
-                                          );
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Board saved to cloud',
-                                              ),
-                                            ),
-                                          );
-                                        } catch (e) {
-                                          if (!mounted) return;
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            SnackBar(
-                                              content: Text(
-                                                'Failed to save board: $e',
-                                              ),
-                                            ),
-                                          );
-                                        }
+                                        checklistSetState(
+                                          () => _checklistSavedByTitle[title] =
+                                              true,
+                                        );
                                       },
                                     ),
                                   ),
@@ -2450,7 +1868,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      isSaved ? 'List Saved!' : 'Save to Style Board',
+                      isSaved ? AppLocalizations.t(context, 'list_saved') : AppLocalizations.t(context, 'save_to_board'),
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onPrimary,
@@ -2469,7 +1887,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _chips(AppThemeTokens t) {
-    final chips = _chipsByModule[_module] ?? const <String>[];
+    final chips = _getChipsByModule(context)[_module] ?? const <String>[];
     if (chips.isEmpty) return const SizedBox.shrink();
     return SizedBox(
       height: 40,
@@ -2504,143 +1922,34 @@ class _ChatScreenState extends State<ChatScreen> {
   );
 
   Widget _input(AppThemeTokens t) {
-    final grad = LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [t.accent.primary, t.accent.secondary],
-    );
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         _chips(t),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          child: Container(
-            decoration: BoxDecoration(
-              color: t.phoneShellInner.withValues(alpha: 0.95),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: t.cardBorder, width: 1),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: () {
-                    showModalBottomSheet<void>(
-                      context: context,
-                      backgroundColor: Colors.transparent,
-                      builder: (_) => _LensActionSheet(t: t),
-                    );
-                  },
-                  child: SizedBox(
-                    width: 26,
-                    height: 26,
-                    child: Center(
-                      child: Icon(
-                        Icons.search_rounded,
-                        color: t.accent.primary,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _chatController,
-                    focusNode: _chatFocusNode,
-                    style: TextStyle(color: t.textPrimary, fontSize: 14.5),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      contentPadding: EdgeInsets.zero,
-                      border: InputBorder.none,
-                      hintText: 'Ask AHVI anything...',
-                      hintStyle: TextStyle(color: t.mutedText, fontSize: 14.5),
-                    ),
-                    onSubmitted: (v) {
-                      if (v.trim().isNotEmpty) {
-                        _sendMessage(v.trim());
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(width: 6),
-                // ── Voice Button ──────────────────────────────────────────
-                GestureDetector(
-                  onTap: _toggleListening,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOutCubic,
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      gradient: _isListening
-                          ? LinearGradient(
-                              colors: [
-                                Colors.redAccent,
-                                Colors.red.shade700,
-                              ],
-                            )
-                          : LinearGradient(
-                              colors: [
-                                t.accent.primary.withValues(alpha: 0.18),
-                                t.accent.secondary.withValues(alpha: 0.18),
-                              ],
-                            ),
-                      borderRadius: BorderRadius.circular(13),
-                      boxShadow: _isListening
-                          ? [
-                              BoxShadow(
-                                color: Colors.redAccent.withValues(alpha: 0.45),
-                                blurRadius: 16,
-                                offset: const Offset(0, 4),
-                              ),
-                            ]
-                          : [],
-                    ),
-                    child: _isListening
-                        ? const _PulsingMicIcon()
-                        : Icon(
-                            Icons.mic_none_rounded,
-                            color: t.accent.primary,
-                            size: 18,
-                          ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                GestureDetector(
-                  onTap: () => _sendMessage(),
-                  child: ValueListenableBuilder<TextEditingValue>(
-                    valueListenable: _chatController,
-                    builder: (context, value, _) {
-                      final hasText = value.text.trim().isNotEmpty;
-                      return AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        width: 38,
-                        height: 38,
-                        decoration: BoxDecoration(
-                          gradient: hasText
-                              ? grad
-                              : LinearGradient(
-                                  colors: [
-                                    t.accent.primary.withValues(alpha: 0.35),
-                                    t.accent.secondary.withValues(alpha: 0.35),
-                                  ],
-                                ),
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                        child: Icon(
-                          Icons.arrow_forward_rounded,
-                          color: Theme.of(context).colorScheme.onPrimary,
-                          size: 16,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
+        AhviChatPromptBar(
+          controller: _chatController,
+          focusNode: _chatFocusNode,
+          hintText: AppLocalizations.t(context, 'chat_hint'),
+          hasTextListenable: _chatController,
+          surface: t.phoneShellInner,
+          border: t.cardBorder,
+          accent: t.accent.primary,
+          accentSecondary: t.accent.secondary,
+          textHeading: t.textPrimary,
+          textMuted: t.mutedText,
+          shadowMedium: t.backgroundPrimary.withValues(alpha: 0.20),
+          onAccent: Colors.white,
+          themeTokens: t,
+          onVoiceTap: _toggleListening,
+          isListening: _isListening,
+          onSendMessage: (v) => _sendMessage(v),
+          // ── Lens sheet actions ──────────────────────────────────────
+          // TODO: implement Visual Search (image picker → AI search)
+          onVisualSearch: () {},
+          // TODO: implement Find Similar (wardrobe → similar items screen)
+          onFindSimilar: () {},
+          // TODO: implement Add to Wardrobe (image picker → wardrobe save)
+          onAddToWardrobe: () {},
         ),
         const SizedBox(height: 8),
       ],
@@ -2648,295 +1957,338 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
-class _LensActionSheet extends StatelessWidget {
+
+// ── Outfit Detail Page (Hero expand destination) ───────────────────────────
+
+class _OutfitDetailPage extends StatefulWidget {
+  final _Outfit outfit;
+  final String heroTag;
   final AppThemeTokens t;
-  const _LensActionSheet({required this.t});
+  final ValueChanged<bool> onSaveChanged;
 
-  @override
-  Widget build(BuildContext context) {
-      final t = context.themeTokens;
-    final accent = t.accent.primary;
-    final accentSecondary = t.accent.secondary;
-    final textHeading = t.textPrimary;
-    final textMuted = t.mutedText;
-    final panel = t.panel;
-    final surface = t.phoneShellInner;
-    final bgSecondary = t.backgroundSecondary;
-
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [surface, bgSecondary],
-        ),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border.all(color: accent.withValues(alpha: 0.15), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: 0.15),
-            blurRadius: 48,
-            offset: const Offset(0, -12),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // drag handle
-          Container(
-            width: 40,
-            height: 4,
-            margin: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.30),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          // header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: accent.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(9),
-                        border: Border.all(
-                          color: accent.withValues(alpha: 0.25),
-                          width: 1,
-                        ),
-                      ),
-                      child: Icon(Icons.search, color: accent, size: 17),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'AHVI Lens',
-                      style: TextStyle(
-                        color: textHeading,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-                GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: accent.withValues(alpha: 0.08),
-                      border: Border.all(
-                        color: accent.withValues(alpha: 0.20),
-                        width: 1,
-                      ),
-                    ),
-                    child: Icon(Icons.close, color: textMuted, size: 14),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // info card
-          Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: panel,
-              border: Border.all(color: accent.withValues(alpha: 0.15), width: 1),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: accent.withValues(alpha: 0.5),
-                      width: 2,
-                    ),
-                    color: accent.withValues(alpha: 0.08),
-                  ),
-                  child: Icon(Icons.circle, color: accent, size: 12),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Visual AI Search',
-                        style: TextStyle(
-                          color: textHeading,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Point at any item to find, save, or get styling advice.',
-                        style: TextStyle(
-                          color: textMuted,
-                          fontSize: 11.5,
-                          height: 1.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // options
-          _LensOptionTile(
-            icon: Icons.search,
-            name: 'Find Similar',
-            desc: 'Discover similar items with shopping links',
-            color: accent,
-            textHeading: textHeading,
-            textMuted: textMuted,
-            panel: panel,
-            accentBorder: accent,
-            onTap: () => Navigator.pop(context),
-          ),
-          _LensOptionTile(
-            icon: Icons.add_photo_alternate_outlined,
-            name: 'Add to Wardrobe',
-            desc: 'Save to your collection',
-            color: accentSecondary,
-            textHeading: textHeading,
-            textMuted: textMuted,
-            panel: panel,
-            accentBorder: accent,
-            onTap: () => Navigator.pop(context),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LensOptionTile extends StatefulWidget {
-  final IconData icon;
-  final String name;
-  final String desc;
-  final Color color;
-  final Color textHeading;
-  final Color textMuted;
-  final Color panel;
-  final Color accentBorder;
-  final VoidCallback onTap;
-
-  const _LensOptionTile({
-    required this.icon,
-    required this.name,
-    required this.desc,
-    required this.color,
-    required this.textHeading,
-    required this.textMuted,
-    required this.panel,
-    required this.accentBorder,
-    required this.onTap,
+  const _OutfitDetailPage({
+    required this.outfit,
+    required this.heroTag,
+    required this.t,
+    required this.onSaveChanged,
   });
 
   @override
-  State<_LensOptionTile> createState() => _LensOptionTileState();
+  State<_OutfitDetailPage> createState() => _OutfitDetailPageState();
 }
 
-class _LensOptionTileState extends State<_LensOptionTile> {
-  bool _hovered = false;
-  bool _pressed = false;
+class _OutfitDetailPageState extends State<_OutfitDetailPage>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _contentCtrl;
+  late Animation<double> _contentFade;
+  late Animation<Offset> _contentSlide;
+  late bool _saved;
+
+  @override
+  void initState() {
+    super.initState();
+    _saved = widget.outfit.saved;
+    _contentCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _contentFade = CurvedAnimation(
+      parent: _contentCtrl,
+      curve: const Interval(0.3, 1.0, curve: Curves.easeOut),
+    );
+    _contentSlide = Tween<Offset>(
+      begin: const Offset(0, 0.10),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _contentCtrl,
+      curve: const Interval(0.2, 1.0, curve: Cubic(0.16, 1.0, 0.3, 1.0)),
+    ));
+    Future.delayed(const Duration(milliseconds: 170), () {
+      if (mounted) _contentCtrl.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _contentCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-      final t = context.themeTokens;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() { _hovered = false; _pressed = false; }),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapUp: (_) => setState(() => _pressed = false),
-        onTapCancel: () => setState(() => _pressed = false),
-        child: AnimatedScale(
-          scale: _pressed ? 0.98 : 1.0,
-          duration: const Duration(milliseconds: 120),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: _hovered
-                  ? widget.color.withValues(alpha: 0.08)
-                  : widget.panel,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: _hovered
-                    ? widget.color.withValues(alpha: 0.30)
-                    : widget.accentBorder.withValues(alpha: 0.12),
-                width: 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: widget.color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: widget.color.withValues(alpha: 0.25),
-                      width: 1,
+    final t = widget.t;
+    final screenH = MediaQuery.of(context).size.height;
+    final screenW = MediaQuery.of(context).size.width;
+    final accent = t.accent.primary;
+    final accentTertiary = t.accent.tertiary;
+    final bg = t.backgroundPrimary;
+    final surface = t.phoneShellInner;
+    final onAccent = Theme.of(context).colorScheme.onPrimary;
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: GestureDetector(
+        onTap: () => Navigator.of(context).pop(),
+        child: Container(
+          color: bg.withValues(alpha: 0.82),
+          child: Center(
+            child: GestureDetector(
+              onTap: () {}, // prevent tap-through
+              child: Hero(
+                tag: widget.heroTag,
+                flightShuttleBuilder: (_, animation, __, ___, toCtx) =>
+                    AnimatedBuilder(
+                      animation: animation,
+                      builder: (_, __) => toCtx.widget,
+                    ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    width: screenW * 0.88,
+                    constraints: BoxConstraints(maxHeight: screenH * 0.82),
+                    decoration: BoxDecoration(
+                      color: surface,
+                      borderRadius: BorderRadius.circular(28),
+                      border: Border.all(
+                        color: accent.withValues(alpha: 0.22),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: bg.withValues(alpha: 0.50),
+                          blurRadius: 60,
+                          offset: const Offset(0, 20),
+                        ),
+                        BoxShadow(
+                          color: accent.withValues(alpha: 0.10),
+                          blurRadius: 30,
+                        ),
+                      ],
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // ── Large image ───────────────────────────────────
+                        SizedBox(
+                          height: screenH * 0.42,
+                          width: double.infinity,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.network(
+                                widget.outfit.image,
+                                fit: BoxFit.cover,
+                                alignment: Alignment.topCenter,
+                                errorBuilder: (_, __, ___) => Container(
+                                  color: accent.withValues(alpha: 0.10),
+                                  child: Icon(Icons.image_outlined,
+                                      color: t.mutedText, size: 48),
+                                ),
+                              ),
+                              // Bottom fade
+                              Positioned(
+                                left: 0, right: 0, bottom: 0, height: 80,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [Colors.transparent, surface],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              // Top shimmer line
+                              Positioned(
+                                top: 0, left: 0, right: 0, height: 1,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Colors.transparent,
+                                        accent.withValues(alpha: 0.55),
+                                        accentTertiary.withValues(alpha: 0.45),
+                                        Colors.transparent,
+                                      ],
+                                      stops: const [0.0, 0.35, 0.65, 1.0],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              // Close button
+                              Positioned(
+                                top: 14, right: 14,
+                                child: GestureDetector(
+                                  onTap: () => Navigator.of(context).pop(),
+                                  child: Container(
+                                    width: 32, height: 32,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: bg.withValues(alpha: 0.55),
+                                      border: Border.all(
+                                          color: t.cardBorder, width: 1),
+                                    ),
+                                    child: Icon(Icons.close_rounded,
+                                        color: t.textPrimary, size: 16),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // ── Content ───────────────────────────────────────
+                        FadeTransition(
+                          opacity: _contentFade,
+                          child: SlideTransition(
+                            position: _contentSlide,
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(22, 6, 22, 26),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Tags
+                                  Wrap(
+                                    spacing: 6,
+                                    children: widget.outfit.tags.map((tag) =>
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: accent.withValues(alpha: 0.10),
+                                          borderRadius:
+                                              BorderRadius.circular(100),
+                                          border: Border.all(
+                                              color: accent
+                                                  .withValues(alpha: 0.20)),
+                                        ),
+                                        child: Text(tag,
+                                          style: TextStyle(
+                                            color: accent,
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w600,
+                                          )),
+                                      ),
+                                    ).toList(),
+                                  ),
+                                  const SizedBox(height: 10),
+
+                                  // Name
+                                  Text(
+                                    widget.outfit.name,
+                                    style: TextStyle(
+                                      color: t.textPrimary,
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: -0.5,
+                                      height: 1.15,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+
+                                  // 2-line description
+                                  Text(
+                                    widget.outfit.description.isNotEmpty
+                                        ? widget.outfit.description
+                                        : 'A curated look styled just for you.',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: t.mutedText,
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w400,
+                                      height: 1.55,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 20),
+
+                                  // Save button
+                                  GestureDetector(
+                                    onTap: () {
+                                      setState(() => _saved = !_saved);
+                                      widget.onSaveChanged(_saved);
+                                      if (_saved) HapticFeedback.lightImpact();
+                                    },
+                                    child: AnimatedContainer(
+                                      duration:
+                                          const Duration(milliseconds: 260),
+                                      curve:
+                                          const Cubic(0.34, 1.56, 0.64, 1.0),
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 14),
+                                      decoration: BoxDecoration(
+                                        gradient: _saved
+                                            ? null
+                                            : LinearGradient(
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                                colors: [
+                                                  accent,
+                                                  accentTertiary,
+                                                ],
+                                              ),
+                                        color: _saved ? t.panel : null,
+                                        borderRadius:
+                                            BorderRadius.circular(16),
+                                        border: _saved
+                                            ? Border.all(
+                                                color: accent
+                                                    .withValues(alpha: 0.30),
+                                                width: 1)
+                                            : null,
+                                        boxShadow: _saved
+                                            ? []
+                                            : [
+                                                BoxShadow(
+                                                  color: accent
+                                                      .withValues(alpha: 0.30),
+                                                  blurRadius: 18,
+                                                  offset: const Offset(0, 6),
+                                                ),
+                                              ],
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            _saved
+                                                ? Icons.bookmark_rounded
+                                                : Icons.bookmark_border_rounded,
+                                            color: _saved ? accent : onAccent,
+                                            size: 18,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            _saved
+                                                ? 'Saved to Wardrobe'
+                                                : 'Save Outfit',
+                                            style: TextStyle(
+                                              color:
+                                                  _saved ? accent : onAccent,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w700,
+                                              letterSpacing: 0.1,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  child: Icon(widget.icon, color: widget.color, size: 18),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.name,
-                        style: TextStyle(
-                          color: widget.textHeading,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        widget.desc,
-                        style: TextStyle(
-                          color: widget.textMuted,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  transform: Matrix4.translationValues(
-                    _hovered ? 3.0 : 0.0, 0, 0,
-                  ),
-                  child: Icon(
-                    Icons.chevron_right_rounded,
-                    color: _hovered ? widget.color : widget.textMuted,
-                    size: 20,
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -2946,17 +2298,46 @@ class _LensOptionTileState extends State<_LensOptionTile> {
 }
 
 // ── Pulsing mic animation when listening ────────────────────────────────────
-class _PulsingMicIcon extends StatelessWidget {
+class _PulsingMicIcon extends StatefulWidget {
   const _PulsingMicIcon();
 
   @override
+  State<_PulsingMicIcon> createState() => _PulsingMicIconState();
+}
+
+class _PulsingMicIconState extends State<_PulsingMicIcon>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..repeat(reverse: true);
+    _scale = Tween<double>(begin: 0.85, end: 1.15).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Icon(
-      Icons.mic_rounded,
-      color: Colors.white,
-      size: 18,
+      final t = context.themeTokens;
+    return ScaleTransition(
+      scale: _scale,
+      child: const Icon(
+        Icons.mic_rounded,
+        color: Colors.white,
+        size: 18,
+      ),
     );
   }
 }
-
-

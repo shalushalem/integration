@@ -24,12 +24,12 @@ class _Screen2State extends State<Screen2> with TickerProviderStateMixin {
   final Set<String> selected = {'Casual', 'Minimalist'};
 
   final List<Map<String, String>> styles = [
-    {'label': 'Clean Minimal', 'img': 'assets/styles/clean_minimal.jpg'},
-    {'label': 'Soft Elegant',  'img': 'assets/styles/soft_elegant.jpg'},
-    {'label': 'Street Cool',   'img': 'assets/styles/street_cool.jpg'},
-    {'label': 'Boho Artisanal','img': 'assets/styles/boho_artisinal.jpeg'},
-    {'label': 'Party Glam',    'img': 'assets/styles/party_galm.jpg'},
-    {'label': 'Formal Chic',   'img': 'assets/styles/formal_chic.jpg'},
+    {'label': 'Clean Minimal', 'img': 'assets/styles/clean_minimal.png'},
+    {'label': 'Soft Elegant',  'img': 'assets/styles/soft_elegant.png'},
+    {'label': 'Street Cool',   'img': 'assets/styles/street_cool.png'},
+    {'label': 'Boho Artisanal','img': 'assets/styles/boho_artisinal.png'},
+    {'label': 'Party Glam',    'img': 'assets/styles/party_galm.png'},
+    {'label': 'Formal Chic',   'img': 'assets/styles/formal_chic.png'},
   ];
 
   @override
@@ -63,7 +63,7 @@ class _Screen2State extends State<Screen2> with TickerProviderStateMixin {
   }
 
   bool get _isValidSelection =>
-      selected.length >= 1;
+      selected.isNotEmpty;
 
   void _showValidationError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -91,7 +91,7 @@ class _Screen2State extends State<Screen2> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1A2D),
+      backgroundColor: const Color(0xFFEEF3FF),
       body: Stack(
         children: [
           Positioned.fill(child: CustomPaint(painter: _BgPainter())),
@@ -102,7 +102,6 @@ class _Screen2State extends State<Screen2> with TickerProviderStateMixin {
           SafeArea(
             child: Column(
               children: [
-                const _StatusBar(),
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(24, 0, 24, 48),
@@ -118,7 +117,7 @@ class _Screen2State extends State<Screen2> with TickerProviderStateMixin {
                           const Text(
                             'Choose styles that match your vibe ✨',
                             style: TextStyle(
-                              color: Color(0xB8E6EBFF),
+                              color: Color(0xFF66708A),
                               fontSize: 13,
                               fontWeight: FontWeight.w400,
                             ),
@@ -130,7 +129,7 @@ class _Screen2State extends State<Screen2> with TickerProviderStateMixin {
                           const Text(
                             'Tap to select multiple',
                             style: TextStyle(
-                              color: Color(0x80E6EBFF),
+                              color: Color(0x99667080),
                               fontSize: 10.5,
                             ),
                           ),
@@ -210,176 +209,25 @@ class _BgPainter extends CustomPainter {
       );
     }
 
-    r(Offset(w * .5, h * .32), w * .46, h * .30, const Color(0x0FF5F7FF));
+    r(Offset(w * .5, h * .32), w * .46, h * .30, const Color(0x0A1A1D26));
     r(Offset(w * -.14, h * -.08), w * .90, h * .68,
-        const Color(0x476B91FF));
+        const Color(0x206B91FF));
     r(Offset(w * 1.14, h * .32), w * .62, h * .52,
-        const Color(0x388D7DFF));
+        const Color(0x188D7DFF));
     r(Offset(w * 1.18, h * 1.12), w * .82, h * .68,
-        const Color(0x2E04D7C8));
-    r(Offset(w * .5, h * .92), w * .72, h * .52, const Color(0x24FF8EC7));
+        const Color(0x1204D7C8));
+    r(Offset(w * .5, h * .92), w * .72, h * .52, const Color(0x10FF8EC7));
     r(Offset(w * -.16, h * .72), w * .64, h * .74,
-        const Color(0xCC0F1A2D));
-    r(Offset(w * .04, h * 1.0), w * .52, h * .46, const Color(0x1F6B91FF));
+        const Color(0x40EEF3FF));
+    r(Offset(w * .04, h * 1.0), w * .52, h * .46, const Color(0x0F6B91FF));
     r(Offset(w * 1.02, h * .02), w * .44, h * .36,
-        const Color(0x1404D7C8));
-    r(Offset(w * .90, h * .58), w * .40, h * .34, const Color(0x0FFFD86E));
-    r(Offset(w * .5, h * 0), w * .50, h * .30, const Color(0x298D7DFF));
+        const Color(0x0A04D7C8));
+    r(Offset(w * .90, h * .58), w * .40, h * .34, const Color(0x08FFD86E));
+    r(Offset(w * .5, h * 0), w * .50, h * .30, const Color(0x148D7DFF));
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter old) => false;
-}
-
-// ─────────────────────────────────────────────────────────────
-// Status Bar
-// ─────────────────────────────────────────────────────────────
-
-class _StatusBar extends StatelessWidget {
-  const _StatusBar();
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 14, 32, 0),
-      child: SizedBox(
-        height: 42,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('9:41',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFFF5F7FF),
-                  letterSpacing: -0.013,
-                )),
-            Row(children: [
-              _SignalIcon(),
-              const SizedBox(width: 7),
-              _WifiIcon(),
-              const SizedBox(width: 7),
-              const _BatteryWidget(),
-            ]),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SignalIcon extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 17,
-      height: 12,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          _SBar(h: 5, op: 1.0),
-          const SizedBox(width: 1),
-          _SBar(h: 7.5, op: 1.0),
-          const SizedBox(width: 1),
-          _SBar(h: 10, op: 1.0),
-          const SizedBox(width: 1),
-          _SBar(h: 12, op: 0.28),
-        ],
-      ),
-    );
-  }
-}
-
-class _SBar extends StatelessWidget {
-  final double h, op;
-  const _SBar({required this.h, required this.op});
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 3,
-    height: h,
-    decoration: BoxDecoration(
-      color: const Color(0xFFF5F7FF).withValues(alpha: op),
-      borderRadius: BorderRadius.circular(0.8),
-    ),
-  );
-}
-
-class _WifiIcon extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => SizedBox(
-      width: 16, height: 12, child: CustomPaint(painter: _WifiP()));
-}
-
-class _WifiP extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size s) {
-    final p = Paint()
-      ..color = const Color(0xFFF5F7FF)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.6
-      ..strokeCap = StrokeCap.round;
-    canvas.drawPath(
-        Path()
-          ..moveTo(s.width * .0625, s.height * .375)
-          ..quadraticBezierTo(
-              s.width * .5, 0, s.width * .9375, s.height * .375),
-        p);
-    canvas.drawPath(
-        Path()
-          ..moveTo(s.width * .2, s.height * .567)
-          ..quadraticBezierTo(
-              s.width * .5, s.height * .25, s.width * .8, s.height * .567),
-        p);
-    canvas.drawPath(
-        Path()
-          ..moveTo(s.width * .344, s.height * .758)
-          ..quadraticBezierTo(s.width * .5, s.height * .6, s.width * .656,
-              s.height * .758),
-        p);
-    canvas.drawCircle(Offset(s.width * .5, s.height * .933), 0.9,
-        Paint()..color = const Color(0xFFF5F7FF));
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter old) => false;
-}
-
-class _BatteryWidget extends StatelessWidget {
-  const _BatteryWidget();
-  @override
-  Widget build(BuildContext context) {
-    return Row(children: [
-      Container(
-        width: 23,
-        height: 11.5,
-        decoration: BoxDecoration(
-          border: Border.all(color: const Color(0xFFF5F7FF), width: 1.5),
-          borderRadius: BorderRadius.circular(3.5),
-        ),
-        padding: const EdgeInsets.all(1.5),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: FractionallySizedBox(
-            widthFactor: 0.76,
-            child: Container(
-              decoration: BoxDecoration(
-                color: const Color(0xFFF5F7FF),
-                borderRadius: BorderRadius.circular(1.5),
-              ),
-            ),
-          ),
-        ),
-      ),
-      Container(
-        width: 2,
-        height: 5.5,
-        decoration: BoxDecoration(
-          color: const Color(0xFFF5F7FF),
-          borderRadius:
-          const BorderRadius.horizontal(right: Radius.circular(1)),
-        ),
-      ),
-    ]);
-  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -401,9 +249,9 @@ class _Header extends StatelessWidget {
             margin: const EdgeInsets.only(bottom: 16),
             padding: const EdgeInsets.fromLTRB(9, 5, 13, 5),
             decoration: BoxDecoration(
-              color: const Color(0x14FFFFFF),
+              color: const Color(0x1F8D7DFF),
               borderRadius: BorderRadius.circular(100),
-              border: Border.all(color: const Color(0x1FFFFFFF)),
+              border: Border.all(color: const Color(0x388D7DFF)),
               boxShadow: const [
                 BoxShadow(
                     color: Color(0x1F6B91FF),
@@ -454,7 +302,7 @@ class _Header extends StatelessWidget {
               style: TextStyle(
                 fontSize: 36,
                 fontWeight: FontWeight.w400,
-                color: Color(0xFFF5F7FF),
+                color: Color(0xFF1A1D26),
                 letterSpacing: -0.936,
                 height: 1.06,
               ),
@@ -477,7 +325,7 @@ class _Header extends StatelessWidget {
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w300,
-              color: Color(0xB8E6EBFF),
+              color: Color(0xFF66708A),
               height: 1.5,
             ),
           ),
@@ -497,9 +345,9 @@ class _TabBarWidget extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: const Color(0x14FFFFFF),
+        color: const Color(0xA8FFFFFF),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x1FFFFFFF)),
+        border: Border.all(color: const Color(0xFFE5E9F7)),
         boxShadow: const [
           BoxShadow(
               color: Color(0x1A6B91FF),
@@ -561,7 +409,7 @@ class _Tab extends StatelessWidget {
               isActive ? FontWeight.w600 : FontWeight.w500,
               color: isActive
                   ? const Color(0xFFF5F7FF)
-                  : const Color(0xB8E6EBFF),
+                  : const Color(0xFF66708A),
             )),
       ),
     );
@@ -665,7 +513,7 @@ class _StyleCard extends StatelessWidget {
             border: Border.all(
               color: isSelected
                   ? const Color(0xBF6B91FF)
-                  : const Color(0x1FFFFFFF),
+                  : const Color(0xFFE5E9F7),
               width: 2,
             ),
             boxShadow: isSelected
@@ -689,7 +537,7 @@ class _StyleCard extends StatelessWidget {
                 fit: BoxFit.cover,
                 alignment: Alignment.topCenter,
                 errorBuilder: (_, _, _) =>
-                    Container(color: const Color(0xFF192131)),
+                    Container(color: const Color(0xFFDFE7FB)),
               ),
             ),
             // Bottom gradient overlay
@@ -703,8 +551,8 @@ class _StyleCard extends StatelessWidget {
                     colors: [
                       Colors.transparent,
                       Colors.transparent,
-                      Color(0x8508111F),
-                      Color(0xEB08111F),
+                      Color(0x701A1D26),
+                      Color(0xD81A1D26),
                     ],
                   ),
                 ),
@@ -806,7 +654,7 @@ class _CtaSectionState extends State<_CtaSection>
   bool _continueBusy = false;
 
   bool get _isValidSelection =>
-      widget.selected.length >= 1;
+      widget.selected.isNotEmpty;
 
   void _showValidationError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -903,16 +751,16 @@ class _CtaSectionState extends State<_CtaSection>
             width: 54,
             height: 54,
             decoration: BoxDecoration(
-              color: const Color(0x1FFFFFFF),
+              color: const Color(0xA8FFFFFF),
               borderRadius: BorderRadius.circular(17),
-              border: Border.all(color: const Color(0x1FFFFFFF)),
+              border: Border.all(color: const Color(0xFFE5E9F7)),
               boxShadow: const [
                 BoxShadow(
-                    color: Color(0x6608111F),
+                    color: Color(0x14000000),
                     blurRadius: 26,
                     offset: Offset(0, 8)),
                 BoxShadow(
-                    color: Color(0x1AFFFFFF),
+                    color: Color(0x40FFFFFF),
                     blurRadius: 0,
                     offset: Offset(0, 1)),
               ],
@@ -1010,7 +858,7 @@ class _BackArrowP extends CustomPainter {
         ..lineTo(s.width * .333, s.height * .5)
         ..lineTo(s.width * .611, s.height * .778),
       Paint()
-        ..color = const Color(0xB8E6EBFF)
+        ..color = const Color(0xFF66708A)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.0
         ..strokeCap = StrokeCap.round

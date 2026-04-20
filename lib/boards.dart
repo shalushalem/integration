@@ -4,6 +4,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:myapp/app_localizations.dart';
 import 'package:myapp/calendar.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/daily_wear.dart' as daily_wear;
@@ -13,10 +14,11 @@ import 'package:myapp/occasion.dart'; // Handles Daily Wear, Office, Party, Vaca
 // ── Specific Board Imports ──
 import 'package:myapp/everything_else.dart' as everything_else;
 import 'package:myapp/home_and_utilities.dart' as home_utils;
-import 'package:myapp/bills_page.dart' as bills;
 import 'package:myapp/skincare.dart';
 import 'package:myapp/widgets/ahvi_home_text.dart';
 import 'package:myapp/diet_fitness.dart' as diet_fitness;
+import 'package:myapp/services/appwrite_service.dart';
+import 'package:provider/provider.dart';
 
 class ShellBackNavigationNotification extends Notification {
   const ShellBackNavigationNotification();
@@ -56,8 +58,8 @@ class CalendarCard extends StatefulWidget {
 }
 
 class _CalendarCardState extends State<CalendarCard> {
-  int _totalPlans = 0;
-  int _todayPlans = 0;
+  final int _totalPlans = 0;
+  final int _todayPlans = 0;
 
   void _openCalendar() {
     Navigator.push(
@@ -113,7 +115,7 @@ class _CalendarCardState extends State<CalendarCard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Schedule / Calendar',
+                        AppLocalizations.t(context, 'boards_schedule_calendar'),
                         style: TextStyle(
                           fontFamily: 'Inter',
                           fontSize: 15,
@@ -149,38 +151,6 @@ class _CalendarCardState extends State<CalendarCard> {
   }
 }
 
-class _NavyCard extends StatelessWidget {
-  final Widget child;
-  final Color borderColor;
-
-  const _NavyCard({
-    required this.child,
-    required this.borderColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        decoration: BoxDecoration(
-          color: context.themeTokens.card,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: context.themeTokens.cardBorder, width: 1.2),
-          boxShadow: [
-            BoxShadow(
-              color: context.themeTokens.backgroundSecondary.withValues(alpha: 0.6),
-              blurRadius: 32,
-              spreadRadius: 1,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        child: child,
-      ),
-    );
-  }
-}
 
 
 class _GlassCard extends StatelessWidget {
@@ -285,9 +255,10 @@ class _BoardsScreenState extends State<BoardsScreen>
   bool _isLifeTab = true;
   bool _hasStartedAnimations =
       false; // <-- FIX: Tracks if entry animations fired
-  final List<String> _customBoardNames = [];
-  final TextEditingController _createBoardController = TextEditingController();
-  final FocusNode _createBoardFocusNode = FocusNode();
+  bool _isLoadingDynamicBoards = true;
+  String? _dynamicBoardsError;
+  List<_DynamicBoardGroup> _lifeBoardGroups = const [];
+  List<_DynamicBoardGroup> _styleBoardGroups = const [];
 
   late final AnimationController _headerCtrl;
   late final Animation<double> _headerOpacity;
@@ -300,6 +271,45 @@ class _BoardsScreenState extends State<BoardsScreen>
   late final AnimationController _sectionCtrl;
   late final Animation<double> _sectionOpacity;
   late final Animation<Offset> _sectionSlide;
+
+  static const Set<String> _lifeCategoryKeys = <String>{
+    'daily wear',
+    'dailywear',
+    'home',
+    'home utilities',
+    'homeandutilities',
+    'skincare',
+    'diet fitness',
+    'diet and fitness',
+    'fitness',
+    'workout',
+    'health',
+    'med tracker',
+    'medicine',
+  };
+
+  static const List<List<Color>> _boardGradientPalette = <List<Color>>[
+    [Color(0xFFFFB08F), Color(0xFFFF8F72)],
+    [Color(0xFFFFE07E), Color(0xFFFFC956)],
+    [Color(0xFF9AF0D3), Color(0xFF58DCB0)],
+    [Color(0xFF9DCBFF), Color(0xFF77A8FF)],
+    [Color(0xFFD2B7FF), Color(0xFFA586FF)],
+    [Color(0xFFFFB7D4), Color(0xFFFF8FC4)],
+  ];
+
+  static const List<String> _defaultLifeCategories = <String>[
+    'Daily Wear',
+    'Home Utilities',
+    'Skincare',
+    'Diet Fitness',
+  ];
+
+  static const List<String> _defaultStyleCategories = <String>[
+    'Party',
+    'Office',
+    'Vacation',
+    'Occasion',
+  ];
 
   @override
   void initState() {
@@ -336,6 +346,7 @@ class _BoardsScreenState extends State<BoardsScreen>
         if (mounted) _sectionCtrl.forward();
       });
     });
+    _loadDynamicBoards();
   }
 
   @override
@@ -343,8 +354,6 @@ class _BoardsScreenState extends State<BoardsScreen>
     _headerCtrl.dispose();
     _toggleCtrl.dispose();
     _sectionCtrl.dispose();
-    _createBoardController.dispose();
-    _createBoardFocusNode.dispose();
     super.dispose();
   }
 
@@ -361,10 +370,13 @@ class _BoardsScreenState extends State<BoardsScreen>
     HapticFeedback.lightImpact();
     Navigator.of(context).push(
       PageRouteBuilder<void>(
+        opaque: false,
         transitionDuration: _A.slow,
         reverseTransitionDuration: _A.slow,
-        pageBuilder: (context, animation, secondary) => page,
+        pageBuilder: (_, __, ___) => page,
         transitionsBuilder: (context, animation, secondary, child) {
+          // `secondary` intentionally ignored — boards page stays fully
+          // visible behind the incoming screen with no fade-out.
           final curved = CurvedAnimation(
             parent: animation,
             curve: _A.pageEntry,
@@ -380,187 +392,172 @@ class _BoardsScreenState extends State<BoardsScreen>
             ),
           );
         },
+        maintainState: true,
       ),
     );
   }
 
-  void _openCreateBoardDialog() {
-    _createBoardController.clear();
-    showDialog(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.75),
-      builder: (ctx) => _CreateBoardDialog(
-        controller: _createBoardController,
-        focusNode: _createBoardFocusNode,
-        accent: _accent,
-        card: _card,
-        cardBorder: _cardBorder,
-        text: _text,
-        muted: _muted,
-        onSubmit: _submitCreateBoard,
-      ),
-    );
+  String _normalizeCategory(String value) {
+    return value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
   }
 
-  void _closeCreateBoardDialog() {
-    _createBoardFocusNode.unfocus();
-    Navigator.of(context, rootNavigator: true).maybePop();
-  }
-
-  void _submitCreateBoard() {
-    final trimmed = _createBoardController.text.trim();
-    if (trimmed.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a board name.')),
-      );
-      return;
+  bool _isLifeCategory(String category, {String? boardType}) {
+    final normalizedType = _normalizeCategory(boardType ?? '');
+    if (normalizedType == 'life' || normalizedType == 'life board') {
+      return true;
     }
-
-    final alreadyExists = _customBoardNames.any(
-      (name) => name.toLowerCase() == trimmed.toLowerCase(),
-    );
-    if (alreadyExists) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('That board already exists.')),
-      );
-      return;
+    if (normalizedType == 'style' || normalizedType == 'style board') {
+      return false;
     }
-
-    setState(() {
-      _customBoardNames.add(trimmed);
-    });
-    _createBoardFocusNode.unfocus();
-    _createBoardController.clear();
-    Navigator.of(context, rootNavigator: true).maybePop();
+    return _lifeCategoryKeys.contains(_normalizeCategory(category));
   }
 
-  void _deleteCustomBoard(String boardName) {
-    setState(() {
-      _customBoardNames.remove(boardName);
-    });
+  String _labelFromCategory(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return 'Uncategorized';
+    final words = trimmed.split(RegExp(r'\s+'));
+    return words
+        .map((word) =>
+            word.isEmpty ? word : '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}')
+        .join(' ');
   }
 
-  List<_BoardCardConfig> _predefinedBoardCards() {
-    return [
-      _BoardCardConfig(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFFB08F), Color(0xFFFF8F72)],
-        ),
-        shadowColor: const Color(0xFFFF8F72).withValues(alpha: 0.30),
-        iconBg: _panel,
-        icon: Icons.celebration_rounded,
-        title: 'Party Looks',
-        subtitle: 'Evening & cocktail',
-        onTap: () => _push(
-          const OccasionBoard(
-            occasion: 'Party',
-            title: 'Party Looks',
-            subtitle: 'Evening & cocktail',
-            emptyEmoji: '🎊',
-          ),
-        ),
-      ),
-      _BoardCardConfig(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFFE07E), Color(0xFFFFC956)],
-        ),
-        shadowColor: const Color(0xFFFFC956).withValues(alpha: 0.30),
-        iconBg: _panel,
-        icon: Icons.business_center_rounded,
-        title: 'Office Fits',
-        subtitle: 'Work-ready looks',
-        onTap: () => _push(
-          const OccasionBoard(
-            occasion: 'Office',
-            title: 'Office Fits',
-            subtitle: 'Work-ready looks',
-            emptyEmoji: '💼',
-          ),
-        ),
-      ),
-      _BoardCardConfig(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF9AF0D3), Color(0xFF58DCB0)],
-        ),
-        shadowColor: const Color(0xFF58DCB0).withValues(alpha: 0.25),
-        iconBg: _panel,
-        icon: Icons.beach_access_rounded,
-        title: 'Vacation',
-        subtitle: 'Travel outfits',
-        onTap: () => _push(
-          const OccasionBoard(
-            occasion: 'Vacation',
-            title: 'Vacation',
-            subtitle: 'Travel outfits',
-            emptyEmoji: '✈️',
-          ),
-        ),
-      ),
-      _BoardCardConfig(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF9DCBFF), Color(0xFF77A8FF)],
-        ),
-        shadowColor: const Color(0xFF77A8FF).withValues(alpha: 0.28),
-        iconBg: _card,
-        icon: Icons.auto_awesome_rounded,
-        title: 'Occasion',
-        subtitle: 'Special events',
-        onTap: () => _push(
-          const OccasionBoard(
-            occasion: 'Occasion',
-            title: 'Occasion',
-            subtitle: 'Special events',
-            emptyEmoji: '✨',
-          ),
-        ),
-      ),
-    ];
+  IconData _iconForCategory(String category, {required bool isLife}) {
+    final normalized = _normalizeCategory(category);
+    if (normalized.contains('party')) return Icons.celebration_rounded;
+    if (normalized.contains('office')) return Icons.business_center_rounded;
+    if (normalized.contains('vacation') || normalized.contains('travel')) {
+      return Icons.beach_access_rounded;
+    }
+    if (normalized.contains('daily')) return Icons.checkroom_rounded;
+    if (normalized.contains('home')) return Icons.home_rounded;
+    if (normalized.contains('skin')) return Icons.water_drop_rounded;
+    if (normalized.contains('diet') || normalized.contains('fitness') || normalized.contains('workout')) {
+      return Icons.monitor_heart_rounded;
+    }
+    return isLife ? Icons.auto_awesome_rounded : Icons.grid_view_rounded;
   }
 
-  List<_BoardCardConfig> _customBoardCards() {
-    const palette = [
-      [Color(0xFF8EC5FC), Color(0xFF5F8BFF)],
-      [Color(0xFFFFC58B), Color(0xFFFF9F68)],
-      [Color(0xFF9EE6C9), Color(0xFF58D7A8)],
-      [Color(0xFFD2B7FF), Color(0xFFA586FF)],
-      [Color(0xFFFFB7D4), Color(0xFFFF8FC4)],
-      [Color(0xFFF7E08B), Color(0xFFEBC85B)],
-    ];
+  Widget _pageForCategory(String category, {required bool isLife}) {
+    final normalized = _normalizeCategory(category);
+    if (isLife) {
+      if (normalized.contains('daily')) return const daily_wear.DailyWearScreen();
+      if (normalized.contains('home')) return const home_utils.HomeUtilitiesScreen();
+      if (normalized.contains('skin')) return const SkincareScreen();
+      if (normalized.contains('diet') || normalized.contains('fitness') || normalized.contains('workout')) {
+        return const diet_fitness.DietAndFitnessScreen();
+      }
+    }
+    return OccasionBoard(
+      occasion: category,
+      titleLabel: _labelFromCategory(category),
+      subtitleLabel: '${isLife ? 'Life' : 'Style'} board',
+      emptyEmoji: isLife ? '🌿' : '✨',
+    );
+  }
 
-    return _customBoardNames.asMap().entries.map((entry) {
-      final index = entry.key;
-      final boardName = entry.value;
-      final colors = palette[index % palette.length];
-      return _BoardCardConfig(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: colors,
+  _BoardCardConfig _toBoardCardConfig(_DynamicBoardGroup group, int index) {
+    final colors = _boardGradientPalette[index % _boardGradientPalette.length];
+    return _BoardCardConfig(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: colors,
+      ),
+      shadowColor: colors[1].withValues(alpha: 0.28),
+      iconBg: _panel,
+      icon: _iconForCategory(group.category, isLife: group.isLife),
+      title: group.label,
+      subtitle: '${group.count} saved looks',
+      onTap: () => _push(_pageForCategory(group.category, isLife: group.isLife)),
+    );
+  }
+
+  List<_DynamicBoardGroup> _mergedGroups({
+    required List<_DynamicBoardGroup> dynamicGroups,
+    required List<String> defaults,
+    required bool isLife,
+  }) {
+    final byKey = <String, _DynamicBoardGroup>{
+      for (final group in dynamicGroups) _normalizeCategory(group.category): group,
+    };
+    for (final category in defaults) {
+      final key = _normalizeCategory(category);
+      byKey.putIfAbsent(
+        key,
+        () => _DynamicBoardGroup(
+          category: category,
+          label: _labelFromCategory(category),
+          count: 0,
+          isLife: isLife,
         ),
-        shadowColor: colors[1].withValues(alpha: 0.28),
-        iconBg: _panel,
-        icon: Icons.dashboard_customize_rounded,
-        title: boardName,
-        subtitle: 'Custom board',
-        onTap: () => _push(
-          OccasionBoard(
-            occasion: 'Custom:$boardName',
-            title: boardName,
-            subtitle: 'Custom board',
-            emptyEmoji: '🧩',
-          ),
-        ),
-        onDelete: () => _deleteCustomBoard(boardName),
       );
-    }).toList();
+    }
+    final merged = byKey.values.toList();
+    merged.sort((a, b) {
+      final byCount = b.count.compareTo(a.count);
+      if (byCount != 0) return byCount;
+      return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+    });
+    return merged;
+  }
+
+  Future<void> _loadDynamicBoards() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingDynamicBoards = true;
+      _dynamicBoardsError = null;
+    });
+
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final docs = await appwrite.getAllSavedBoards();
+      final lifeMap = <String, _DynamicBoardGroup>{};
+      final styleMap = <String, _DynamicBoardGroup>{};
+
+      for (final doc in docs) {
+        final rawOccasion = (doc.data['occasion'] ?? doc.data['boardType'] ?? '').toString();
+        final normalized = _normalizeCategory(rawOccasion);
+        if (normalized.isEmpty) continue;
+        final boardType = (doc.data['boardType'] ?? doc.data['board_type'] ?? '').toString();
+        final isLife = _isLifeCategory(rawOccasion, boardType: boardType);
+        final targetMap = isLife ? lifeMap : styleMap;
+        final existing = targetMap[normalized];
+        if (existing == null) {
+          targetMap[normalized] = _DynamicBoardGroup(
+            category: rawOccasion.trim(),
+            label: _labelFromCategory(rawOccasion),
+            count: 1,
+            isLife: isLife,
+          );
+        } else {
+          targetMap[normalized] = existing.copyWith(count: existing.count + 1);
+        }
+      }
+
+      List<_DynamicBoardGroup> sortGroups(Map<String, _DynamicBoardGroup> source) {
+        final list = source.values.toList();
+        list.sort((a, b) {
+          final byCount = b.count.compareTo(a.count);
+          if (byCount != 0) return byCount;
+          return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+        });
+        return list;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _lifeBoardGroups = sortGroups(lifeMap);
+        _styleBoardGroups = sortGroups(styleMap);
+        _isLoadingDynamicBoards = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingDynamicBoards = false;
+        _dynamicBoardsError = AppLocalizations.t(context, 'error');
+      });
+    }
   }
 
   Widget _buildBoardCard(
@@ -698,9 +695,9 @@ class _BoardsScreenState extends State<BoardsScreen>
               slivers: [
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(
-                    _S.base,
-                    _S.xl,
-                    _S.base,
+                    20,
+                    _S.xs,
+                    20,
                     132,
                   ),
                   sliver: SliverList(
@@ -791,18 +788,25 @@ class _BoardsScreenState extends State<BoardsScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        AhviHomeText(color: _text),
-        const SizedBox(height: _S.sm),
+        Padding(
+          padding: const EdgeInsets.only(top: 10.0, bottom: 6.0),
+          child: AhviHomeText(
+            color: _text,
+            fontSize: 30.0,
+            letterSpacing: 3.2,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
         Row(
           children: [
             Text(
-              'Planner',
+              AppLocalizations.t(context, 'boards_planner'),
               style: TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 38,
+                fontSize: 28,
                 fontWeight: FontWeight.w700,
                 height: 1.0,
-                letterSpacing: -1.0,
+                letterSpacing: -0.8,
                 color: _text,
               ),
             ),
@@ -810,7 +814,7 @@ class _BoardsScreenState extends State<BoardsScreen>
         ),
         const SizedBox(height: _S.sm),
         Text(
-          'Your life, organised visually.',
+          AppLocalizations.t(context, 'boards_life_tagline'),
           style: TextStyle(
             fontFamily: 'Inter',
             fontSize: 14,
@@ -835,7 +839,7 @@ class _BoardsScreenState extends State<BoardsScreen>
         children: [
           Expanded(
             child: _ToggleButton(
-              label: 'Life',
+              label: AppLocalizations.t(context, 'boards_life'),
               icon: Icons.auto_awesome_rounded,
               isActive: _isLifeTab,
               activeShellColor: _text,
@@ -847,7 +851,7 @@ class _BoardsScreenState extends State<BoardsScreen>
           ),
           Expanded(
             child: _ToggleButton(
-              label: 'Boards',
+              label: AppLocalizations.t(context, 'boards_boards'),
               icon: Icons.grid_view_rounded,
               isActive: !_isLifeTab,
               activeShellColor: _text,
@@ -863,7 +867,16 @@ class _BoardsScreenState extends State<BoardsScreen>
   }
 
   Widget _buildLifeSection() {
-    const lifeContentColor = Colors.white;
+    final mergedLifeGroups = _mergedGroups(
+      dynamicGroups: _lifeBoardGroups,
+      defaults: _defaultLifeCategories,
+      isLife: true,
+    );
+    final lifeCards = mergedLifeGroups
+        .asMap()
+        .entries
+        .map((entry) => _toBoardCardConfig(entry.value, entry.key))
+        .toList();
 
     return Column(
       children: [
@@ -874,7 +887,7 @@ class _BoardsScreenState extends State<BoardsScreen>
             borderColor: _cardBorder,
             panelColor: _panel,
             panelBorder: _panelBorder,
-            textColor: lifeContentColor,
+            textColor: Colors.white,
             mutedColor: _muted,
             accent: const Color(0xFFB48EFF),
             accentSoft: const Color(0xFFD4B8FF),
@@ -883,196 +896,54 @@ class _BoardsScreenState extends State<BoardsScreen>
           ),
         ),
         const SizedBox(height: _S.md),
-
-        Row(
-          children: [
-            Expanded(
-              child: _StaggeredCard(
-                delay: const Duration(milliseconds: 170),
-                child: _VCard(
-                  fullWidth: false,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFFFFB08F), Color(0xFFFF8F72)],
-                  ),
-                  shadowColor: const Color(0xFFFF8F72).withValues(alpha: 0.30),
-                  badge: '12',
-                  badgeTextColor: _accent,
-                  badgeBg: _card,
-                  badgeBorderColor: _accent.withValues(alpha: 0.25),
-                  iconBg: _card,
-                  iconWidget: Icon(
-                    Icons.checkroom_rounded,
-                    size: 32,
-                    color: _cardIconColor,
-                  ),
-                  title: 'Daily Wear',
-                  titleColor: lifeContentColor,
-                  subtitle: "Today's outfits",
-                  subtitleColor: lifeContentColor,
-                  arrowBg: _card,
-                  arrowColor: _cardIconColor,
-                  shellColor: _shell,
-                  onTap: () => _push(
-                   const daily_wear.DailyWearScreen()
-                  ), // Or whatever your main class is named in daily_wear.dart
-                ),
-              ),
-            ),
-            const SizedBox(width: _S.md),
-            Expanded(
-              child: _StaggeredCard(
-                delay: const Duration(milliseconds: 240),
-                child: _VCard(
-                  fullWidth: false,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFFFFE07E), Color(0xFFFFC956)],
-                  ),
-                  shadowColor: const Color(0xFFFFC956).withValues(alpha: 0.30),
-                  badge: '5',
-                  badgeTextColor: _accent2,
-                  badgeBg: _card,
-                  badgeBorderColor: _accent2.withValues(alpha: 0.25),
-                  iconBg: _card,
-                  iconWidget: Icon(
-                    Icons.home_rounded,
-                    size: 32,
-                    color: _cardIconColor,
-                  ),
-                  title: 'Home / Utilities',
-                  titleColor: lifeContentColor,
-                  subtitle: 'Bills & stuff',
-                  subtitleColor: lifeContentColor,
-                  arrowBg: _card,
-                  arrowColor: _cardIconColor,
-                  shellColor: _shell,
-                  // <-- FIX: Now properly points to BillsScreen!
-                  onTap: () => _push(const home_utils.HomeUtilitiesScreen()),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: _S.md),
-        Row(
-          children: [
-            Expanded(
-              child: _StaggeredCard(
-                delay: const Duration(milliseconds: 310),
-                child: _VCard(
-                  fullWidth: false,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFFFFBFDC), Color(0xFFFF96C7)],
-                  ),
-                  shadowColor: const Color(0xFFFF96C7).withValues(alpha: 0.30),
-                  badge: 'AM · PM',
-                  badgeTextColor: _accent,
-                  badgeBg: _panelBorder,
-                  badgeBorderColor: _cardBorder,
-                  iconBg: _panel,
-                  iconWidget: Icon(
-                    Icons.water_drop_rounded,
-                    size: 32,
-                    color: _cardIconColor,
-                  ),
-                  title: 'Skincare',
-                  titleColor: lifeContentColor,
-                  subtitle: 'Morning & night routine',
-                  subtitleColor: lifeContentColor,
-                  arrowBg: _panel,
-                  arrowColor: _cardIconColor,
-                  shellColor: _shell,
-                  onTap: () => _push(const SkincareScreen()),
-                ),
-              ),
-            ),
-            const SizedBox(width: _S.md),
-            Expanded(
-              child: _StaggeredCard(
-                delay: const Duration(milliseconds: 380),
-                child: _VCard(
-                  fullWidth: false,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFF6EE7B7), Color(0xFF34D399)],
-                  ),
-                  shadowColor: const Color(0xFF34D399).withValues(alpha: 0.30),
-                  badge: 'Track',
-                  badgeTextColor: _accent,
-                  badgeBg: _panelBorder,
-                  badgeBorderColor: _cardBorder,
-                  iconBg: _panel,
-                  iconWidget: Icon(
-                    Icons.monitor_heart_rounded,
-                    size: 32,
-                    color: _cardIconColor,
-                  ),
-                  title: 'Diet & Fitness',
-                  titleColor: lifeContentColor,
-                  subtitle: 'Meals, workout & goals',
-                  subtitleColor: lifeContentColor,
-                  arrowBg: _panel,
-                  arrowColor: _cardIconColor,
-                  shellColor: _shell,
-                  onTap: () => _push(const diet_fitness.DietAndFitnessScreen()),
-                ),
-              ),
-            ),
-          ],
-        ),
+        if (_isLoadingDynamicBoards)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_dynamicBoardsError != null)
+          _InlineInfoCard(
+            message: _dynamicBoardsError!,
+            muted: _muted,
+            borderColor: _cardBorder,
+            panelColor: _panel,
+            onRetry: _loadDynamicBoards,
+          )
+        else
+          _buildTwoColumnBoardGrid(lifeCards, startDelayMs: 140),
       ],
     );
   }
 
   Widget _buildBoardsSection() {
-    final predefinedBoards = _predefinedBoardCards();
-    final customBoards = _customBoardCards();
+    final mergedStyleGroups = _mergedGroups(
+      dynamicGroups: _styleBoardGroups,
+      defaults: _defaultStyleCategories,
+      isLife: false,
+    );
+    final styleCards = mergedStyleGroups
+        .asMap()
+        .entries
+        .map((entry) => _toBoardCardConfig(entry.value, entry.key))
+        .toList();
 
     return Column(
       children: [
-        _StaggeredCard(
-          delay: const Duration(milliseconds: 180),
-          child: _VCard(
-            fullWidth: true,
-            minHeight: 92,
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFFC7B6FF), Color(0xFF9A84FF)],
-            ),
-            shadowColor: const Color(0xFF9A84FF).withValues(alpha: 0.28),
-            badge: null,
-            badgeTextColor: Colors.transparent,
-            badgeBg: Colors.transparent,
-            badgeBorderColor: Colors.transparent,
-            iconBg: _panel,
-            iconWidget: Icon(
-              Icons.add_circle_outline_rounded,
-              size: 28,
-              color: _cardIconColor,
-            ),
-            title: 'Create Your Own Board',
-            titleColor: Colors.white,
-            titleSize: 15,
-            subtitle: 'Name it and start building',
-            subtitleColor: Colors.white,
-            arrowBg: _panel,
-            arrowColor: _cardIconColor,
-            shellColor: _shell,
-            onTap: _openCreateBoardDialog,
-          ),
-        ),
-        const SizedBox(height: _S.md),
-        _buildTwoColumnBoardGrid(predefinedBoards, startDelayMs: 80),
-        const SizedBox(height: _S.md),
-        if (customBoards.isNotEmpty) ...[
-          _buildTwoColumnBoardGrid(customBoards, startDelayMs: 260),
+        if (_isLoadingDynamicBoards)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_dynamicBoardsError != null)
+          _InlineInfoCard(
+            message: _dynamicBoardsError!,
+            muted: _muted,
+            borderColor: _cardBorder,
+            panelColor: _panel,
+            onRetry: _loadDynamicBoards,
+          )
+        else ...[
+          _buildTwoColumnBoardGrid(styleCards, startDelayMs: 100),
           const SizedBox(height: _S.md),
         ],
         _StaggeredCard(
@@ -1085,7 +956,7 @@ class _BoardsScreenState extends State<BoardsScreen>
             iconColor: _cardIconColor,
             panelColor: _panel,
             shellColor: _shell,
-            onTap: () => _push(const everything_else.Screen4()),
+            onTap: () => _push(const everything_else.EverythingElseScreen()),
           ),
         ),
       ],
@@ -1113,6 +984,83 @@ class _BoardCardConfig {
     required this.onTap,
     this.onDelete,
   });
+}
+
+class _DynamicBoardGroup {
+  final String category;
+  final String label;
+  final int count;
+  final bool isLife;
+
+  const _DynamicBoardGroup({
+    required this.category,
+    required this.label,
+    required this.count,
+    required this.isLife,
+  });
+
+  _DynamicBoardGroup copyWith({
+    String? category,
+    String? label,
+    int? count,
+    bool? isLife,
+  }) {
+    return _DynamicBoardGroup(
+      category: category ?? this.category,
+      label: label ?? this.label,
+      count: count ?? this.count,
+      isLife: isLife ?? this.isLife,
+    );
+  }
+}
+
+class _InlineInfoCard extends StatelessWidget {
+  final String message;
+  final Color muted;
+  final Color borderColor;
+  final Color panelColor;
+  final VoidCallback onRetry;
+
+  const _InlineInfoCard({
+    required this.message,
+    required this.muted,
+    required this.borderColor,
+    required this.panelColor,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+      decoration: BoxDecoration(
+        color: panelColor.withValues(alpha: 0.78),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: borderColor, width: 1),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: muted,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          TextButton(
+            onPressed: onRetry,
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ToggleButton extends StatefulWidget {
@@ -1588,7 +1536,7 @@ class _EverythingElseCardState extends State<_EverythingElseCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Everything Else',
+                      AppLocalizations.t(context, 'boards_everything_else'),
                       style: TextStyle(
                         fontFamily: 'Inter',
                         fontSize: 16,
@@ -1599,7 +1547,7 @@ class _EverythingElseCardState extends State<_EverythingElseCard> {
                     ),
                     const SizedBox(height: _S.xs - 1),
                     Text(
-                      'Outfits for other events',
+                      AppLocalizations.t(context, 'boards_everything_else_sub'),
                       style: TextStyle(
                         fontFamily: 'Inter',
                         fontSize: 11.5,
@@ -1696,6 +1644,7 @@ class _StaggeredCardState extends State<_StaggeredCard>
 class _HoverPressButton extends StatefulWidget {
   final Widget child;
   final VoidCallback onTap;
+  // ignore: unused_element_parameter
   final double hoverScale;
   final double pressScale;
 
@@ -1788,7 +1737,7 @@ class _CreateBoardDialog extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Create Your Own Board',
+                AppLocalizations.t(context, 'boards_create_own'),
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 18,
@@ -1798,7 +1747,7 @@ class _CreateBoardDialog extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                'Name it and start building',
+                AppLocalizations.t(context, 'boards_create_own_sub'),
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 13,
@@ -1814,9 +1763,9 @@ class _CreateBoardDialog extends StatelessWidget {
                 onSubmitted: (_) => onSubmit(),
                 style: TextStyle(fontFamily: 'Inter', fontSize: 14, color: text),
                 decoration: InputDecoration(
-                  labelText: 'Name It',
+                  labelText: AppLocalizations.t(context, 'boards_name_it'),
                   labelStyle: TextStyle(fontFamily: 'Inter', color: muted, fontSize: 13),
-                  hintText: 'Enter board name',
+                  hintText: AppLocalizations.t(context, 'boards_enter_name'),
                   hintStyle: TextStyle(fontFamily: 'Inter', color: muted),
                   filled: true,
                   fillColor: inputFill,
@@ -1841,7 +1790,7 @@ class _CreateBoardDialog extends StatelessWidget {
                   TextButton(
                     onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
                     child: Text(
-                      'Cancel',
+                      AppLocalizations.t(context, 'common_cancel'),
                       style: TextStyle(
                         fontFamily: 'Inter',
                         color: muted,
@@ -1858,9 +1807,9 @@ class _CreateBoardDialog extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                     ),
                     onPressed: onSubmit,
-                    child: const Text(
-                      'Create',
-                      style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600),
+                    child: Text(
+                      AppLocalizations.t(context, 'common_create'),
+                      style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],

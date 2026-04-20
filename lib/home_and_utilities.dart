@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:myapp/app_localizations.dart';
 import 'package:myapp/medi_tracker.dart' as medi_tracker;
 import 'package:myapp/bills_page.dart' as bills;
 import 'package:myapp/contacts.dart' as contacts;
 import 'package:myapp/theme/theme_tokens.dart';
-import 'package:myapp/widgets/ahvi_lens_sheet.dart';
 
 // ─────────────────────────────────────────────
 //  CUSTOM PAINTERS (unchanged from original)
@@ -128,8 +128,6 @@ class _HomeUtilitiesScreenState extends State<HomeUtilitiesScreen>
             ),
             child: _buildTabBar(t),
           ),
-
-          // ── Tab content ──
           Expanded(
             child: IndexedStack(
               index: _tabController.index,
@@ -152,7 +150,7 @@ class _HomeUtilitiesScreenState extends State<HomeUtilitiesScreen>
         20,
         MediaQuery.of(context).padding.top + 8,
         20,
-        14,
+        8,
       ),
       child: Row(
         children: [
@@ -174,23 +172,23 @@ class _HomeUtilitiesScreenState extends State<HomeUtilitiesScreen>
             text: TextSpan(
               children: [
                 TextSpan(
-                  text: 'Home & ',
+                  text: AppLocalizations.t(context, 'home_title_bold'),
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
                     color: t.textPrimary,
-                    letterSpacing: -0.3,
+                    letterSpacing: -0.4,
                   ),
                 ),
                 TextSpan(
-                  text: 'Utilities',
+                  text: AppLocalizations.t(context, 'home_title_light'),
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 17,
-                    fontWeight: FontWeight.w300,
-                    color: t.accent.primary,
-                    letterSpacing: -0.3,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: t.textPrimary,
+                    letterSpacing: -0.4,
                   ),
                 ),
               ],
@@ -204,9 +202,10 @@ class _HomeUtilitiesScreenState extends State<HomeUtilitiesScreen>
 
   // ── Tab bar ──
   Widget _buildTabBar(AppThemeTokens t) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      padding: const EdgeInsets.all(4),
+    return ClipRect(
+      child: Container(
+      margin: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: t.panel,
         borderRadius: BorderRadius.circular(14),
@@ -214,6 +213,9 @@ class _HomeUtilitiesScreenState extends State<HomeUtilitiesScreen>
       ),
       child: TabBar(
         controller: _tabController,
+        padding: EdgeInsets.zero,
+        splashFactory: NoSplash.splashFactory,
+        overlayColor: WidgetStateProperty.all(Colors.transparent),
         indicator: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -246,11 +248,12 @@ class _HomeUtilitiesScreenState extends State<HomeUtilitiesScreen>
           fontWeight: FontWeight.w500,
           fontSize: 13,
         ),
-        tabs: const [
-          Tab(text: 'Medi'),
-          Tab(text: 'Bills'),
-          Tab(text: 'Contacts'),
+        tabs: [
+          Tab(text: AppLocalizations.t(context, 'home_tab_medi')),
+          Tab(text: AppLocalizations.t(context, 'home_tab_bills')),
+          Tab(text: AppLocalizations.t(context, 'home_tab_contacts')),
         ],
+      ),
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; 
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:myapp/boards.dart';
 import 'package:myapp/home.dart' as home;
 import 'package:myapp/onboarding1.dart';
@@ -25,6 +26,7 @@ import 'package:myapp/theme/theme_controller.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/services/appwrite_service.dart'; 
 import 'package:myapp/services/backend_service.dart'; // <-- Added Backend Service
+import 'package:myapp/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 Future<void> main() async {
@@ -72,6 +74,25 @@ abstract final class _A {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
+  Locale _langToLocale(String lang) {
+    const map = <String, String>{
+      'English': 'en',
+      'Hindi': 'hi',
+      'Tamil': 'ta',
+      'Telugu': 'te',
+      'Kannada': 'kn',
+      'Malayalam': 'ml',
+      'Bengali': 'bn',
+      'Marathi': 'mr',
+      'French': 'fr',
+      'Spanish': 'es',
+      'German': 'de',
+      'Arabic': 'ar',
+      'Japanese': 'ja',
+    };
+    return Locale(map[lang] ?? 'en');
+  }
+
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
@@ -93,8 +114,8 @@ class MyApp extends StatelessWidget {
           )..setAuthToken(previous?.authToken),
         ),
       ],
-      child: Consumer<ThemeController>(
-        builder: (context, controller, child) {
+      child: Consumer2<ThemeController, ProfileController>(
+        builder: (context, controller, profileCtrl, child) {
           final accent     = getAccentPalette(controller.currentTheme);
           final lightTokens = AppThemeTokens.light(accent);
           final darkTokens  = AppThemeTokens.dark(accent);
@@ -120,6 +141,28 @@ class MyApp extends StatelessWidget {
             darkTheme: darkTheme,
             themeMode:
             controller.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+            locale: _langToLocale(profileCtrl.state.lang),
+            supportedLocales: const [
+              Locale('en'),
+              Locale('hi'),
+              Locale('ta'),
+              Locale('te'),
+              Locale('kn'),
+              Locale('ml'),
+              Locale('bn'),
+              Locale('mr'),
+              Locale('fr'),
+              Locale('es'),
+              Locale('de'),
+              Locale('ar'),
+              Locale('ja'),
+            ],
+            localizationsDelegates: [
+              AppLocalizationsDelegate(),
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
             
             // Uses AuthWrapper to check session on startup
             home: const AuthWrapper(),
@@ -948,8 +991,11 @@ class _HomePageHost extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const ClipRect(
-      child: home.Screen4(),
+    return ClipRect(
+      child: home.Screen4(
+        // Render Home inside shell-mode to avoid drawing a second bottom nav.
+        onShellNavTap: (_) {},
+      ),
     );
   }
 }

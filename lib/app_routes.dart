@@ -1,4 +1,5 @@
 class AppRoutes {
+  static const String splash   = '/';
   static const String intro = '/intro';
   static const String signin = '/signin';
   static const String emailAuth = '/email-auth';
@@ -14,4 +15,5 @@ class AppRoutes {
   static const String wardrobe = '/wardrobe';
   static const String calendar = '/calendar';
   static const String boards = '/boards';
+  static const String mealPlanner = '/meal-planner';
 }

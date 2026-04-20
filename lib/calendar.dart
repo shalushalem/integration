@@ -1,24 +1,20 @@
-import 'dart:async';
-import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:myapp/services/appwrite_service.dart';
-import 'package:myapp/services/backend_service.dart';
+import 'package:myapp/app_localizations.dart';
 import 'package:myapp/theme/theme_tokens.dart';
-import 'package:provider/provider.dart';
 
 void main() {
   runApp(const ScheduleApp());
 }
 
 class ScheduleApp extends StatelessWidget {
-  const ScheduleApp({Key? key}) : super(key: key);
+  const ScheduleApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      title: 'Schedule / Calendar',
+    return MaterialApp(
+      title: AppLocalizations.t(context, 'boards_schedule_calendar'),
       debugShowCheckedModeBanner: false,
-      home: CalendarShell(),
+      home: const CalendarShell(),
     );
   }
 }
@@ -27,106 +23,42 @@ class ScheduleApp extends StatelessWidget {
 // MODELS
 // ==========================================
 class PlanItem {
-  String? id;
   final String occasion;
   final IconData icon;
   final String colorTheme;
   final String time;
   final String outfit;
-  final DateTime dateTime;
   bool hasReminder;
 
   PlanItem({
-    this.id,
     required this.occasion,
     required this.icon,
     this.colorTheme = 'orange',
     this.time = '',
     this.outfit = '',
-    DateTime? dateTime,
     this.hasReminder = true,
-  }) : dateTime = dateTime ?? DateTime.now();
-}
-
-class _OccasionOption {
-  final String name;
-  final IconData icon;
-
-  const _OccasionOption({
-    required this.name,
-    required this.icon,
   });
 }
 
-const List<_OccasionOption> _fallbackOccasionOptions = [
-  _OccasionOption(name: 'Gym', icon: Icons.fitness_center),
-  _OccasionOption(name: 'Office', icon: Icons.work_outline),
-  _OccasionOption(name: 'Party', icon: Icons.celebration),
-  _OccasionOption(name: 'Shopping', icon: Icons.shopping_bag_outlined),
-  _OccasionOption(name: 'Study', icon: Icons.menu_book),
-  _OccasionOption(name: 'Travel', icon: Icons.flight_takeoff),
-  _OccasionOption(name: 'Event', icon: Icons.event),
-  _OccasionOption(name: 'Date Night', icon: Icons.favorite_border),
-];
+class OutfitIdea {
+  final String vibe;
+  final String desc;
+  final String tip;
+  final String summary;
 
-String _dateKey(DateTime date) => '${date.year}-${date.month}-${date.day}';
-
-String _colorThemeForOccasion(String occasion) {
-  final text = occasion.toLowerCase();
-  if (text.contains('office') ||
-      text.contains('work') ||
-      text.contains('study') ||
-      text.contains('travel')) {
-    return 'blue';
-  }
-  if (text.contains('party') ||
-      text.contains('date') ||
-      text.contains('event') ||
-      text.contains('wedding')) {
-    return 'pink';
-  }
-  return 'orange';
-}
-
-IconData _iconForOccasion(String occasion) {
-  final text = occasion.toLowerCase();
-  if (text.contains('gym') || text.contains('workout')) {
-    return Icons.fitness_center;
-  }
-  if (text.contains('office') || text.contains('work')) {
-    return Icons.work_outline;
-  }
-  if (text.contains('party')) {
-    return Icons.celebration;
-  }
-  if (text.contains('shopping')) {
-    return Icons.shopping_bag_outlined;
-  }
-  if (text.contains('study') || text.contains('exam')) {
-    return Icons.menu_book;
-  }
-  if (text.contains('travel') || text.contains('trip') || text.contains('vacation')) {
-    return Icons.flight_takeoff;
-  }
-  if (text.contains('date')) {
-    return Icons.favorite_border;
-  }
-  return Icons.event;
-}
-
-String _formatPlanTime(DateTime dateTime) {
-  final tod = TimeOfDay.fromDateTime(dateTime);
-  final hour = tod.hourOfPeriod == 0 ? 12 : tod.hourOfPeriod;
-  final minute = tod.minute.toString().padLeft(2, '0');
-  final suffix = tod.period == DayPeriod.am ? 'AM' : 'PM';
-  return '$hour:$minute $suffix';
+  OutfitIdea({
+    required this.vibe,
+    required this.desc,
+    required this.tip,
+    required this.summary,
+  });
 }
 
 // ==========================================
 // MAIN SHELL
 // ==========================================
 class CalendarShell extends StatefulWidget {
-  const CalendarShell({Key? key}) : super(key: key);
+  const CalendarShell({super.key});
 
   @override
   State<CalendarShell> createState() => _CalendarShellState();
@@ -135,152 +67,16 @@ class CalendarShell extends StatefulWidget {
 class _CalendarShellState extends State<CalendarShell> {
   DateTime _currentMonth = DateTime.now();
   DateTime _selectedDate = DateTime.now();
-
-  Map<String, List<PlanItem>> _plansData = <String, List<PlanItem>>{};
-  List<_OccasionOption> _occasionOptions = _fallbackOccasionOptions;
-  bool _isLoadingPlans = true;
-
+  
+  final Map<String, List<PlanItem>> _plansData = {};
+  
   bool _isChatOpen = false;
   String _activeOccasion = 'Gym';
   IconData _activeIcon = Icons.fitness_center;
 
   // Helper formats
-  String get _selectedDateKey => _dateKey(_selectedDate);
-  String get _todayKey => _dateKey(DateTime.now());
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPlansFromBackend();
-  }
-
-  DateTime? _parseDateTime(dynamic value) {
-    if (value is DateTime) return value.toLocal();
-    if (value is int) {
-      return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true).toLocal();
-    }
-    if (value is String && value.trim().isNotEmpty) {
-      try {
-        return DateTime.parse(value).toLocal();
-      } catch (_) {
-        return null;
-      }
-    }
-    return null;
-  }
-
-  bool _toBool(dynamic value, {bool fallback = true}) {
-    if (value is bool) return value;
-    if (value is num) return value != 0;
-    if (value is String) {
-      final text = value.trim().toLowerCase();
-      if (text == 'true' || text == '1' || text == 'yes') return true;
-      if (text == 'false' || text == '0' || text == 'no') return false;
-    }
-    return fallback;
-  }
-
-  List<_OccasionOption> _buildDynamicOccasionOptions(Set<String> source) {
-    final normalized = source
-        .map((name) => name.trim())
-        .where((name) => name.isNotEmpty)
-        .toSet();
-    if (normalized.isEmpty) return _fallbackOccasionOptions;
-
-    final options = <_OccasionOption>[];
-    final seen = <String>{};
-
-    for (final item in _fallbackOccasionOptions) {
-      final match = normalized.firstWhere(
-        (name) => name.toLowerCase() == item.name.toLowerCase(),
-        orElse: () => '',
-      );
-      if (match.isNotEmpty) {
-        options.add(_OccasionOption(name: match, icon: item.icon));
-        seen.add(match.toLowerCase());
-      }
-    }
-
-    final extras = normalized.toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    for (final name in extras) {
-      final key = name.toLowerCase();
-      if (seen.contains(key)) continue;
-      options.add(_OccasionOption(name: name, icon: _iconForOccasion(name)));
-      seen.add(key);
-    }
-
-    return options.isEmpty ? _fallbackOccasionOptions : options;
-  }
-
-  void _insertPlanLocally(PlanItem plan) {
-    final key = _dateKey(plan.dateTime);
-    _plansData.putIfAbsent(key, () => <PlanItem>[]);
-    _plansData[key]!.add(plan);
-    _plansData[key]!.sort((a, b) => a.dateTime.compareTo(b.dateTime));
-  }
-
-  PlanItem? _planFromDoc(ProxyDocument doc) {
-    final data = doc.data;
-    final dateTime = _parseDateTime(
-      data['dateTime'] ?? data['date_time'] ?? data['datetime'],
-    );
-    if (dateTime == null) return null;
-
-    final occasionRaw = (data['occasion'] ?? data['title'] ?? 'Event').toString();
-    final occasion = occasionRaw.trim().isEmpty ? 'Event' : occasionRaw.trim();
-    final outfit = (data['outfitDescription'] ?? data['outfit'] ?? '').toString().trim();
-    final storedTime = (data['time'] ?? '').toString().trim();
-
-    return PlanItem(
-      id: doc.$id,
-      occasion: occasion,
-      icon: _iconForOccasion(occasion),
-      colorTheme: _colorThemeForOccasion(occasion),
-      time: storedTime.isEmpty ? _formatPlanTime(dateTime) : storedTime,
-      outfit: outfit,
-      hasReminder: _toBool(data['reminder'], fallback: true),
-      dateTime: dateTime,
-    );
-  }
-
-  Future<void> _loadPlansFromBackend() async {
-    final appwrite = context.read<AppwriteService>();
-    try {
-      final docs = await appwrite.getUserPlans();
-      final loaded = <String, List<PlanItem>>{};
-      final occasionSet = <String>{};
-
-      for (final doc in docs) {
-        final parsed = _planFromDoc(doc);
-        if (parsed == null) continue;
-        final key = _dateKey(parsed.dateTime);
-        loaded.putIfAbsent(key, () => <PlanItem>[]).add(parsed);
-        occasionSet.add(parsed.occasion);
-      }
-      for (final list in loaded.values) {
-        list.sort((a, b) => a.dateTime.compareTo(b.dateTime));
-      }
-
-      if (!mounted) return;
-      final options = _buildDynamicOccasionOptions(occasionSet);
-      setState(() {
-        _plansData = loaded;
-        _occasionOptions = options;
-        _activeOccasion = options.first.name;
-        _activeIcon = options.first.icon;
-        _isLoadingPlans = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _occasionOptions = _fallbackOccasionOptions;
-        _activeOccasion = _fallbackOccasionOptions.first.name;
-        _activeIcon = _fallbackOccasionOptions.first.icon;
-        _isLoadingPlans = false;
-      });
-    }
-  }
+  String get _selectedDateKey => "${_selectedDate.year}-${_selectedDate.month}-${_selectedDate.day}";
+  String get _todayKey => "${DateTime.now().year}-${DateTime.now().month}-${DateTime.now().day}";
 
   void _changeMonth(int increment) {
     setState(() {
@@ -290,112 +86,23 @@ class _CalendarShellState extends State<CalendarShell> {
 
   void _addPlan(PlanItem plan) {
     setState(() {
-      _insertPlanLocally(plan);
-      final hasOccasion = _occasionOptions.any(
-        (opt) => opt.name.toLowerCase() == plan.occasion.toLowerCase(),
-      );
-      if (!hasOccasion) {
-        _occasionOptions = [
-          ..._occasionOptions,
-          _OccasionOption(name: plan.occasion, icon: _iconForOccasion(plan.occasion)),
-        ];
+      if (!_plansData.containsKey(_selectedDateKey)) {
+        _plansData[_selectedDateKey] = [];
       }
+      _plansData[_selectedDateKey]!.add(plan);
     });
-
-    unawaited(_persistPlan(plan));
-  }
-
-  Future<void> _persistPlan(PlanItem plan) async {
-    final appwrite = context.read<AppwriteService>();
-    try {
-      final doc = await appwrite.createPlan({
-        'occasion': plan.occasion,
-        'outfitDescription': plan.outfit,
-        'dateTime': plan.dateTime.toUtc().toIso8601String(),
-        'time': plan.time,
-        'reminder': plan.hasReminder,
-      });
-      if (!mounted) return;
-      setState(() {
-        plan.id = doc.$id;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Saved locally. Cloud sync failed.'),
-          backgroundColor: context.themeTokens.backgroundSecondary,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
   }
 
   void _removePlan(int index) {
-    unawaited(_removePlanAsync(index));
-  }
-
-  Future<void> _removePlanAsync(int index) async {
-    final list = _plansData[_selectedDateKey];
-    if (list == null || index < 0 || index >= list.length) return;
-
-    final removed = list[index];
     setState(() {
-      list.removeAt(index);
-      if (list.isEmpty) {
-        _plansData.remove(_selectedDateKey);
-      }
+      _plansData[_selectedDateKey]?.removeAt(index);
     });
-
-    final removedId = removed.id;
-    if (removedId == null || removedId.isEmpty) return;
-    final appwrite = context.read<AppwriteService>();
-    try {
-      await appwrite.deletePlan(removedId);
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Plan removed locally. Cloud delete failed.'),
-          backgroundColor: context.themeTokens.backgroundSecondary,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
   }
 
   void _toggleReminder(int index) {
-    unawaited(_toggleReminderAsync(index));
-  }
-
-  Future<void> _toggleReminderAsync(int index) async {
-    final list = _plansData[_selectedDateKey];
-    if (list == null || index < 0 || index >= list.length) return;
-
-    final plan = list[index];
-    final previous = plan.hasReminder;
     setState(() {
-      plan.hasReminder = !plan.hasReminder;
+      _plansData[_selectedDateKey]![index].hasReminder = !_plansData[_selectedDateKey]![index].hasReminder;
     });
-
-    final planId = plan.id;
-    if (planId == null || planId.isEmpty) return;
-    final appwrite = context.read<AppwriteService>();
-    try {
-      await appwrite.updatePlanReminder(planId, plan.hasReminder);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        plan.hasReminder = previous;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Reminder update failed.'),
-          backgroundColor: context.themeTokens.backgroundSecondary,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
   }
 
   void _openChat(String occasion, IconData icon) {
@@ -434,35 +141,14 @@ class _CalendarShellState extends State<CalendarShell> {
                           icon: _activeIcon,
                           onBack: _closeChat,
                           onSavePlan: (time, outfit) {
-                            final mergedDate = DateTime(
-                              _selectedDate.year,
-                              _selectedDate.month,
-                              _selectedDate.day,
-                              time.hour,
-                              time.minute,
-                            );
                             _addPlan(PlanItem(
                               occasion: _activeOccasion,
                               icon: _activeIcon,
-                              time: _formatPlanTime(mergedDate),
+                              time: time,
                               outfit: outfit,
-                              colorTheme: _colorThemeForOccasion(_activeOccasion),
-                              hasReminder: true,
-                              dateTime: mergedDate,
+                              colorTheme: ['orange', 'blue', 'pink'][DateTime.now().millisecond % 3], // Random theme
                             ));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Plan saved to calendar!',
-                                  style: TextStyle(
-                                    color: context.themeTokens.textPrimary,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                backgroundColor: context.themeTokens.backgroundSecondary,
-                                duration: const Duration(seconds: 2),
-                              ),
-                            );
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(AppLocalizations.t(context, 'calendar_plan_saved'), style: TextStyle(color: context.themeTokens.textPrimary, fontWeight: FontWeight.w600)), backgroundColor: context.themeTokens.backgroundSecondary, duration: const Duration(seconds: 2)));
                           },
                         )
                       : MainCalendarView(
@@ -473,7 +159,6 @@ class _CalendarShellState extends State<CalendarShell> {
                           selectedDateKey: _selectedDateKey,
                           plans: _plansData[_selectedDateKey] ?? [],
                           allPlansData: _plansData,
-                          isLoading: _isLoadingPlans,
                           onMonthChanged: _changeMonth,
                           onDaySelected: (date) {
                             setState(() {
@@ -486,7 +171,7 @@ class _CalendarShellState extends State<CalendarShell> {
                               isScrollControlled: true,
                               backgroundColor: Colors.transparent,
                               builder: (ctx) => AddPlanModal(
-                                options: _occasionOptions,
+                                onPlanSaved: _addPlan,
                                 onChatOpened: (occ, emo) {
                                   Navigator.pop(ctx);
                                   _openChat(occ, emo);
@@ -511,7 +196,7 @@ class _CalendarShellState extends State<CalendarShell> {
 // BACKGROUND EFFECTS
 // ==========================================
 class BackgroundScene extends StatefulWidget {
-  const BackgroundScene({Key? key}) : super(key: key);
+  const BackgroundScene({super.key});
 
   @override
   State<BackgroundScene> createState() => _BackgroundSceneState();
@@ -550,17 +235,17 @@ class _BackgroundSceneState extends State<BackgroundScene> with SingleTickerProv
             Positioned(
               top: -100 + (_ctrl.value * 40),
               left: -140 + (_ctrl.value * 60),
-              child: _buildOrb(480, theme.accent.primary.withOpacity(0.15)),
+              child: _buildOrb(480, theme.accent.primary.withValues(alpha: 0.15)),
             ),
             Positioned(
               top: 260 + (_ctrl.value * -30),
               right: -100 + (_ctrl.value * 40),
-              child: _buildOrb(360, theme.accent.secondary.withOpacity(0.15)),
+              child: _buildOrb(360, theme.accent.secondary.withValues(alpha: 0.15)),
             ),
             Positioned(
               bottom: 60 + (_ctrl.value * 50),
               left: 10 + (_ctrl.value * -30),
-              child: _buildOrb(300, theme.accent.tertiary.withOpacity(0.15)),
+              child: _buildOrb(300, theme.accent.tertiary.withValues(alpha: 0.15)),
             ),
             Positioned.fill(
               child: BackdropFilter(
@@ -575,16 +260,6 @@ class _BackgroundSceneState extends State<BackgroundScene> with SingleTickerProv
     );
   }
 
-  Widget _buildOrb(double size, Color color) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: color,
-      ),
-    );
-  }
 }
 
 // ==========================================
@@ -597,7 +272,6 @@ class MainCalendarView extends StatelessWidget {
   final String selectedDateKey;
   final List<PlanItem> plans;
   final Map<String, List<PlanItem>> allPlansData;
-  final bool isLoading;
   final Function(int) onMonthChanged;
   final Function(DateTime) onDaySelected;
   final VoidCallback onAddPlanPressed;
@@ -605,20 +279,19 @@ class MainCalendarView extends StatelessWidget {
   final Function(int) onToggleReminder;
 
   MainCalendarView({
-    Key? key,
+    super.key,
     required this.currentMonth,
     required this.selectedDate,
     required this.todayKey,
     required this.selectedDateKey,
     required this.plans,
     required this.allPlansData,
-    required this.isLoading,
     required this.onMonthChanged,
     required this.onDaySelected,
     required this.onAddPlanPressed,
     required this.onRemovePlan,
     required this.onToggleReminder,
-  }) : super(key: key);
+  });
 
   final List<String> _months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   final List<String> _weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -646,7 +319,7 @@ class MainCalendarView extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: theme.card,
                   shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(color: theme.accent.primary.withOpacity(0.12), blurRadius: 10, offset: const Offset(0, 2))],
+                  boxShadow: [BoxShadow(color: theme.accent.primary.withValues(alpha: 0.12), blurRadius: 10, offset: const Offset(0, 2))],
                 ),
                 child: Padding(
                   padding: const EdgeInsets.only(left: 6.0),
@@ -658,16 +331,16 @@ class MainCalendarView extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Schedule / Calendar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+                  Text(AppLocalizations.t(context, 'boards_schedule_calendar'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: theme.textPrimary)),
                   const SizedBox(height: 3),
                   Row(
                     children: [
                       Container(
                         width: 8, height: 8,
-                        decoration: BoxDecoration(color: theme.accent.tertiary, shape: BoxShape.circle, boxShadow: [BoxShadow(color: theme.accent.tertiary.withOpacity(0.75), blurRadius: 7)]),
+                        decoration: BoxDecoration(color: theme.accent.tertiary, shape: BoxShape.circle, boxShadow: [BoxShadow(color: theme.accent.tertiary.withValues(alpha: 0.75), blurRadius: 7)]),
                       ),
                       const SizedBox(width: 6),
-                      Text('${getAllPlansCount()} outfit plans', style: TextStyle(fontSize: 12, color: theme.mutedText)),
+                      Text('${getAllPlansCount()} ${AppLocalizations.t(context, 'calendar_outfit_plans')}', style: TextStyle(fontSize: 12, color: theme.mutedText)),
                     ],
                   ),
                 ],
@@ -682,7 +355,7 @@ class MainCalendarView extends StatelessWidget {
           decoration: BoxDecoration(
             color: theme.card,
             borderRadius: BorderRadius.circular(24),
-            boxShadow: [BoxShadow(color: theme.textPrimary.withOpacity(0.08), blurRadius: 24, offset: const Offset(0, 4))],
+            boxShadow: [BoxShadow(color: theme.textPrimary.withValues(alpha: 0.08), blurRadius: 24, offset: const Offset(0, 4))],
           ),
           child: Column(
             children: [
@@ -700,63 +373,72 @@ class MainCalendarView extends StatelessWidget {
               ),
 
               // Days Strip
-              SizedBox(
-                height: 90,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  itemCount: (() {
-                    final now = DateTime.now();
-                    final isCurrentMonth = currentMonth.year == now.year && currentMonth.month == now.month;
-                    final totalDays = _daysInMonth(currentMonth);
-                    return isCurrentMonth ? (totalDays - now.day + 1) : totalDays;
-                  })(),
-                  itemBuilder: (ctx, index) {
-                    final now = DateTime.now();
-                    final isCurrentMonth = currentMonth.year == now.year && currentMonth.month == now.month;
-                    final day = isCurrentMonth ? (now.day + index) : (index + 1);
-                    final date = DateTime(currentMonth.year, currentMonth.month, day);
-                    final key = "${date.year}-${date.month}-${date.day}";
-                    final isSelected = key == selectedDateKey;
-                    final isToday = key == todayKey;
-                    final hasEvent = (allPlansData[key]?.isNotEmpty ?? false);
+              Builder(
+                builder: (ctx) {
+                  final now = DateTime.now();
+                  final isCurrentMonth = currentMonth.year == now.year && currentMonth.month == now.month;
+                  final totalDays = _daysInMonth(currentMonth);
+                  // Auto-scroll to today when viewing current month
+                  final scrollCtrl = ScrollController(
+                    initialScrollOffset: isCurrentMonth
+                        ? ((now.day - 1) * 58.0).clamp(0.0, double.infinity)
+                        : 0.0,
+                  );
+                  return SizedBox(
+                    height: 90,
+                    child: ListView.builder(
+                      controller: scrollCtrl,
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      itemCount: totalDays,
+                      itemBuilder: (ctx, index) {
+                        final now = DateTime.now();
+                        final day = index + 1;
+                        final date = DateTime(currentMonth.year, currentMonth.month, day);
+                        final key = "${date.year}-${date.month}-${date.day}";
+                        final isSelected = key == selectedDateKey;
+                        final isToday = key == todayKey;
+                        final hasEvent = (allPlansData[key]?.isNotEmpty ?? false);
+                        final isPast = date.isBefore(DateTime(now.year, now.month, now.day));
 
-                    return GestureDetector(
-                      onTap: () => onDaySelected(date),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
-                        width: 52,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(20),
-                          color: theme.card,
-                          border: Border.all(color: isSelected ? theme.accent.primary : Colors.transparent, width: isSelected ? 1.5 : 1),
-                          boxShadow: isSelected ? [BoxShadow(color: theme.accent.primary.withOpacity(0.6), blurRadius: 16, spreadRadius: 2)] : [],
-                        ),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            if (isToday)
-                               Positioned(top: 6, right: 6, child: Container(width: 5, height: 5, decoration: BoxDecoration(color: theme.accent.tertiary, shape: BoxShape.circle))),
-                            if (hasEvent)
-                               Positioned(bottom: 6, child: Container(width: 5, height: 5, decoration: BoxDecoration(color: theme.accent.secondary, shape: BoxShape.circle))),
-                            Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
+                        return GestureDetector(
+                          onTap: () => onDaySelected(date),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+                            width: 52,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(20),
+                              color: isPast && !isSelected ? theme.card.withValues(alpha: 0.55) : theme.card,
+                              border: Border.all(color: isSelected ? theme.accent.primary : Colors.transparent, width: isSelected ? 1.5 : 1),
+                              boxShadow: isSelected ? [BoxShadow(color: theme.accent.primary.withValues(alpha: 0.6), blurRadius: 16, spreadRadius: 2)] : [],
+                            ),
+                            child: Stack(
+                              alignment: Alignment.center,
                               children: [
-                                Text(_weekdays[date.weekday % 7], style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: isSelected ? theme.accent.primary : theme.mutedText)),
-                                const SizedBox(height: 2),
-                                Text('$day', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+                                if (isToday)
+                                   Positioned(top: 6, right: 6, child: Container(width: 5, height: 5, decoration: BoxDecoration(color: theme.accent.tertiary, shape: BoxShape.circle))),
+                                if (hasEvent)
+                                   Positioned(bottom: 6, child: Container(width: 5, height: 5, decoration: BoxDecoration(color: theme.accent.secondary, shape: BoxShape.circle))),
+                                Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(_weekdays[date.weekday % 7], style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: isSelected ? theme.accent.primary : (isPast ? theme.mutedText.withValues(alpha: 0.5) : theme.mutedText))),
+                                    const SizedBox(height: 2),
+                                    Text('$day', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: isPast && !isSelected ? theme.textPrimary.withValues(alpha: 0.35) : theme.textPrimary)),
+                                  ],
+                                ),
                               ],
                             ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
               ),
 
-              Container(height: 1, margin: const EdgeInsets.symmetric(horizontal: 14), color: theme.textPrimary.withOpacity(0.06)),
+              Container(height: 1, margin: const EdgeInsets.symmetric(horizontal: 14), color: theme.textPrimary.withValues(alpha: 0.06)),
 
               // Plans Section
               Padding(
@@ -764,40 +446,26 @@ class MainCalendarView extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(selectedDateKey == todayKey ? "Today's Plans" : "${_months[selectedDate.month - 1]} ${selectedDate.day} Plans", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: theme.mutedText, letterSpacing: 1.2)),
+                    Text(selectedDateKey == todayKey ? AppLocalizations.t(context, 'calendar_todays_plans') : "${_months[selectedDate.month - 1]} ${selectedDate.day} ${AppLocalizations.t(context, 'calendar_plans')}", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: theme.mutedText, letterSpacing: 1.2)),
                     const SizedBox(height: 10),
                     
-                    if (isLoading)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 22),
-                        child: Center(
-                          child: SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: theme.accent.primary,
-                            ),
-                          ),
-                        ),
-                      )
-                    else if (plans.isEmpty)
+                    if (plans.isEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 20),
-                        child: Text("Nothing planned 🌿\nTap 'Add a Plan' below", textAlign: TextAlign.center, style: TextStyle(color: theme.mutedText, fontSize: 13, height: 1.5)),
+                        child: Text(AppLocalizations.t(context, 'calendar_no_plans'), textAlign: TextAlign.center, style: TextStyle(color: theme.mutedText, fontSize: 13, height: 1.5)),
                       )
                     else 
                       ...List.generate(plans.length, (idx) {
                         final plan = plans[idx];
                         Color sideColor = theme.accent.primary;
-                        List<Color> bgGrad = [theme.accent.primary.withOpacity(0.13), theme.accent.primary.withOpacity(0.07)];
+                        List<Color> bgGrad = [theme.accent.primary.withValues(alpha: 0.13), theme.accent.primary.withValues(alpha: 0.07)];
                         
                         if(plan.colorTheme == 'blue') {
                           sideColor = theme.accent.secondary;
-                          bgGrad = [theme.accent.secondary.withOpacity(0.12), theme.accent.secondary.withOpacity(0.06)];
+                          bgGrad = [theme.accent.secondary.withValues(alpha: 0.12), theme.accent.secondary.withValues(alpha: 0.06)];
                         } else if (plan.colorTheme == 'pink') {
                           sideColor = theme.accent.tertiary;
-                          bgGrad = [theme.accent.tertiary.withOpacity(0.12), theme.accent.tertiary.withOpacity(0.06)];
+                          bgGrad = [theme.accent.tertiary.withValues(alpha: 0.12), theme.accent.tertiary.withValues(alpha: 0.06)];
                         }
 
                         return Container(
@@ -806,7 +474,7 @@ class MainCalendarView extends StatelessWidget {
                             borderRadius: BorderRadius.circular(14),
                             gradient: LinearGradient(colors: bgGrad, begin: Alignment.topLeft, end: Alignment.bottomRight),
                             border: Border(left: BorderSide(color: sideColor, width: 4)),
-                            boxShadow: [BoxShadow(color: sideColor.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 2))],
+                            boxShadow: [BoxShadow(color: sideColor.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 2))],
                           ),
                           child: Stack(
                             children: [
@@ -819,10 +487,10 @@ class MainCalendarView extends StatelessWidget {
                                     const SizedBox(height: 2),
                                     Text(plan.occasion, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: theme.textPrimary)),
                                     const SizedBox(height: 2),
-                                    Text(plan.time.isEmpty ? 'Planned' : plan.time, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: theme.mutedText)),
+                                    Text(plan.time.isEmpty ? AppLocalizations.t(context, 'calendar_planned') : plan.time, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: theme.mutedText)),
                                     if (plan.outfit.isNotEmpty) ...[
                                       const SizedBox(height: 2),
-                                      Text(plan.outfit, style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: theme.textPrimary.withOpacity(0.8))),
+                                      Text(plan.outfit, style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: theme.textPrimary.withValues(alpha: 0.8))),
                                     ]
                                   ],
                                 ),
@@ -858,14 +526,14 @@ class MainCalendarView extends StatelessWidget {
                         decoration: BoxDecoration(
                           gradient: LinearGradient(colors: [theme.accent.primary, theme.accent.secondary], begin: Alignment.topLeft, end: Alignment.bottomRight),
                           borderRadius: BorderRadius.circular(18),
-                          boxShadow: [BoxShadow(color: theme.accent.primary.withOpacity(0.35), blurRadius: 16, offset: const Offset(0, 4))],
+                          boxShadow: [BoxShadow(color: theme.accent.primary.withValues(alpha: 0.35), blurRadius: 16, offset: const Offset(0, 4))],
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.add_circle_outline, size: 16, color: Colors.white),
-                            SizedBox(width: 8),
-                            Text('Add a Plan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13.5)),
+                            const Icon(Icons.add_circle_outline, size: 16, color: Colors.white),
+                            const SizedBox(width: 8),
+                            Text(AppLocalizations.t(context, 'calendar_add_plan'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13.5)),
                           ],
                         ),
                       ),
@@ -901,7 +569,9 @@ class MainCalendarView extends StatelessWidget {
 
   int getAllPlansCount() {
     int total = 0;
-    allPlansData.values.forEach((l) => total += l.length);
+    for (var l in allPlansData.values) {
+      total += l.length;
+    }
     return total;
   }
 }
@@ -910,30 +580,28 @@ class MainCalendarView extends StatelessWidget {
 // ADD PLAN MODAL
 // ==========================================
 class AddPlanModal extends StatefulWidget {
-  final List<_OccasionOption> options;
+  final Function(PlanItem) onPlanSaved;
   final Function(String, IconData) onChatOpened;
 
-  const AddPlanModal({
-    Key? key,
-    required this.options,
-    required this.onChatOpened,
-  }) : super(key: key);
+  const AddPlanModal({super.key, required this.onPlanSaved, required this.onChatOpened});
 
   @override
   State<AddPlanModal> createState() => _AddPlanModalState();
 }
 
 class _AddPlanModalState extends State<AddPlanModal> {
-  String? _selectedOccasion;
+  final List<Map<String, dynamic>> _buttons = [
+    {'name': 'Gym', 'icon': Icons.fitness_center, 'key': 'calendar_occasion_gym'},
+    {'name': 'Office', 'icon': Icons.work_outline, 'key': 'calendar_occasion_office'},
+    {'name': 'Party', 'icon': Icons.celebration, 'key': 'calendar_occasion_party'},
+    {'name': 'Shopping', 'icon': Icons.shopping_bag_outlined, 'key': 'calendar_occasion_shopping'},
+    {'name': 'Study', 'icon': Icons.menu_book, 'key': 'calendar_occasion_study'},
+    {'name': 'Travel', 'icon': Icons.flight_takeoff, 'key': 'calendar_occasion_travel'},
+    {'name': 'Event', 'icon': Icons.event, 'key': 'calendar_occasion_event'},
+    {'name': 'Date Night', 'icon': Icons.favorite_border, 'key': 'calendar_occasion_date_night'},
+  ];
 
-  @override
-  void initState() {
-    super.initState();
-    if (widget.options.isNotEmpty) {
-      _selectedOccasion = widget.options.first.name;
-    }
-  }
-
+  final String _selectedOccasion = 'Gym';
 
   @override
   Widget build(BuildContext context) {
@@ -942,7 +610,7 @@ class _AddPlanModalState extends State<AddPlanModal> {
       decoration: BoxDecoration(
         color: theme.backgroundSecondary,
         borderRadius: const BorderRadius.only(topLeft: Radius.circular(28), topRight: Radius.circular(28)),
-        boxShadow: [BoxShadow(color: theme.textPrimary.withOpacity(0.08), blurRadius: 32, offset: const Offset(0, -4))],
+        boxShadow: [BoxShadow(color: theme.textPrimary.withValues(alpha: 0.08), blurRadius: 32, offset: const Offset(0, -4))],
       ),
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
       child: Column(
@@ -957,7 +625,7 @@ class _AddPlanModalState extends State<AddPlanModal> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('New Plan', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+              Text(AppLocalizations.t(context, 'calendar_new_plan'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: theme.textPrimary)),
               GestureDetector(
                 onTap: () => Navigator.pop(context),
                 child: Container(
@@ -967,7 +635,7 @@ class _AddPlanModalState extends State<AddPlanModal> {
                     children: [
                       Icon(Icons.close, size: 14, color: theme.mutedText),
                       SizedBox(width: 4),
-                      Text('Close', style: TextStyle(color: theme.mutedText, fontSize: 13, fontWeight: FontWeight.w600)),
+                      Text(AppLocalizations.t(context, 'calendar_close'), style: TextStyle(color: theme.mutedText, fontSize: 13, fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
@@ -977,71 +645,36 @@ class _AddPlanModalState extends State<AddPlanModal> {
           const SizedBox(height: 16),
 
           // Occasions grid
-          Text('CHOOSE OCCASION', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: theme.mutedText)),
+          Text(AppLocalizations.t(context, 'calendar_choose_occasion'), style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: theme.mutedText)),
           const SizedBox(height: 10),
-          if (widget.options.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 18),
-              child: Text(
-                'No occasion history yet. Add a plan from chat to get started.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: theme.mutedText,
-                  height: 1.4,
-                ),
-              ),
-            )
-          else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: widget.options.map((option) {
-                final isSel =
-                    _selectedOccasion?.toLowerCase() == option.name.toLowerCase();
-                return GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _selectedOccasion = option.name;
-                    });
-                    widget.onChatOpened(option.name, option.icon);
-                  },
-                  child: Container(
-                    width: (MediaQuery.of(context).size.width - 40 - 24) / 4,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    decoration: BoxDecoration(
-                      color: isSel ? theme.accent.primary.withOpacity(0.2) : theme.card,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: isSel ? theme.accent.primary : theme.cardBorder,
-                      ),
-                      boxShadow: isSel
-                          ? [
-                              BoxShadow(
-                                color: theme.accent.primary.withOpacity(0.4),
-                                blurRadius: 12,
-                              ),
-                            ]
-                          : [],
-                    ),
-                    child: Column(
-                      children: [
-                        Icon(option.icon, size: 24, color: theme.textPrimary),
-                        const SizedBox(height: 4),
-                        Text(
-                          option.name,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: isSel ? theme.accent.primary : theme.mutedText,
-                          ),
-                        ),
-                      ],
-                    ),
+          Wrap(
+            spacing: 8, runSpacing: 8,
+            children: _buttons.map((b) {
+              bool isSel = _selectedOccasion == b['name'];
+              return GestureDetector(
+                onTap: () {
+                  widget.onChatOpened(b['name'] as String, b['icon'] as IconData);
+                },
+                child: Container(
+                  width: (MediaQuery.of(context).size.width - 40 - 24) / 4,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSel ? theme.accent.primary.withValues(alpha: 0.2) : theme.card,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: isSel ? theme.accent.primary : theme.cardBorder),
+                    boxShadow: isSel ? [BoxShadow(color: theme.accent.primary.withValues(alpha: 0.4), blurRadius: 12)] : [],
                   ),
-                );
-              }).toList(),
-            ),
+                  child: Column(
+                    children: [
+                      Icon(b['icon'] as IconData, size: 24, color: theme.textPrimary),
+                      const SizedBox(height: 4),
+                      Text(AppLocalizations.t(context, b['key'] as String), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isSel ? theme.accent.primary : theme.mutedText)),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
           const SizedBox(height: 10),
         ],
       ),
@@ -1063,9 +696,9 @@ class StyleChatScreen extends StatefulWidget {
   final String occasion;
   final IconData icon;
   final VoidCallback onBack;
-  final Function(TimeOfDay, String) onSavePlan;
+  final Function(String, String) onSavePlan;
 
-  const StyleChatScreen({Key? key, required this.occasion, required this.icon, required this.onBack, required this.onSavePlan}) : super(key: key);
+  const StyleChatScreen({super.key, required this.occasion, required this.icon, required this.onBack, required this.onSavePlan});
 
   @override
   State<StyleChatScreen> createState() => _StyleChatScreenState();
@@ -1074,153 +707,95 @@ class StyleChatScreen extends StatefulWidget {
 class _StyleChatScreenState extends State<StyleChatScreen> {
   final TextEditingController _textCtrl = TextEditingController();
   final List<ChatMessage> _msgs = [];
-  final List<Map<String, String>> _chatHistory = [];
   bool _isListening = false;
-  bool _isSending = false;
+
+  bool _greetingAdded = false;
 
   @override
   void initState() {
     super.initState();
-    final intro = "Hi! I'm your style assistant for ${widget.occasion}. Ask me what to wear!";
-    _msgs.add(ChatMessage(intro, isUser: false, time: 'Now'));
-    _chatHistory.add({'role': 'assistant', 'content': intro});
   }
 
   @override
-  void dispose() {
-    _textCtrl.dispose();
-    super.dispose();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_greetingAdded) {
+      _greetingAdded = true;
+      _msgs.add(ChatMessage(
+        AppLocalizations.t(context, 'calendar_chat_greeting').replaceAll('{occasion}', widget.occasion),
+        isUser: false,
+        time: AppLocalizations.t(context, 'calendar_chat_time_now'),
+      ));
+    }
   }
 
-  TimeOfDay? _extractTimeOfDay(String text) {
-    final regex = RegExp(
-      r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.|o'clock)?\b",
-      caseSensitive: false,
-    );
-    final match = regex.firstMatch(text);
-    if (match == null) return null;
-
-    final rawHour = int.tryParse(match.group(1) ?? '');
-    if (rawHour == null || rawHour < 0 || rawHour > 23) return null;
-    final rawMinute = int.tryParse(match.group(2) ?? '0') ?? 0;
-    if (rawMinute < 0 || rawMinute > 59) return null;
-
-    final marker = (match.group(3) ?? '').toLowerCase().replaceAll('.', '');
-    var hour = rawHour;
-    if (marker == 'am' || marker == "o'clock") {
-      if (hour == 12) hour = 0;
-    } else if (marker == 'pm') {
-      if (hour < 12) hour += 12;
-    }
-
-    if (hour > 23) return null;
-    return TimeOfDay(hour: hour, minute: rawMinute);
+  // Helper to extract time
+  String _extractTime(String text) {
+     final match = RegExp(r"\b(\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.|o'clock)?)\b", caseSensitive: false).firstMatch(text);
+     return match != null ? match.group(1) ?? "" : "";
   }
 
-  String _formatTimeOfDay(TimeOfDay time) {
-    final hour = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
-    final minute = time.minute.toString().padLeft(2, '0');
-    final suffix = time.period == DayPeriod.am ? 'AM' : 'PM';
-    return '$hour:$minute $suffix';
-  }
-
-  String _extractOutfitSummary(String text) {
-    final cleaned = text.replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (cleaned.isEmpty) {
-      return 'Styled look for ${widget.occasion}.';
-    }
-    final firstSentence = cleaned.split(RegExp(r'[.!?]')).first.trim();
-    if (firstSentence.isEmpty) {
-      return 'Styled look for ${widget.occasion}.';
-    }
-    if (firstSentence.length > 120) {
-      return '${firstSentence.substring(0, 120).trim()}...';
-    }
-    return firstSentence;
-  }
-
-  Future<String> _fetchAiStylingReply(String userText) async {
-    final backend = context.read<BackendService>();
-    final appwrite = context.read<AppwriteService>();
-
-    var userId = 'calendar_guest';
-    try {
-      final user = await appwrite.getCurrentUser();
-      if (user != null) userId = user.$id;
-    } catch (_) {}
-
-    final result = await backend.sendChatQuery(
-      userText,
-      userId,
-      List<Map<String, String>>.from(_chatHistory),
-      '',
-      moduleContext: 'calendar_style_${widget.occasion}',
-    );
-
-    if (result['error'] != null) {
-      return "I couldn't reach styling AI right now. Try again in a moment.";
-    }
-
-    final rawMessage = result['message'];
-    if (rawMessage is Map<String, dynamic>) {
-      final text = (rawMessage['content'] ?? '').toString().trim();
-      if (text.isNotEmpty) return text;
-    }
-    if (rawMessage is String && rawMessage.trim().isNotEmpty) {
-      return rawMessage.trim();
-    }
-
-    final fallback = (result['content'] ?? '').toString().trim();
-    if (fallback.isNotEmpty) return fallback;
-    return "Let's style your ${widget.occasion.toLowerCase()} look.";
-  }
-
-  Future<void> _sendMsg() async {
-    final userText = _textCtrl.text.trim();
-    if (userText.isEmpty || _isSending) return;
-
-    setState(() {
-      _msgs.add(ChatMessage(userText, isUser: true, time: 'Now'));
-      _textCtrl.clear();
-      _isSending = true;
-    });
-    _chatHistory.add({'role': 'user', 'content': userText});
-
+  void _sendMsg() {
+    if (_textCtrl.text.trim().isEmpty) return;
+    
+    final userText = _textCtrl.text;
     final lower = userText.toLowerCase();
-    final wantsSave = lower.contains('yes') ||
-        lower.contains('save') ||
-        lower.contains('add') ||
-        lower.contains('reminder');
-    final extractedTime = _extractTimeOfDay(userText);
+    
+    // We mock the outfit strictly for this demo
+    final mockOutfit = "Styling layer with ${widget.occasion} vibes.";
 
-    String aiText = await _fetchAiStylingReply(userText);
-    final summary = _extractOutfitSummary(aiText);
-
-    if (extractedTime != null) {
-      final reminderAt = _formatTimeOfDay(extractedTime);
-      widget.onSavePlan(extractedTime, summary);
-      aiText =
-          '$aiText\n\nSaved this plan with a reminder at $reminderAt.';
-    } else if (wantsSave) {
-      aiText =
-          '$aiText\n\nTell me the reminder time (for example, 7:30 pm) and I will save it.';
-    }
-
-    if (!mounted) return;
     setState(() {
-      _msgs.add(ChatMessage(aiText, isUser: false, time: 'Now'));
-      _isSending = false;
+      _msgs.add(ChatMessage(userText, isUser: true, time: AppLocalizations.t(context, 'calendar_chat_time_now')));
+      _textCtrl.clear();
+      
+      // Mock AI response
+      Future.delayed(const Duration(seconds: 1), () {
+        if(mounted) {
+           setState(() {
+             String extractedTime = _extractTime(userText);
+             
+             if (lower.contains('yes') || lower.contains('save') || lower.contains('add')) {
+                if (extractedTime.isNotEmpty) {
+                  widget.onSavePlan(extractedTime, mockOutfit);
+                  _msgs.add(ChatMessage(
+                    AppLocalizations.t(context, 'calendar_chat_saved_with_time').replaceAll('{occasion}', widget.occasion).replaceAll('{time}', extractedTime),
+                    isUser: false,
+                    time: AppLocalizations.t(context, 'calendar_chat_time_now'),
+                  ));
+                } else {
+                  _msgs.add(ChatMessage(
+                    AppLocalizations.t(context, 'calendar_chat_ask_time'),
+                    isUser: false,
+                    time: AppLocalizations.t(context, 'calendar_chat_time_now'),
+                  ));
+                }
+             } else if (extractedTime.isNotEmpty) {
+                widget.onSavePlan(extractedTime, mockOutfit);
+                _msgs.add(ChatMessage(
+                  AppLocalizations.t(context, 'calendar_chat_set_reminder').replaceAll('{time}', extractedTime),
+                  isUser: false,
+                  time: AppLocalizations.t(context, 'calendar_chat_time_now'),
+                ));
+             } else {
+                _msgs.add(ChatMessage(
+                  AppLocalizations.t(context, 'calendar_chat_suggest_save'),
+                  isUser: false,
+                  time: AppLocalizations.t(context, 'calendar_chat_time_now'),
+                ));
+             }
+           });
+        }
+      });
     });
-    _chatHistory.add({'role': 'assistant', 'content': aiText});
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = context.themeTokens;
-    return WillPopScope(
-      onWillPop: () async {
-        widget.onBack();
-        return false;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) widget.onBack();
       },
       child: Container(
         color: theme.backgroundSecondary,
@@ -1254,13 +829,13 @@ class _StyleChatScreenState extends State<StyleChatScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                       Text('${widget.occasion} Chat', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+                       Text('${widget.occasion} ${AppLocalizations.t(context, 'calendar_chat')}', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: theme.textPrimary)),
                        Container(margin: const EdgeInsets.only(top: 5, bottom: 4), width: 36, height: 2.5, decoration: BoxDecoration(color: theme.accent.primary, borderRadius: BorderRadius.circular(2))),
                        Row(
                          children: [
                            Container(width: 6, height: 6, decoration: BoxDecoration(color: theme.accent.tertiary, shape: BoxShape.circle, boxShadow: [BoxShadow(color: theme.accent.tertiary, blurRadius: 6)])),
                            const SizedBox(width: 6),
-                           Text('Ask anything about your outfit.', style: TextStyle(fontSize: 13, color: theme.mutedText))
+                           Text(AppLocalizations.t(context, 'calendar_chat_subtitle'), style: TextStyle(fontSize: 13, color: theme.mutedText))
                          ],
                        )
                     ],
@@ -1333,9 +908,9 @@ class _StyleChatScreenState extends State<StyleChatScreen> {
                    scrollDirection: Axis.horizontal,
                    child: Row(
                      children: [
-                       _chip('What should I wear?', theme),
-                       _chip('Casual look', theme),
-                       _chip('Work outfit', theme),
+                       _chip(AppLocalizations.t(context, 'calendar_chip_wear'), theme),
+                       _chip(AppLocalizations.t(context, 'calendar_chip_casual'), theme),
+                       _chip(AppLocalizations.t(context, 'calendar_chip_work'), theme),
                      ],
                    ),
                  ),
@@ -1354,7 +929,7 @@ class _StyleChatScreenState extends State<StyleChatScreen> {
                        Expanded(
                          child: TextField(
                            controller: _textCtrl,
-                           decoration: InputDecoration(border: InputBorder.none, hintText: 'Ask about your outfit...', hintStyle: TextStyle(color: theme.mutedText), isDense: true),
+                           decoration: InputDecoration(border: InputBorder.none, hintText: AppLocalizations.t(context, 'calendar_chat_input_hint'), hintStyle: TextStyle(color: theme.mutedText), isDense: true),
                            style: TextStyle(fontSize: 14, color: theme.textPrimary),
                            onSubmitted: (_) => _sendMsg(),
                          ),

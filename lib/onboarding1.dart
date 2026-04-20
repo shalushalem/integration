@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart'; // [ADDED B08] for CupertinoPicker
+import 'package:flutter/services.dart'; // [ADDED B12] for input formatters
 import 'package:provider/provider.dart';
 import 'package:myapp/app_routes.dart';
 import 'package:myapp/profile.dart';
@@ -11,6 +12,24 @@ void main() {
   ));
 }
 
+// ── Body shape image constants ──────────────────────────────────────────────
+const Map<String, List<Map<String, String>>> kBodyShapes = {
+  'women': [
+    {'name': 'Hourglass',  'img': 'assets/body_shapes/women_hourglass.jpeg'},
+    {'name': 'Pear',       'img': 'assets/body_shapes/women_pear.jpeg'},
+    {'name': 'Apple',      'img': 'assets/body_shapes/women_apple.jpeg'},
+    {'name': 'Rectangle',  'img': 'assets/body_shapes/women_rectangle.jpeg'},
+    {'name': 'Inverted',   'img': 'assets/body_shapes/women_inverted.jpeg'},
+  ],
+  'men': [
+    {'name': 'Rectangle',  'img': 'assets/body_shapes/men_rectangle.jpeg'},
+    {'name': 'Triangle',   'img': 'assets/body_shapes/men_traingle.jpeg'},
+    {'name': 'Trapezoid',  'img': 'assets/body_shapes/men_trapezoid.jpeg'},
+    {'name': 'Oval',       'img': 'assets/body_shapes/men_oval.jpeg'},
+    {'name': 'Inverted',   'img': 'assets/body_shapes/men_inverted.jpeg'},
+  ],
+};
+
 class Screen1 extends StatefulWidget {
   const Screen1({super.key});
 
@@ -21,7 +40,7 @@ class Screen1 extends StatefulWidget {
 // [ADDED B01, B02, B05] TickerProviderStateMixin supports multiple AnimationControllers
 class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
   int _selectedTab = 0;
-  int _selectedGender = 1;
+  int _selectedGender = -1; // no default — user must select
 
   // ── [ADDED B06] Press states for pills and button ──
   final List<bool> _pillPressed = [false, false, false];
@@ -34,6 +53,102 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
   bool _phoneFocused = false;
   late TextEditingController _nameCtrl;
   late TextEditingController _phoneCtrl;
+
+  // ── Country code selection state ──
+  String _selectedCountryCode = '+91';
+  String _selectedCountryFlag = '🇮🇳';
+  String _selectedCountryName = 'India';
+  int _selectedCountryMaxDigits = 10;
+
+  // Full country list: flag, name, dial code, max digits
+  static const List<Map<String, dynamic>> _countries = [
+    {'flag': '🇮🇳', 'name': 'India', 'code': '+91', 'digits': 10},
+    {'flag': '🇺🇸', 'name': 'United States', 'code': '+1', 'digits': 10},
+    {'flag': '🇬🇧', 'name': 'United Kingdom', 'code': '+44', 'digits': 10},
+    {'flag': '🇦🇺', 'name': 'Australia', 'code': '+61', 'digits': 9},
+    {'flag': '🇨🇦', 'name': 'Canada', 'code': '+1', 'digits': 10},
+    {'flag': '🇩🇪', 'name': 'Germany', 'code': '+49', 'digits': 11},
+    {'flag': '🇫🇷', 'name': 'France', 'code': '+33', 'digits': 9},
+    {'flag': '🇯🇵', 'name': 'Japan', 'code': '+81', 'digits': 10},
+    {'flag': '🇨🇳', 'name': 'China', 'code': '+86', 'digits': 11},
+    {'flag': '🇧🇷', 'name': 'Brazil', 'code': '+55', 'digits': 11},
+    {'flag': '🇲🇽', 'name': 'Mexico', 'code': '+52', 'digits': 10},
+    {'flag': '🇿🇦', 'name': 'South Africa', 'code': '+27', 'digits': 9},
+    {'flag': '🇳🇬', 'name': 'Nigeria', 'code': '+234', 'digits': 10},
+    {'flag': '🇰🇪', 'name': 'Kenya', 'code': '+254', 'digits': 9},
+    {'flag': '🇸🇬', 'name': 'Singapore', 'code': '+65', 'digits': 8},
+    {'flag': '🇦🇪', 'name': 'UAE', 'code': '+971', 'digits': 9},
+    {'flag': '🇸🇦', 'name': 'Saudi Arabia', 'code': '+966', 'digits': 9},
+    {'flag': '🇵🇰', 'name': 'Pakistan', 'code': '+92', 'digits': 10},
+    {'flag': '🇧🇩', 'name': 'Bangladesh', 'code': '+880', 'digits': 10},
+    {'flag': '🇱🇰', 'name': 'Sri Lanka', 'code': '+94', 'digits': 9},
+    {'flag': '🇳🇵', 'name': 'Nepal', 'code': '+977', 'digits': 10},
+    {'flag': '🇮🇩', 'name': 'Indonesia', 'code': '+62', 'digits': 11},
+    {'flag': '🇵🇭', 'name': 'Philippines', 'code': '+63', 'digits': 10},
+    {'flag': '🇲🇾', 'name': 'Malaysia', 'code': '+60', 'digits': 10},
+    {'flag': '🇹🇭', 'name': 'Thailand', 'code': '+66', 'digits': 9},
+    {'flag': '🇻🇳', 'name': 'Vietnam', 'code': '+84', 'digits': 10},
+    {'flag': '🇰🇷', 'name': 'South Korea', 'code': '+82', 'digits': 10},
+    {'flag': '🇮🇹', 'name': 'Italy', 'code': '+39', 'digits': 10},
+    {'flag': '🇪🇸', 'name': 'Spain', 'code': '+34', 'digits': 9},
+    {'flag': '🇵🇹', 'name': 'Portugal', 'code': '+351', 'digits': 9},
+    {'flag': '🇳🇱', 'name': 'Netherlands', 'code': '+31', 'digits': 9},
+    {'flag': '🇧🇪', 'name': 'Belgium', 'code': '+32', 'digits': 9},
+    {'flag': '🇨🇭', 'name': 'Switzerland', 'code': '+41', 'digits': 9},
+    {'flag': '🇸🇪', 'name': 'Sweden', 'code': '+46', 'digits': 9},
+    {'flag': '🇳🇴', 'name': 'Norway', 'code': '+47', 'digits': 8},
+    {'flag': '🇩🇰', 'name': 'Denmark', 'code': '+45', 'digits': 8},
+    {'flag': '🇫🇮', 'name': 'Finland', 'code': '+358', 'digits': 9},
+    {'flag': '🇷🇺', 'name': 'Russia', 'code': '+7', 'digits': 10},
+    {'flag': '🇺🇦', 'name': 'Ukraine', 'code': '+380', 'digits': 9},
+    {'flag': '🇵🇱', 'name': 'Poland', 'code': '+48', 'digits': 9},
+    {'flag': '🇦🇷', 'name': 'Argentina', 'code': '+54', 'digits': 10},
+    {'flag': '🇨🇱', 'name': 'Chile', 'code': '+56', 'digits': 9},
+    {'flag': '🇨🇴', 'name': 'Colombia', 'code': '+57', 'digits': 10},
+    {'flag': '🇵🇪', 'name': 'Peru', 'code': '+51', 'digits': 9},
+    {'flag': '🇹🇷', 'name': 'Turkey', 'code': '+90', 'digits': 10},
+    {'flag': '🇮🇱', 'name': 'Israel', 'code': '+972', 'digits': 9},
+    {'flag': '🇪🇬', 'name': 'Egypt', 'code': '+20', 'digits': 10},
+    {'flag': '🇲🇦', 'name': 'Morocco', 'code': '+212', 'digits': 9},
+    {'flag': '🇬🇭', 'name': 'Ghana', 'code': '+233', 'digits': 9},
+    {'flag': '🇳🇿', 'name': 'New Zealand', 'code': '+64', 'digits': 9},
+  ];
+
+  OverlayEntry? _countryDropdownOverlay;
+  final LayerLink _countryLayerLink = LayerLink();
+
+  void _showCountryPicker() {
+    if (_countryDropdownOverlay != null) {
+      _removeCountryDropdown();
+      return;
+    }
+    final overlay = Overlay.of(context);
+    _countryDropdownOverlay = OverlayEntry(
+      builder: (_) => _CountryDropdownOverlay(
+        link: _countryLayerLink,
+        countries: _countries,
+        selectedCode: _selectedCountryCode,
+        selectedFlag: _selectedCountryFlag,
+        onSelected: (country) {
+          setState(() {
+            _selectedCountryCode = country['code'] as String;
+            _selectedCountryFlag = country['flag'] as String;
+            _selectedCountryName = country['name'] as String;
+            _selectedCountryMaxDigits = country['digits'] as int;
+            _phoneCtrl.clear();
+          });
+          _removeCountryDropdown();
+        },
+        onDismiss: _removeCountryDropdown,
+      ),
+    );
+    overlay.insert(_countryDropdownOverlay!);
+  }
+
+  void _removeCountryDropdown() {
+    _countryDropdownOverlay?.remove();
+    _countryDropdownOverlay = null;
+  }
 
   // ── [ADDED B08] DOB selection state ──
   String? _selectedDay;
@@ -61,16 +176,16 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
   // ── [ADDED B05] Gender pill spring bounce AnimationController ──
   late AnimationController _pillBounceController;
   late Animation<double> _pillBounceScale;
-  int _lastTappedGender = 1; // tracks which pill to animate
+  int _lastTappedGender = -1;
 
-  static const Color bg = Color(0xFF08111F);
+  static const Color bg = Color(0xFFEEF3FF);
 
-  static const Color panel = Color(0x14FFFFFF);
-  static const Color panel2 = Color(0x1FFFFFFF);
-  static const Color card = Color(0x14FFFFFF);
-  static const Color cardBorder = Color(0x1FFFFFFF);
-  static const Color textColor = Color(0xFFF5F7FF);
-  static const Color muted = Color(0xB8E6EBFF);
+  static const Color panel = Color(0xA8FFFFFF);
+  static const Color panel2 = Color(0xE0FFFFFF);
+  static const Color card = Color(0xE0FFFFFF);
+  static const Color cardBorder = Color(0xFFE5E9F7);
+  static const Color textColor = Color(0xFF1A1D26);
+  static const Color muted = Color(0xFF66708A);
   static const Color accent = Color(0xFF6B91FF);
   static const Color accent2 = Color(0xFF8D7DFF);
   static const Color accent5 = Color(0xFFFFD86E);
@@ -177,6 +292,7 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
     _phoneFocus.dispose();
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
+    _removeCountryDropdown();
     super.dispose();
   }
 
@@ -210,11 +326,13 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
       return;
     }
     final genders = ['Male', 'Female', 'Others'];
-    final gender = genders[_selectedGender.clamp(0, genders.length - 1)];
+    final gender = _selectedGender >= 0 ? genders[_selectedGender.clamp(0, genders.length - 1)] : '';
     final dob = '${_selectedDay!} ${_selectedMonth!} ${_selectedYear!}';
     context.read<ProfileController>().updateBasics(
       name: _nameCtrl.text.trim(),
-      phone: _phoneCtrl.text.trim(),
+      phone: _phoneCtrl.text.trim().isNotEmpty
+          ? '$_selectedCountryCode ${_phoneCtrl.text.trim()}'
+          : '',
       gender: gender,
       dob: dob,
       skinTone: _selectedSkinTone,
@@ -237,7 +355,7 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
                 gradient: RadialGradient(
                   center: Alignment(-1.0, -1.0),
                   radius: 1.2,
-                  colors: [Color(0x2E14CACD), Color(0x0014CACD)],
+                  colors: [Color(0x1814CACD), Color(0x0014CACD)],
                   stops: [0.0, 0.65],
                 ),
               ),
@@ -249,7 +367,7 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
                 gradient: RadialGradient(
                   center: Alignment(1.0, 1.0),
                   radius: 1.2,
-                  colors: [Color(0x2E14CACD), Color(0x0014CACD)],
+                  colors: [Color(0x1814CACD), Color(0x0014CACD)],
                   stops: [0.0, 0.65],
                 ),
               ),
@@ -398,9 +516,9 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
           borderRadius: BorderRadius.circular(16),
           boxShadow: const [
             BoxShadow(
-                color: Color(0x2E000000), blurRadius: 24, offset: Offset(0, 8)),
+                color: Color(0x14000000), blurRadius: 24, offset: Offset(0, 8)),
             BoxShadow(
-                color: Color(0x1F000000), blurRadius: 6, offset: Offset(0, 2)),
+                color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2)),
           ],
         ),
         child: Row(
@@ -495,11 +613,11 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
           borderRadius: BorderRadius.circular(24),
           boxShadow: const [
             BoxShadow(
-                color: Color(0x38000000),
+                color: Color(0x18000000),
                 blurRadius: 40,
                 offset: Offset(0, 12)),
             BoxShadow(
-                color: Color(0x24000000),
+                color: Color(0x0F000000),
                 blurRadius: 10,
                 offset: Offset(0, 3)),
           ],
@@ -510,8 +628,6 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
             _buildNameField(),
             _buildDivider(),
             _buildPhoneField(),
-            _buildDivider(),
-            _buildGenderField(),
             _buildDivider(),
             _buildDOBField(),
             _buildDivider(),
@@ -653,54 +769,100 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
             ],
           ),
           const SizedBox(height: 9),
-          // ── [ADDED B04] Same focus-glow pattern for phone field ──
           AnimatedContainer(
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeOut,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
               boxShadow: _phoneFocused
-                  ? [
-                BoxShadow(
-                  color: accent.withValues(alpha: 0.15),
-                  blurRadius: 12,
-                  spreadRadius: 3,
-                ),
-              ]
+                  ? [BoxShadow(color: accent.withValues(alpha: 0.15), blurRadius: 12, spreadRadius: 3)]
                   : [],
             ),
-            child: TextField(
-              focusNode: _phoneFocus, // [ADDED B04]
-              controller: _phoneCtrl,
-              keyboardType: TextInputType.phone,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w400,
-                color: textColor,
-                fontFamily: 'DM Sans',
-              ),
-              decoration: InputDecoration(
-                hintText: '+91 000 000 0000',
-                hintStyle: TextStyle(
-                  color: muted.withValues(alpha: 0.5),
-                  fontWeight: FontWeight.w400,
-                  fontSize: 15,
-                  fontFamily: 'DM Sans',
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // ── Country code button with CompositedTransformTarget ──
+                CompositedTransformTarget(
+                  link: _countryLayerLink,
+                  child: GestureDetector(
+                    onTap: _showCountryPicker,
+                    child: Container(
+                      height: 50,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: _phoneFocused ? panel2 : panel,
+                        border: Border(
+                          top: BorderSide(color: _phoneFocused ? accent : cardBorder, width: 1.5),
+                          bottom: BorderSide(color: _phoneFocused ? accent : cardBorder, width: 1.5),
+                          left: BorderSide(color: _phoneFocused ? accent : cardBorder, width: 1.5),
+                          right: BorderSide(color: _phoneFocused ? accent : cardBorder, width: 1.5),
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(_selectedCountryFlag, style: const TextStyle(fontSize: 20)),
+                          const SizedBox(width: 6),
+                          Text(
+                            _selectedCountryCode,
+                            style: const TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w500,
+                              color: textColor,
+                              fontFamily: 'DM Sans',
+                            ),
+                          ),
+                          const SizedBox(width: 3),
+                          const Icon(Icons.keyboard_arrow_down_rounded, color: muted, size: 16),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-                filled: true,
-                fillColor: _phoneFocused ? panel2 : panel, // [ADDED B04]
-                contentPadding:
-                const EdgeInsets.fromLTRB(15, 13, 15, 13),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide:
-                  const BorderSide(color: cardBorder, width: 1.5),
+                const SizedBox(width: 8),
+                // ── Number input ──
+                Expanded(
+                  child: SizedBox(
+                    height: 50,
+                    child: TextField(
+                      focusNode: _phoneFocus,
+                      controller: _phoneCtrl,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(_selectedCountryMaxDigits),
+                      ],
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w400,
+                        color: textColor,
+                        fontFamily: 'DM Sans',
+                      ),
+                      decoration: InputDecoration(
+                        hintText: '00000 00000',
+                        hintStyle: TextStyle(
+                          color: muted.withValues(alpha: 0.5),
+                          fontWeight: FontWeight.w400,
+                          fontSize: 15,
+                          fontFamily: 'DM Sans',
+                        ),
+                        filled: true,
+                        fillColor: _phoneFocused ? panel2 : panel,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: cardBorder, width: 1.5),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: accent, width: 1.5),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: accent, width: 1.5),
-                ),
-              ),
+              ],
             ),
           ),
         ],
@@ -943,7 +1105,7 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
     int tempIndex = 0;
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF0F1A2D),
+      backgroundColor: const Color(0xFFFFFFFF),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -957,7 +1119,7 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: panel2,
+                color: const Color(0xFFCDD4E8),
                 borderRadius: BorderRadius.circular(100),
               ),
             ),
@@ -1053,7 +1215,25 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
   }
 
   // ── Shop Preferences Field ──
+  // Three mutually exclusive cards: Women / Men / Both
+  static const List<Map<String, String>> _shopPrefCards = [
+    {'label': 'Women', 'img': 'assets/shop/women.jpg'},
+    {'label': 'Men',   'img': 'assets/shop/men.jpg'},
+    {'label': 'Both',  'img': 'assets/shop/both.jpeg'},
+  ];
+
   Widget _buildShopPrefsField() {
+    // Determine which card is visually active
+    final bool womenSelected = _shopPrefs.length == 1 && _shopPrefs.contains('Women');
+    final bool menSelected   = _shopPrefs.length == 1 && _shopPrefs.contains('Men');
+    final bool bothSelected  = _shopPrefs.contains('Women') && _shopPrefs.contains('Men');
+
+    bool isCardActive(String label) {
+      if (label == 'Women') return womenSelected;
+      if (label == 'Men')   return menSelected;
+      return bothSelected; // Both
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 20),
       child: Column(
@@ -1067,95 +1247,100 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
             ),
           ),
           const SizedBox(height: 12),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 10, mainAxisSpacing: 10,
-            childAspectRatio: 1.0,
-            children: kShopPrefs.map((pref) {
-              final label = pref['label']!;
-              final isActive = _shopPrefs.contains(label);
-              return GestureDetector(
-                onTap: () => setState(() {
-                  if (isActive) {
-                    _shopPrefs.remove(label);
-                  } else {
-                    _shopPrefs.add(label);
-                  }
-                  // Auto-switch body gender
-                  if (label == 'Women' && !isActive) {
-                    _bodyGender = 'women';
-                    _selectedBodyShape = kBodyShapes['women']!.first['name']!;
-                  } else if (label == 'Men' && !isActive) {
-                    _bodyGender = 'men';
-                    _selectedBodyShape = kBodyShapes['men']!.first['name']!;
-                  }
-                }),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isActive ? accent : cardBorder,
-                      width: isActive ? 1.5 : 1,
-                    ),
-                    color: isActive
-                        ? const Color(0x226B91FF)
-                        : panel,
+          Row(
+            children: List.generate(_shopPrefCards.length, (index) {
+              final pref    = _shopPrefCards[index];
+              final label   = pref['label']!;
+              final isActive = isCardActive(label);
+              return Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left:  index == 0 ? 0 : 5,
+                    right: index == _shopPrefCards.length - 1 ? 0 : 5,
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(11),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Image.asset(
-                          pref['img']!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const SizedBox(),
+                  child: GestureDetector(
+                    onTap: () => setState(() {
+                      _shopPrefs.clear();
+                      if (label == 'Both') {
+                        _shopPrefs.addAll(['Women', 'Men']);
+                        _bodyGender = 'both';
+                        _selectedBodyShape = kBodyShapes['women']!.first['name']!;
+                      } else if (label == 'Women') {
+                        _shopPrefs.add('Women');
+                        _bodyGender = 'women';
+                        _selectedBodyShape = kBodyShapes['women']!.first['name']!;
+                      } else {
+                        _shopPrefs.add('Men');
+                        _bodyGender = 'men';
+                        _selectedBodyShape = kBodyShapes['men']!.first['name']!;
+                      }
+                    }),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      height: 160,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isActive ? accent : cardBorder,
+                          width: isActive ? 1.5 : 1,
                         ),
-                        Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.transparent,
-                                Colors.black.withOpacity(0.6),
-                              ],
+                        color: isActive ? const Color(0x226B91FF) : panel,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(11),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.asset(
+                              pref['img']!,
+                              fit: BoxFit.cover,
+                              alignment: Alignment.topCenter,
+                              errorBuilder: (_, _, _) => const SizedBox(),
                             ),
-                          ),
-                        ),
-                        Align(
-                          alignment: Alignment.bottomLeft,
-                          child: Padding(
-                            padding: const EdgeInsets.all(8),
-                            child: Row(
-                              children: [
-                                if (isActive)
-                                  const Padding(
-                                    padding: EdgeInsets.only(right: 4),
-                                    child: Icon(Icons.check_circle,
-                                        color: accent, size: 13),
-                                  ),
-                                Text(
-                                  label,
-                                  style: const TextStyle(
-                                    color: textColor, fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    fontFamily: 'DM Sans',
-                                  ),
+                            Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.transparent,
+                                    Colors.black.withOpacity(0.65),
+                                  ],
                                 ),
-                              ],
+                              ),
                             ),
-                          ),
+                            Align(
+                              alignment: Alignment.bottomLeft,
+                              child: Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: Row(
+                                  children: [
+                                    if (isActive)
+                                      const Padding(
+                                        padding: EdgeInsets.only(right: 4),
+                                        child: Icon(Icons.check_circle,
+                                            color: accent, size: 13),
+                                      ),
+                                    Text(
+                                      label,
+                                      style: const TextStyle(
+                                        color: textColor, fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        fontFamily: 'DM Sans',
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
               );
-            }).toList(),
+            }),
           ),
         ],
       ),
@@ -1164,6 +1349,69 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
 
   // ── Body Shape Field ──
   Widget _buildBodyShapeField() {
+    if (_bodyGender == 'both') {
+      // Show women shapes section + men shapes section
+      final womenShapes = kBodyShapes['women']!;
+      final menShapes = kBodyShapes['men']!;
+      return Padding(
+        padding: const EdgeInsets.only(top: 20, bottom: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'BODY SHAPE',
+              style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w600,
+                color: muted, letterSpacing: 0.07 * 11, fontFamily: 'DM Sans',
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Women section label
+            const Text(
+              'Women',
+              style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600,
+                color: accent, letterSpacing: 0.04 * 12, fontFamily: 'DM Sans',
+              ),
+            ),
+            const SizedBox(height: 8),
+            GridView.count(
+              crossAxisCount: 3,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisSpacing: 10, mainAxisSpacing: 10,
+              childAspectRatio: 0.65,
+              children: womenShapes.map((shape) {
+                final isActive = _selectedBodyShape == shape['name'];
+                return _buildBodyShapeCard(shape, isActive);
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+            // Men section label
+            const Text(
+              'Men',
+              style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600,
+                color: accent2, letterSpacing: 0.04 * 12, fontFamily: 'DM Sans',
+              ),
+            ),
+            const SizedBox(height: 8),
+            GridView.count(
+              crossAxisCount: 3,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisSpacing: 10, mainAxisSpacing: 10,
+              childAspectRatio: 0.65,
+              children: menShapes.map((shape) {
+                final isActive = _selectedBodyShape == shape['name'];
+                return _buildBodyShapeCard(shape, isActive);
+              }).toList(),
+            ),
+          ],
+        ),
+      );
+    }
+
     final shapes = kBodyShapes[_bodyGender] ?? kBodyShapes['women']!;
     return Padding(
       padding: const EdgeInsets.only(top: 20, bottom: 8),
@@ -1186,56 +1434,56 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
             childAspectRatio: 0.65,
             children: shapes.map((shape) {
               final isActive = _selectedBodyShape == shape['name'];
-              return GestureDetector(
-                onTap: () => setState(() => _selectedBodyShape = shape['name']!),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: isActive ? accent : cardBorder,
-                      width: isActive ? 2 : 1,
-                    ),
-                    color: isActive
-                        ? const Color(0x226B91FF)
-                        : panel,
-                  ),
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: ClipRRect(
-                          borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(13)),
-                          child: Image.asset(
-                            shape['img']!,
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                            errorBuilder: (_, _, _) =>
-                                const Icon(Icons.person, color: muted, size: 36),
-                          ),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        child: Text(
-                          shape['name']!,
-                          style: TextStyle(
-                            color: isActive ? accent : muted,
-                            fontSize: 11,
-                            fontWeight: isActive
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                            fontFamily: 'DM Sans',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
+              return _buildBodyShapeCard(shape, isActive);
             }).toList(),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildBodyShapeCard(Map<String, String> shape, bool isActive) {
+    return GestureDetector(
+      onTap: () => setState(() => _selectedBodyShape = shape['name']!),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isActive ? accent : cardBorder,
+            width: isActive ? 2 : 1,
+          ),
+          color: isActive ? const Color(0x226B91FF) : panel,
+        ),
+        child: Column(
+          children: [
+            Expanded(
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(13)),
+                child: Image.asset(
+                  shape['img']!,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  errorBuilder: (_, _, _) =>
+                      const Icon(Icons.person, color: muted, size: 36),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Text(
+                shape['name']!,
+                style: TextStyle(
+                  color: isActive ? accent : muted,
+                  fontSize: 11,
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                  fontFamily: 'DM Sans',
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1362,7 +1610,7 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
                       width: isActive ? 22 : 6,
                       height: 6,
                       decoration: BoxDecoration(
-                        color: isActive ? accent2 : panel2,
+                        color: isActive ? accent2 : const Color(0xFFCDD4E8),
                         borderRadius:
                         BorderRadius.circular(isActive ? 3 : 50),
                       ),
@@ -1385,7 +1633,7 @@ class _Screen1State extends State<Screen1> with TickerProviderStateMixin {
         width: 130,
         height: 5,
         decoration: BoxDecoration(
-          color: panel2,
+          color: const Color(0xFFCDD4E8),
           borderRadius: BorderRadius.circular(100),
         ),
       ),
@@ -1491,6 +1739,177 @@ class _BodyShapeRevealState extends State<_BodyShapeReveal>
                 ),
         );
       },
+    );
+  }
+}
+
+// ── Country Dropdown Overlay — appears below the button ──
+class _CountryDropdownOverlay extends StatefulWidget {
+  final LayerLink link;
+  final List<Map<String, dynamic>> countries;
+  final String selectedCode;
+  final String selectedFlag;
+  final void Function(Map<String, dynamic>) onSelected;
+  final VoidCallback onDismiss;
+
+  const _CountryDropdownOverlay({
+    required this.link,
+    required this.countries,
+    required this.selectedCode,
+    required this.selectedFlag,
+    required this.onSelected,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_CountryDropdownOverlay> createState() => _CountryDropdownOverlayState();
+}
+
+class _CountryDropdownOverlayState extends State<_CountryDropdownOverlay> {
+  String _search = '';
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const sheetBg  = Color(0xFFFFFFFF);
+    const itemBg   = Color(0xFFF0F4FF);
+    const borderCol = Color(0xFFE5E9F7);
+    const labelCol  = Color(0xFF66708A);
+    const textCol   = Color(0xFF1A1D26);
+    const accentCol = Color(0xFF6B91FF);
+
+    final filtered = widget.countries.where((c) {
+      final name = (c['name'] as String).toLowerCase();
+      final code = c['code'] as String;
+      final q = _search.toLowerCase();
+      return name.contains(q) || code.contains(q);
+    }).toList();
+
+    return Stack(
+      children: [
+        // Dismiss tap area
+        Positioned.fill(
+          child: GestureDetector(
+            onTap: widget.onDismiss,
+            behavior: HitTestBehavior.translucent,
+            child: const SizedBox.expand(),
+          ),
+        ),
+        // Dropdown positioned below the button
+        CompositedTransformFollower(
+          link: widget.link,
+          showWhenUnlinked: false,
+          offset: const Offset(0, 54), // below button (height 50 + 4 gap)
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: 260,
+              constraints: const BoxConstraints(maxHeight: 320),
+              decoration: BoxDecoration(
+                color: sheetBg,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: borderCol, width: 1.2),
+                boxShadow: const [
+                  BoxShadow(color: Color(0x18000000), blurRadius: 24, offset: Offset(0, 8)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Search bar
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+                    child: TextField(
+                      controller: _searchCtrl,
+                      autofocus: true,
+                      onChanged: (v) => setState(() => _search = v),
+                      style: const TextStyle(fontSize: 13, color: textCol, fontFamily: 'DM Sans'),
+                      decoration: InputDecoration(
+                        hintText: 'Search…',
+                        hintStyle: const TextStyle(color: labelCol, fontSize: 13, fontFamily: 'DM Sans'),
+                        prefixIcon: const Icon(Icons.search_rounded, color: labelCol, size: 17),
+                        filled: true,
+                        fillColor: itemBg,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        isDense: true,
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: borderCol, width: 1),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: accentCol, width: 1.2),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // List
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                      itemCount: filtered.length,
+                      itemBuilder: (_, i) {
+                        final c = filtered[i];
+                        final isSelected = c['code'] == widget.selectedCode &&
+                            c['flag'] == widget.selectedFlag;
+                        return GestureDetector(
+                          onTap: () => widget.onSelected(c),
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(vertical: 2),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                            decoration: BoxDecoration(
+                              color: isSelected ? const Color(0x256B91FF) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
+                              children: [
+                                Text(c['flag'] as String, style: const TextStyle(fontSize: 18)),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    c['name'] as String,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w400,
+                                      color: textCol,
+                                      fontFamily: 'DM Sans',
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Text(
+                                  c['code'] as String,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: labelCol,
+                                    fontFamily: 'DM Sans',
+                                  ),
+                                ),
+                                if (isSelected) ...[
+                                  const SizedBox(width: 6),
+                                  const Icon(Icons.check_rounded, color: accentCol, size: 15),
+                                ],
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

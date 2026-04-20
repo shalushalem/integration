@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data'; // ðŸš€ Added this so it understands Uint8List!
 import 'package:http/http.dart' as http;
@@ -9,6 +10,7 @@ class BackendService {
   BackendService({this.authToken, this.refreshAuthToken});
 
   final String baseUrl = Env.backendApiUrl;
+  final String _dataBasePath = '/api/data';
   static const int _maxImageBytes = 4 * 1024 * 1024;
   String? authToken;
   final TokenRefresher? refreshAuthToken;
@@ -36,13 +38,14 @@ class BackendService {
   Future<http.Response> _postJsonWithAuthRetry(
     String path,
     Map<String, dynamic> body,
+    {Duration timeout = const Duration(seconds: 30)}
   ) async {
     Future<http.Response> doPost(Map<String, String> headers) {
       return http.post(
         Uri.parse('$baseUrl$path'),
         headers: headers,
         body: jsonEncode(body),
-      );
+      ).timeout(timeout);
     }
 
     var response = await doPost(_jsonHeaders());
@@ -67,6 +70,52 @@ class BackendService {
       if (refreshed.isNotEmpty) {
         setAuthToken(refreshed);
         response = await doGet(_authHeaders());
+      }
+    }
+    return response;
+  }
+
+  Future<http.Response> _patchJsonWithAuthRetry(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    Future<http.Response> doPatch(Map<String, String> headers) {
+      return http.patch(
+        Uri.parse('$baseUrl$path'),
+        headers: headers,
+        body: jsonEncode(body),
+      );
+    }
+
+    var response = await doPatch(_jsonHeaders());
+    if (response.statusCode == 401 && refreshAuthToken != null) {
+      final refreshed = (await refreshAuthToken!())?.trim() ?? '';
+      if (refreshed.isNotEmpty) {
+        setAuthToken(refreshed);
+        response = await doPatch(_jsonHeaders());
+      }
+    }
+    return response;
+  }
+
+  Future<http.Response> _deleteJsonWithAuthRetry(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    Future<http.Response> doDelete(Map<String, String> headers) async {
+      final req = http.Request('DELETE', Uri.parse('$baseUrl$path'))
+        ..headers.addAll(headers)
+        ..body = jsonEncode(body);
+      final streamed = await req.send();
+      return http.Response.fromStream(streamed);
+    }
+
+    var response = await doDelete(_jsonHeaders());
+    if (response.statusCode == 401 && refreshAuthToken != null) {
+      final refreshed = (await refreshAuthToken!())?.trim() ?? '';
+      if (refreshed.isNotEmpty) {
+        setAuthToken(refreshed);
+        response = await doDelete(_jsonHeaders());
       }
     }
     return response;
@@ -116,6 +165,213 @@ class BackendService {
 
   bool _isImagePayloadSafe(Uint8List bytes) {
     return bytes.lengthInBytes <= _maxImageBytes;
+  }
+
+  Future<void> _ensureToken() async {
+    if ((authToken ?? '').trim().isNotEmpty) return;
+    if (refreshAuthToken == null) return;
+    final refreshed = (await refreshAuthToken!())?.trim() ?? '';
+    if (refreshed.isNotEmpty) {
+      setAuthToken(refreshed);
+    }
+  }
+
+  Map<String, dynamic> _flattenDoc(Map<String, dynamic> raw) {
+    final out = <String, dynamic>{};
+    raw.forEach((k, v) {
+      if (!k.startsWith(r'$')) out[k] = v;
+    });
+    if (raw.containsKey(r'$id')) out[r'$id'] = raw[r'$id'];
+    if (raw.containsKey('id')) out['id'] = raw['id'];
+    return out;
+  }
+
+  Future<List<Map<String, dynamic>>> _dataList(
+    String resource, {
+    String? userId,
+    String? occasion,
+    int limit = 200,
+  }) async {
+    await _ensureToken();
+    final query = <String, String>{'limit': '$limit'};
+    if ((userId ?? '').trim().isNotEmpty) query['user_id'] = userId!.trim();
+    if ((occasion ?? '').trim().isNotEmpty) query['occasion'] = occasion!.trim();
+    final uri = Uri(
+      path: '$_dataBasePath/$resource',
+      queryParameters: query,
+    ).toString();
+    final response = await _getWithAuthRetry(uri);
+    if (response.statusCode != 200) {
+      throw Exception('Failed to fetch $resource: ${response.statusCode}');
+    }
+    final body = jsonDecode(response.body);
+    if (body is! Map<String, dynamic>) return const <Map<String, dynamic>>[];
+    final docs = body['documents'];
+    if (docs is! List) return const <Map<String, dynamic>>[];
+    return docs
+        .whereType<Map>()
+        .map((e) => _flattenDoc(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> _dataCreate(
+    String resource,
+    Map<String, dynamic> data, {
+    String? userId,
+  }) async {
+    await _ensureToken();
+    final response = await _postJsonWithAuthRetry(_dataBasePath, {
+      'resource': resource,
+      'data': data,
+      if ((userId ?? '').trim().isNotEmpty) 'user_id': userId!.trim(),
+    });
+    if (response.statusCode != 200) {
+      throw Exception('Failed to create $resource: ${response.statusCode}');
+    }
+    final body = jsonDecode(response.body);
+    if (body is! Map<String, dynamic>) return const <String, dynamic>{};
+    final doc = body['document'];
+    if (doc is! Map<String, dynamic>) return const <String, dynamic>{};
+    return _flattenDoc(doc);
+  }
+
+  Future<Map<String, dynamic>> _dataUpdate(
+    String resource,
+    String documentId,
+    Map<String, dynamic> data,
+  ) async {
+    await _ensureToken();
+    final id = documentId.trim();
+    if (id.isEmpty) throw Exception('documentId is required');
+    final response = await _patchJsonWithAuthRetry('$_dataBasePath/$id', {
+      'resource': resource,
+      'data': data,
+    });
+    if (response.statusCode != 200) {
+      throw Exception('Failed to update $resource: ${response.statusCode}');
+    }
+    final body = jsonDecode(response.body);
+    if (body is! Map<String, dynamic>) return const <String, dynamic>{};
+    final doc = body['document'];
+    if (doc is! Map<String, dynamic>) return const <String, dynamic>{};
+    return _flattenDoc(doc);
+  }
+
+  Future<void> _dataDelete(String resource, String documentId) async {
+    await _ensureToken();
+    final id = documentId.trim();
+    if (id.isEmpty) return;
+    final response = await _deleteJsonWithAuthRetry(_dataBasePath, {
+      'resource': resource,
+      'document_id': id,
+    });
+    if (response.statusCode != 200) {
+      throw Exception('Failed to delete $resource: ${response.statusCode}');
+    }
+  }
+
+  Future<String> resolveUserId([String fallback = 'demo_user']) async {
+    await _ensureToken();
+    final token = (authToken ?? '').trim();
+    if (token.isEmpty) return fallback;
+    final parts = token.split('.');
+    if (parts.length < 2) return fallback;
+    try {
+      final normalized = base64Url.normalize(parts[1]);
+      final payload = jsonDecode(utf8.decode(base64Url.decode(normalized)));
+      if (payload is Map<String, dynamic>) {
+        final sub = (payload['sub'] ?? '').toString().trim();
+        if (sub.isNotEmpty) return sub;
+      }
+    } catch (_) {}
+    return fallback;
+  }
+
+  Future<List<Map<String, dynamic>>> getSavedBoards({
+    required String userId,
+    String? occasion,
+  }) async {
+    return _dataList('saved_boards', userId: userId, occasion: occasion);
+  }
+
+  Future<List<Map<String, dynamic>>> getLifeBoards({
+    required String userId,
+  }) async {
+    final docs = await _dataList('saved_boards', userId: userId);
+    return docs.where((doc) {
+      final boardType = (doc['boardType'] ?? doc['board_type'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      return boardType.isNotEmpty;
+    }).toList();
+  }
+
+  Future<void> deleteSavedBoard(String id) async {
+    await _dataDelete('saved_boards', id);
+  }
+
+  Future<List<Map<String, dynamic>>> getBills({required String userId}) async {
+    return _dataList('bills', userId: userId);
+  }
+
+  Future<List<Map<String, dynamic>>> getCoupons({required String userId}) async {
+    return _dataList('coupons', userId: userId);
+  }
+
+  Future<Map<String, dynamic>> createBill(
+    Map<String, dynamic> data, {
+    required String userId,
+  }) async {
+    return _dataCreate('bills', data, userId: userId);
+  }
+
+  Future<Map<String, dynamic>> createCoupon(
+    Map<String, dynamic> data, {
+    required String userId,
+  }) async {
+    return _dataCreate('coupons', data, userId: userId);
+  }
+
+  Future<void> deleteBill(String id) async {
+    await _dataDelete('bills', id);
+  }
+
+  Future<void> deleteCoupon(String id) async {
+    await _dataDelete('coupons', id);
+  }
+
+  Future<List<Map<String, dynamic>>> getMeds({required String userId}) async {
+    return _dataList('meds', userId: userId);
+  }
+
+  Future<List<Map<String, dynamic>>> getMedLogs({required String userId}) async {
+    return _dataList('med_logs', userId: userId);
+  }
+
+  Future<Map<String, dynamic>> createMed(
+    Map<String, dynamic> data, {
+    required String userId,
+  }) async {
+    return _dataCreate('meds', data, userId: userId);
+  }
+
+  Future<Map<String, dynamic>> updateMed(
+    String id,
+    Map<String, dynamic> data,
+  ) async {
+    return _dataUpdate('meds', id, data);
+  }
+
+  Future<void> deleteMed(String id) async {
+    await _dataDelete('meds', id);
+  }
+
+  Future<Map<String, dynamic>> createMedLog(
+    Map<String, dynamic> data, {
+    required String userId,
+  }) async {
+    return _dataCreate('med_logs', data, userId: userId);
   }
 
   // --- Chat & Styling Engine ---
@@ -279,17 +535,21 @@ class BackendService {
       for (final path in candidates) {
         final response = await _postJsonWithAuthRetry(path, {
           'image_base64': base64String,
-        });
+        }, timeout: const Duration(seconds: 90));
 
         if (response.statusCode == 200) {
           return jsonDecode(response.body) as Map<String, dynamic>;
         }
+        print('Analyze API failed on $path: ${response.statusCode}');
         if (!_shouldTryNextCandidate(response.statusCode)) {
           break;
         }
       }
 
       print('Analyze API Failed on all known routes.');
+      return null;
+    } on TimeoutException catch (e) {
+      print('Garment Analysis Timeout Error: $e');
       return null;
     } catch (e) {
       print('Garment Analysis Error: $e');

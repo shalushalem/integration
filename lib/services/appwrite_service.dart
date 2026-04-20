@@ -373,6 +373,34 @@ class AppwriteService extends ChangeNotifier {
     throw Exception("User not authenticated");
   }
 
+  Future<bool> loginWithApple() async {
+    try {
+      await account.createOAuth2Session(provider: OAuthProvider.apple);
+      final user = await getCurrentUser();
+      if (user != null) {
+        await _persistLastUserId(user.$id);
+      }
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint("Apple login error: $e");
+      return false;
+    }
+  }
+
+  Future<void> sendPasswordReset(String email) async {
+    final normalized = email.trim();
+    if (normalized.isEmpty) {
+      throw Exception('Email is required');
+    }
+    // Appwrite recovery redirect URL; should point to an allowed host in Appwrite.
+    final redirect = 'https://ahvi.app/reset-password';
+    await account.createRecovery(
+      email: normalized,
+      url: redirect,
+    );
+  }
+
   bool _isConnectivityException(Object error) {
     final text = error.toString().toLowerCase();
     return text.contains('socketexception') ||

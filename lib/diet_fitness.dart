@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:myapp/app_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:myapp/theme/theme_tokens.dart';
-import 'package:myapp/meal_planner.dart' as diet;
+import 'package:myapp/diet_page.dart' as diet;
 import 'package:myapp/fitness_page.dart' as fitness;
 
 class DietAndFitnessScreen extends StatefulWidget {
@@ -109,7 +110,7 @@ class _DietAndFitnessScreenState extends State<DietAndFitnessScreen>
               controller: _tabController,
               physics: const NeverScrollableScrollPhysics(),
               children: const [
-                RepaintBoundary(child: diet.Screen4()),
+                RepaintBoundary(child: diet.MainScreen()),
                 RepaintBoundary(child: fitness.WorkoutStudioScreen()),
               ],
             ),
@@ -147,22 +148,22 @@ class _DietAndFitnessScreenState extends State<DietAndFitnessScreen>
             text: TextSpan(
               children: [
                 TextSpan(
-                  text: 'Diet & ',
+                  text: '${AppLocalizations.t(context, 'diet_and')} ',
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 17,
+                    fontSize: 22,
                     fontWeight: FontWeight.w600,
                     color: t.textPrimary,
                     letterSpacing: -0.3,
                   ),
                 ),
                 TextSpan(
-                  text: 'Fitness',
+                  text: AppLocalizations.t(context, 'fitness'),
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 17,
-                    fontWeight: FontWeight.w300,
-                    color: t.accent.primary,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                    color: t.textPrimary,
                     letterSpacing: -0.3,
                   ),
                 ),
@@ -214,9 +215,9 @@ class _DietAndFitnessScreenState extends State<DietAndFitnessScreen>
           fontWeight: FontWeight.w500,
           fontSize: 13,
         ),
-        tabs: const [
-          Tab(text: 'Diet'),
-          Tab(text: 'Fitness'),
+        tabs: [
+          Tab(text: AppLocalizations.t(context, 'diet')),
+          Tab(text: AppLocalizations.t(context, 'fitness')),
         ],
       ),
     );
