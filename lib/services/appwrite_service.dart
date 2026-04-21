@@ -464,17 +464,63 @@ class AppwriteService extends ChangeNotifier {
     String? occasion,
     int limit = 100,
   }) async {
-    final query = <String, String>{'limit': '$limit'};
-    if (userId != null && userId.isNotEmpty) query['user_id'] = userId;
-    if (occasion != null && occasion.isNotEmpty) query['occasion'] = occasion;
+    final requestedLimit = limit <= 0 ? 100 : limit;
+    final byId = <String, ProxyDocument>{};
+    var offset = 0;
+    var hasMore = true;
+    var pageGuard = 0;
 
-    final response = await http.get(_resourceUri(resource, query: query));
-    if (response.statusCode != 200) {
-      throw Exception('Failed to fetch $resource: ${response.body}');
+    while (hasMore && byId.length < requestedLimit && pageGuard < 100) {
+      pageGuard += 1;
+      final remaining = requestedLimit - byId.length;
+      final pageLimit = remaining < 100 ? remaining : 100;
+      final query = <String, String>{
+        'limit': '$pageLimit',
+        'offset': '$offset',
+      };
+      if (userId != null && userId.isNotEmpty) query['user_id'] = userId;
+      if (occasion != null && occasion.isNotEmpty) query['occasion'] = occasion;
+
+      final response = await http.get(_resourceUri(resource, query: query));
+      if (response.statusCode != 200) {
+        throw Exception('Failed to fetch $resource: ${response.body}');
+      }
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final docs = List<Map<String, dynamic>>.from(body['documents'] ?? const []);
+
+      for (final raw in docs) {
+        final doc = ProxyDocument.fromApi(raw);
+        byId.putIfAbsent(doc.$id, () => doc);
+      }
+
+      final meta = body['meta'] is Map
+          ? Map<String, dynamic>.from(body['meta'] as Map)
+          : const <String, dynamic>{};
+      final pageHasMore = meta['has_more'] == true;
+      final nextOffsetRaw = meta['next_offset'];
+      final nextOffset = nextOffsetRaw is int
+          ? nextOffsetRaw
+          : int.tryParse('${nextOffsetRaw ?? ''}');
+
+      if (docs.isEmpty) {
+        break;
+      }
+      hasMore = pageHasMore;
+      if (!hasMore) {
+        break;
+      }
+
+      final fallbackOffset = offset + docs.length;
+      final candidateOffset = (nextOffset != null && nextOffset > offset)
+          ? nextOffset
+          : fallbackOffset;
+      if (candidateOffset <= offset) {
+        break;
+      }
+      offset = candidateOffset;
     }
-    final body = jsonDecode(response.body) as Map<String, dynamic>;
-    final docs = List<Map<String, dynamic>>.from(body['documents'] ?? const []);
-    return docs.map(ProxyDocument.fromApi).toList();
+
+    return byId.values.take(requestedLimit).toList();
   }
 
   Future<ProxyDocument> _createDoc(
