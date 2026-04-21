@@ -116,6 +116,17 @@ class LocalDataStore {
               updated_at TEXT NOT NULL
             )
           ''');
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS $_opsTable (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id TEXT NOT NULL,
+              entity TEXT NOT NULL,
+              op TEXT NOT NULL,
+              ref_id TEXT NOT NULL,
+              payload_json TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            )
+          ''');
         }
       },
     );

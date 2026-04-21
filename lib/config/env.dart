@@ -17,10 +17,18 @@ class Env {
       '';
 
   static String get backendApiUrl {
-    var value = (dotenv.env['BACKEND_API_URL'] ??
-            dotenv.env['EXPO_PUBLIC_BACKEND_API_URL'] ??
-            'https://cloudbackend-production-63ba.up.railway.app')
-        .trim();
+    const apiFromDefine = String.fromEnvironment('API_URL', defaultValue: '');
+    // Priority:
+    // 1) --dart-define=API_URL=...
+    // 2) runtime dotenv values
+    // 3) explicit safe fallback
+    var value = (
+      apiFromDefine.isNotEmpty
+          ? apiFromDefine
+          : (dotenv.env['BACKEND_API_URL'] ??
+                dotenv.env['EXPO_PUBLIC_BACKEND_API_URL'] ??
+                'https://cloudbackend-production-63ba.up.railway.app')
+    ).trim();
 
     if (value.isEmpty) value = 'https://cloudbackend-production-63ba.up.railway.app';
     while (value.endsWith('/')) {

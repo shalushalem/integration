@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data'; // ðŸš€ Added this so it understands Uint8List!
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:myapp/config/env.dart';
 
@@ -38,6 +39,17 @@ class BackendAnalyzeException implements Exception {
   @override
   String toString() =>
       'BackendAnalyzeException(status=$statusCode, message=$message)';
+}
+
+Map<String, dynamic> _encodeWardrobeUploadPayload(Map<String, dynamic> params) {
+  final fileId = (params['file_id'] ?? '').toString();
+  final raw = params['raw'] as Uint8List? ?? Uint8List(0);
+  final masked = params['masked'] as Uint8List? ?? Uint8List(0);
+  return <String, dynamic>{
+    'file_id': fileId,
+    'raw_image_base64': base64Encode(raw),
+    'masked_image_base64': base64Encode(masked),
+  };
 }
 
 class BackendService {
@@ -817,11 +829,12 @@ class BackendService {
           },
         );
       }
-      final response = await _postJsonWithAuthRetry('/api/uploads/wardrobe', {
+      final payload = await compute(_encodeWardrobeUploadPayload, <String, dynamic>{
         'file_id': fileId,
-        'raw_image_base64': base64Encode(rawImageBytes),
-        'masked_image_base64': base64Encode(maskedImageBytes),
+        'raw': rawImageBytes,
+        'masked': maskedImageBytes,
       });
+      final response = await _postJsonWithAuthRetry('/api/uploads/wardrobe', payload);
       if (response.statusCode != 200) {
         throw _wardrobeUploadHttpError(response);
       }

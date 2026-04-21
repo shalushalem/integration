@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:appwrite/appwrite.dart';
@@ -140,6 +141,9 @@ class AppwriteService extends ChangeNotifier {
   late String _baseUrl;
   final LocalDataStore _localStore = LocalDataStore();
   bool _localReady = false;
+  Future<void>? _initFuture;
+  bool _isSyncing = false;
+  Future<void>? _syncInFlight;
   static const Set<int> _retryableStatusCodes = {408, 429};
 
   AppwriteService() {
@@ -152,10 +156,15 @@ class AppwriteService extends ChangeNotifier {
     _baseUrl = '${Env.backendApiUrl}/api/data';
   }
 
-  Future<void> _ensureLocalReady() async {
-    if (_localReady) return;
-    await _localStore.init();
-    _localReady = true;
+  Future<void> _ensureLocalReady() {
+    if (_localReady) return Future.value();
+    _initFuture ??= _localStore.init().then((_) {
+      _localReady = true;
+    }).catchError((error) {
+      _initFuture = null;
+      throw error;
+    });
+    return _initFuture!;
   }
 
   bool _isLocalId(String id) => id.startsWith('local_');
@@ -178,95 +187,118 @@ class AppwriteService extends ChangeNotifier {
     await prefs.remove(_lastUserIdKey);
   }
 
+  Future<Map<String, String>> _authHeaders() async {
+    final token = await getBackendJwtToken();
+    return {
+      'Content-Type': 'application/json',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+    };
+  }
+
   Future<void> _syncPendingLocalChanges(String userId) async {
     await _ensureLocalReady();
-    final pending = await _localStore.pendingOps(userId);
-    for (final op in pending) {
-      try {
-        if (op.entity == 'wardrobe' && op.op == 'create') {
-          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
-          await _createDoc('outfits', data, userId: userId);
-          await _localStore.deleteWardrobeItem(userId, op.refId);
-          await _localStore.deletePendingOp(op.id);
-          continue;
-        }
-
-        if (op.entity == 'wardrobe' && op.op == 'update') {
-          if (_isLocalId(op.refId)) {
+    if (_syncInFlight != null) {
+      await _syncInFlight;
+      return;
+    }
+    if (_isSyncing) return;
+    _isSyncing = true;
+    final completer = Completer<void>();
+    _syncInFlight = completer.future;
+    try {
+      final pending = await _localStore.pendingOps(userId);
+      for (final op in pending) {
+        try {
+          if (op.entity == 'wardrobe' && op.op == 'create') {
+            final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+            await _createDoc('outfits', data, userId: userId);
+            await _localStore.deleteWardrobeItem(userId, op.refId);
             await _localStore.deletePendingOp(op.id);
             continue;
           }
-          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
-          await _updateDoc('outfits', op.refId, data);
-          await _localStore.deleteWardrobeItem(userId, op.refId);
-          await _localStore.deletePendingOp(op.id);
-          continue;
-        }
 
-        if (op.entity == 'wardrobe' && op.op == 'delete') {
-          if (_isLocalId(op.refId)) {
+          if (op.entity == 'wardrobe' && op.op == 'update') {
+            if (_isLocalId(op.refId)) {
+              await _localStore.deletePendingOp(op.id);
+              continue;
+            }
+            final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+            await _updateDoc('outfits', op.refId, data);
             await _localStore.deletePendingOp(op.id);
             continue;
           }
-          await _deleteDoc('outfits', op.refId);
-          await _localStore.deleteWardrobeItem(userId, op.refId);
-          await _localStore.deletePendingOp(op.id);
-          continue;
-        }
 
-        if (op.entity == 'saved_board' && op.op == 'delete') {
-          await _deleteDoc('saved_boards', op.refId);
-          await _localStore.deletePendingOp(op.id);
-          continue;
-        }
+          if (op.entity == 'wardrobe' && op.op == 'delete') {
+            if (_isLocalId(op.refId)) {
+              await _localStore.deletePendingOp(op.id);
+              continue;
+            }
+            await _deleteDoc('outfits', op.refId);
+            await _localStore.deleteWardrobeItem(userId, op.refId);
+            await _localStore.deletePendingOp(op.id);
+            continue;
+          }
 
-        if (op.entity == 'saved_board' && op.op == 'create') {
-          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
-          await _createDoc('saved_boards', data, userId: userId);
-          await _localStore.deleteBoard(userId, op.refId);
-          await _localStore.deletePendingOp(op.id);
-          continue;
-        }
+          if (op.entity == 'saved_board' && op.op == 'delete') {
+            await _deleteDoc('saved_boards', op.refId);
+            await _localStore.deletePendingOp(op.id);
+            continue;
+          }
 
-        if (op.entity == 'profile' && op.op == 'upsert') {
-          final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
-          final response = await http.put(
-            Uri.parse('$_baseUrl/users/$userId'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(data),
-          );
-          if (response.statusCode == 200) {
-            final body = jsonDecode(response.body) as Map<String, dynamic>;
-            final doc = ProxyDocument.fromApi(
-              Map<String, dynamic>.from(body['document']),
+          if (op.entity == 'saved_board' && op.op == 'create') {
+            final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+            await _createDoc('saved_boards', data, userId: userId);
+            await _localStore.deleteBoard(userId, op.refId);
+            await _localStore.deletePendingOp(op.id);
+            continue;
+          }
+
+          if (op.entity == 'profile' && op.op == 'upsert') {
+            final data = Map<String, dynamic>.from(op.payload['data'] ?? const {});
+            final response = await http.put(
+              Uri.parse('$_baseUrl/users/$userId'),
+              headers: await _authHeaders(),
+              body: jsonEncode(data),
             );
-            await _localStore.cacheUserProfile(
-              userId,
-              data: Map<String, dynamic>.from(doc.data),
-              raw: Map<String, dynamic>.from(doc.raw),
+            if (response.statusCode == 200) {
+              final body = jsonDecode(response.body) as Map<String, dynamic>;
+              final doc = ProxyDocument.fromApi(
+                Map<String, dynamic>.from(body['document']),
+              );
+              await _localStore.cacheUserProfile(
+                userId,
+                data: Map<String, dynamic>.from(doc.data),
+                raw: Map<String, dynamic>.from(doc.raw),
+              );
+              await _localStore.deletePendingOp(op.id);
+              continue;
+            }
+            throw _HttpStatusException(response.statusCode, response.body);
+          }
+        } on DuplicateOutfitException catch (dup) {
+          if (op.entity == 'wardrobe' && op.op == 'create') {
+            debugPrint(
+              'Dropping duplicate pending create ${op.refId}: ${dup.message}',
             );
+            await _localStore.deleteWardrobeItem(userId, op.refId);
             await _localStore.deletePendingOp(op.id);
             continue;
           }
-          throw _HttpStatusException(response.statusCode, response.body);
+          break;
+        } catch (e) {
+          if (_isPermanentSyncError(e)) {
+            debugPrint('Dropping broken offline op ${op.id}: $e');
+            await _dropBrokenPendingOp(userId, op);
+            continue;
+          }
+          break;
         }
-      } on DuplicateOutfitException catch (dup) {
-        if (op.entity == 'wardrobe' && op.op == 'create') {
-          debugPrint(
-            'Dropping duplicate pending create ${op.refId}: ${dup.message}',
-          );
-          await _localStore.deleteWardrobeItem(userId, op.refId);
-          await _localStore.deletePendingOp(op.id);
-          continue;
-        }
-        break;
-      } catch (e) {
-        if (_isPermanentSyncError(e)) {
-          debugPrint('Dropping broken offline op ${op.id}: $e');
-          await _dropBrokenPendingOp(userId, op);
-          continue;
-        }
-        break;
+      }
+    } finally {
+      _isSyncing = false;
+      _syncInFlight = null;
+      if (!completer.isCompleted) {
+        completer.complete();
       }
     }
 
@@ -481,7 +513,10 @@ class AppwriteService extends ChangeNotifier {
       if (userId != null && userId.isNotEmpty) query['user_id'] = userId;
       if (occasion != null && occasion.isNotEmpty) query['occasion'] = occasion;
 
-      final response = await http.get(_resourceUri(resource, query: query));
+      final response = await http.get(
+        _resourceUri(resource, query: query),
+        headers: await _authHeaders(),
+      );
       if (response.statusCode != 200) {
         throw Exception('Failed to fetch $resource: ${response.body}');
       }
@@ -532,7 +567,7 @@ class AppwriteService extends ChangeNotifier {
   }) async {
     final response = await http.post(
       Uri.parse(_baseUrl),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(),
       body: jsonEncode({
         'resource': resource,
         'data': data,
@@ -580,7 +615,7 @@ class AppwriteService extends ChangeNotifier {
   ) async {
     final response = await http.patch(
       Uri.parse('$_baseUrl/$documentId'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(),
       body: jsonEncode({
         'resource': resource,
         'data': data,
@@ -595,8 +630,9 @@ class AppwriteService extends ChangeNotifier {
   }
 
   Future<void> _deleteDoc(String resource, String documentId) async {
+    final headers = await _authHeaders();
     final request = http.Request('DELETE', Uri.parse(_baseUrl))
-      ..headers['Content-Type'] = 'application/json'
+      ..headers.addAll(headers)
       ..body = jsonEncode({'resource': resource, 'document_id': documentId});
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
@@ -638,7 +674,10 @@ class AppwriteService extends ChangeNotifier {
     } catch (_) {}
 
     try {
-      final response = await http.get(Uri.parse('$_baseUrl/users/$userId'));
+      final response = await http.get(
+        Uri.parse('$_baseUrl/users/$userId'),
+        headers: await _authHeaders(),
+      );
       if (response.statusCode != 200) {
         return null;
       }
@@ -661,7 +700,7 @@ class AppwriteService extends ChangeNotifier {
     try {
       final response = await http.put(
         Uri.parse('$_baseUrl/users/$userId'),
-        headers: {'Content-Type': 'application/json'},
+        headers: await _authHeaders(),
         body: jsonEncode(data),
       );
       if (response.statusCode != 200) {
@@ -723,7 +762,7 @@ class AppwriteService extends ChangeNotifier {
 
     try {
       userId ??= await _requireUserId();
-      final docs = await _listDocs('outfits', userId: userId, limit: 200);
+      final docs = await _listDocs('outfits', userId: userId, limit: 1000);
       final mapped = docs.map(_wardrobeDocToLocalMap).toList();
       await _localStore.cacheWardrobeItems(userId, mapped);
       return mapped;
@@ -739,7 +778,10 @@ class AppwriteService extends ChangeNotifier {
 
   Future<Map<String, dynamic>?> getWardrobeItemById(String documentId) async {
     try {
-      final response = await http.get(Uri.parse('$_baseUrl/outfits/$documentId'));
+      final response = await http.get(
+        Uri.parse('$_baseUrl/outfits/$documentId'),
+        headers: await _authHeaders(),
+      );
       if (response.statusCode != 200) return null;
       final body = jsonDecode(response.body) as Map<String, dynamic>;
       final raw = Map<String, dynamic>.from(body['document'] ?? const {});
@@ -752,7 +794,10 @@ class AppwriteService extends ChangeNotifier {
 
   Future<Map<String, dynamic>?> getSavedBoardById(String documentId) async {
     try {
-      final response = await http.get(Uri.parse('$_baseUrl/saved_boards/$documentId'));
+      final response = await http.get(
+        Uri.parse('$_baseUrl/saved_boards/$documentId'),
+        headers: await _authHeaders(),
+      );
       if (response.statusCode != 200) return null;
       final body = jsonDecode(response.body) as Map<String, dynamic>;
       final raw = Map<String, dynamic>.from(body['document'] ?? const {});
@@ -769,7 +814,7 @@ class AppwriteService extends ChangeNotifier {
     final userId = await _requireUserId();
     final response = await http.post(
       Uri.parse('$_baseUrl/outfits/duplicate-check'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(),
       body: jsonEncode({
         'user_id': userId,
         'data': data,
@@ -912,13 +957,27 @@ class AppwriteService extends ChangeNotifier {
           ? (Map<String, dynamic>.from(existing.first)..addAll(data))
           : (Map<String, dynamic>.from(data)..['id'] = documentId);
       await _localStore.upsertWardrobeItem(userId, merged);
-      await _localStore.addPendingOp(
-        userId: userId,
-        entity: 'wardrobe',
-        op: 'update',
-        refId: documentId,
-        payload: {'data': data},
-      );
+      final pending = await _localStore.pendingOps(userId);
+      final existingUpdateOp = pending.where((op) =>
+          op.entity == 'wardrobe' &&
+          op.op == 'update' &&
+          op.refId == documentId);
+      if (existingUpdateOp.isNotEmpty) {
+        final op = existingUpdateOp.first;
+        final payload = Map<String, dynamic>.from(op.payload);
+        final payloadData = Map<String, dynamic>.from(payload['data'] ?? const {});
+        payloadData.addAll(data);
+        payload['data'] = payloadData;
+        await _localStore.updatePendingOpPayload(op.id, payload);
+      } else {
+        await _localStore.addPendingOp(
+          userId: userId,
+          entity: 'wardrobe',
+          op: 'update',
+          refId: documentId,
+          payload: {'data': data},
+        );
+      }
       return ProxyDocument(
         $id: documentId,
         data: merged,

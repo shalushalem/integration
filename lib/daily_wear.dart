@@ -8,9 +8,11 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 import 'package:myapp/theme/theme_tokens.dart';
 import 'package:myapp/widgets/ahvi_chat_prompt_bar.dart';
 import 'package:myapp/widgets/ahvi_home_text.dart';
+import 'package:myapp/services/appwrite_service.dart';
 
 enum _TryOnStage { preview, loading, camera, captured }
 
@@ -73,6 +75,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
   bool _isTyping = false;
   bool _quickPromptsVisible = true;
   Timer? _chatGreetingTimer;
+  Map<String, String>? _networkImageHeaders;
 
   // ── Chat History ─────────────────────────────────────────────────────
   final List<_ChatSession> _chatHistory = [];
@@ -320,6 +323,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
   @override
   void initState() {
     super.initState();
+    _primeImageHeaders();
     // NOTE: _displayedOutfits, _savedCarouselById, _savedOptionById and
     // _tryOnOutfitId are initialized in didChangeDependencies() because
     // they require AppLocalizations (an InheritedWidget) which is not
@@ -473,6 +477,19 @@ class _DailyWearScreenState extends State<DailyWearScreen>
 
     _pageEntryCtrl = AnimationController(vsync: this, duration: Duration.zero);
     _pageEntryFade = Tween<double>(begin: 1.0, end: 1.0).animate(_pageEntryCtrl);
+  }
+
+  Future<void> _primeImageHeaders() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final token = await appwrite.getBackendJwtToken();
+      if (!mounted) return;
+      final clean = (token ?? '').trim();
+      if (clean.isEmpty) return;
+      setState(() {
+        _networkImageHeaders = {'Authorization': 'Bearer $clean'};
+      });
+    } catch (_) {}
   }
 
   void _restartOptionCardAnimations() {
@@ -1771,6 +1788,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
           ]),
           child: Image.network(
             outfit['img'] as String,
+            headers: _networkImageHeaders,
             fit: BoxFit.cover,
             alignment: Alignment.topCenter,
             cacheWidth: _cacheWidth(context, MediaQuery.of(context).size.width),
@@ -2107,6 +2125,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                 children: [
                   Image.network(
                     card['img'] as String,
+                    headers: _networkImageHeaders,
                     fit: BoxFit.cover,
                     alignment: Alignment.topCenter,
                     cacheWidth: _cacheWidth(context, 180),
@@ -2691,6 +2710,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                         ),
                         child: Image.network(
                           outfit['img'] as String,
+                          headers: _networkImageHeaders,
                           fit: BoxFit.cover,
                           cacheWidth: _cacheWidth(
                             context,
@@ -2851,6 +2871,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                   aspectRatio: 3 / 4,
                   child: Image.network(
                     outfit['img'] as String,
+                    headers: _networkImageHeaders,
                     fit: BoxFit.cover,
                     cacheWidth: _cacheWidth(context, 320),
                     filterQuality: FilterQuality.low,
@@ -2958,6 +2979,7 @@ class _DailyWearScreenState extends State<DailyWearScreen>
                 width: double.infinity,
                 child: Image.network(
                   outfit['img'] as String,
+                  headers: _networkImageHeaders,
                   fit: BoxFit.cover,
                   alignment: Alignment.topCenter,
                   cacheWidth: _cacheWidth(

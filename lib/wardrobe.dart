@@ -5,6 +5,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:camera/camera.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:http/http.dart' as http;
 
 import 'package:flutter/foundation.dart';
@@ -58,6 +59,7 @@ class WardrobeItem {
   // Dual URLs to match your Database
   String? imageUrl; // Raw image URL
   String? maskedUrl; // Processed PNG URL
+  Map<String, String>? networkHeaders;
 
   WardrobeItem({
     required this.id,
@@ -70,6 +72,7 @@ class WardrobeItem {
     this.imageBytes,
     this.imageUrl,
     this.maskedUrl,
+    this.networkHeaders,
   });
 
   // Helper to always show the processed image first, falling back to raw
@@ -91,6 +94,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   final List<WardrobeItem> _wardrobe = [];
 
   bool _isLoading = true; // âœ… Loader state for initial fetch
+  String? _backendJwt;
 
   AppThemeTokens get t => context.themeTokens;
   final FocusNode _keyboardFocusNode = FocusNode();
@@ -98,7 +102,25 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   @override
   void initState() {
     super.initState();
+    _primeBackendJwt();
     _fetchWardrobeItems();
+  }
+
+  Map<String, String>? get _imageHeaders {
+    final token = (_backendJwt ?? '').trim();
+    if (token.isEmpty) return null;
+    return {'Authorization': 'Bearer $token'};
+  }
+
+  Future<void> _primeBackendJwt() async {
+    try {
+      final appwrite = Provider.of<AppwriteService>(context, listen: false);
+      final token = await appwrite.getBackendJwtToken();
+      if (!mounted) return;
+      setState(() {
+        _backendJwt = (token ?? '').trim().isEmpty ? null : token!.trim();
+      });
+    } catch (_) {}
   }
 
   WardrobeItem _mapToWardrobeItem(Map<String, dynamic> data) {
@@ -114,6 +136,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       liked: data['liked'] == true,
       imageUrl: (data['image_url'] ?? data['imageUrl'])?.toString(),
       maskedUrl: (data['masked_url'] ?? data['maskedUrl'])?.toString(),
+      networkHeaders: _imageHeaders,
     );
   }
 
@@ -128,11 +151,11 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         setState(() {
           _wardrobe.clear();
           _wardrobe.addAll(fetchedItems);
-          _isLoading = false;
         });
       }
     } catch (e) {
       debugPrint("âŒ Failed to fetch wardrobe: $e");
+    } finally {
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -215,6 +238,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 maskedUrl: item['maskedUrl'] as String?,
                 worn: item['worn'] as int? ?? 0,
                 liked: item['liked'] as bool? ?? false,
+                networkHeaders: _imageHeaders,
                 ),
             );
           });
@@ -688,8 +712,11 @@ class _ItemDetailPanelState extends State<_ItemDetailPanel>
                                     borderRadius: BorderRadius.circular(16),
                                     image: item.displayUrl != null
                                         ? DecorationImage(
-                                            image: NetworkImage(
+                                            image: CachedNetworkImageProvider(
                                               item.displayUrl!,
+                                              headers: item.networkHeaders,
+                                              maxHeight: 900,
+                                              maxWidth: 900,
                                             ),
                                             fit: BoxFit.cover,
                                           )
@@ -1286,13 +1313,19 @@ class _AddItemModalState extends State<_AddItemModal>
     }
   }
 
-  // Multi-image flow â€” all images scanned in parallel, results merged
+  // Multi-image flow â€” images scanned sequentially to protect backend memory.
   Future<void> _runDetectionMulti(List<Uint8List> bytesList) async {
     try {
-      // Run all detections in parallel
-      final results = await Future.wait(
-        bytesList.map((b) => _detectOneImage(b).catchError((_) => <_DetectedItem>[])),
-      );
+      // Run detections sequentially to avoid backend memory spikes.
+      final results = <List<_DetectedItem>>[];
+      for (final bytes in bytesList) {
+        try {
+          final items = await _detectOneImage(bytes);
+          results.add(items);
+        } catch (_) {
+          results.add(<_DetectedItem>[]);
+        }
+      }
 
       // Merge all items, re-assign unique IDs to avoid collisions
       final allItems = <_DetectedItem>[];
@@ -3532,7 +3565,12 @@ class _ItemCardState extends State<_ItemCard>
                         // âœ… Prioritize Masked URL over Raw URL
                         image: item.displayUrl != null
                             ? DecorationImage(
-                                image: NetworkImage(item.displayUrl!),
+                                image: CachedNetworkImageProvider(
+                                  item.displayUrl!,
+                                  headers: item.networkHeaders,
+                                  maxHeight: 900,
+                                  maxWidth: 900,
+                                ),
                                 fit: BoxFit.cover,
                               )
                             : (item.imageBytes != null
