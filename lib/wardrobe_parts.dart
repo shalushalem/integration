@@ -504,7 +504,9 @@ class _AddItemModalState extends State<_AddItemModal>
     try {
       final file = await _picker.pickImage(
         source: source,
-        imageQuality: 85,
+        imageQuality: 75,
+        maxWidth: 1920,
+        maxHeight: 1920,
       );
       if (file == null) return;
       final bytes = await file.readAsBytes();
@@ -540,23 +542,21 @@ class _AddItemModalState extends State<_AddItemModal>
       }
       if (!bgRemoved && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Background removal unavailable (${bgReason ?? 'unknown'}). Continuing...')),
+          SnackBar(content: Text('Background cleanup unavailable (${bgReason ?? 'unknown'}). Server-side validation will run.')),
         );
       }
 
       // 2. Analyze the garment using best available image.
       final analysis = await backend.analyzeImageFromBase64(effectiveBase64);
+      if (analysis['success'] == false) {
+        final err = (analysis['error'] ?? 'Unable to process image.').toString().trim();
+        throw Exception(err.isEmpty ? 'Unable to process image.' : err);
+      }
       
       if (mounted) {
-        final payload = (analysis != null && analysis['data'] is Map<String, dynamic>)
+        final payload = (analysis['data'] is Map<String, dynamic>)
             ? Map<String, dynamic>.from(analysis['data'] as Map)
-            : (analysis != null
-                ? Map<String, dynamic>.from(analysis)
-                : <String, dynamic>{
-                    'name': 'New Item',
-                    'category': 'Tops',
-                    'sub_category': 'Shirt',
-                  });
+            : Map<String, dynamic>.from(analysis);
 
         setState(() {
           _aiData = payload;
@@ -599,6 +599,32 @@ class _AddItemModalState extends State<_AddItemModal>
     }
   }
 
+  String _friendlyUploadError(Object error) {
+    if (error is DuplicateOutfitException) {
+      return 'This looks like an item you already added. Try a different angle or another outfit.';
+    }
+    if (error is BackendUploadException) {
+      if (error.statusCode == 413) {
+        return 'Image is too large. Retake from a little distance or lower camera quality.';
+      }
+      if (error.statusCode == 409) {
+        return 'This looks like a duplicate outfit. Try another item.';
+      }
+      if (error.message.trim().isNotEmpty) return error.message;
+    }
+    final raw = error.toString();
+    if (raw.contains('DuplicateOutfitException')) {
+      return 'This looks like an item you already added. Try a different angle or another outfit.';
+    }
+    if (raw.contains('413') || raw.toLowerCase().contains('payload too large')) {
+      return 'Image is too large. Retake from a little distance or lower camera quality.';
+    }
+    if (raw.contains('409') || raw.toLowerCase().contains('duplicate')) {
+      return 'This looks like a duplicate outfit. Try another item.';
+    }
+    return 'Upload failed. Please try again.';
+  }
+
   // ?? Step 2: Upload to Cloudflare R2 & Save to Appwrite DB
   Future<void> _saveAndUpload() async {
     if (_nameCtrl.text.trim().isEmpty || _selectedCat.isEmpty) {
@@ -631,9 +657,6 @@ class _AddItemModalState extends State<_AddItemModal>
           rawImageBytes: _rawImageBytes!,
           maskedImageBytes: _itemImageBytes!,
         );
-        if (upload == null) {
-          throw Exception('Backend upload failed.');
-        }
         rawFileName = upload['raw_file_name'] ?? '';
         maskedFileName = upload['masked_file_name'] ?? '';
         rawImageUrl = upload['raw_image_url'] ?? '';
@@ -702,11 +725,25 @@ class _AddItemModalState extends State<_AddItemModal>
 
       if (mounted) Navigator.of(context).pop();
 
+    } on DuplicateOutfitException catch (e) {
+      debugPrint("? Duplicate outfit blocked: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_friendlyUploadError(e))),
+        );
+      }
+    } on BackendUploadException catch (e) {
+      debugPrint("? Upload payload/backend error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_friendlyUploadError(e))),
+        );
+      }
     } catch (e) {
       debugPrint("? R2/Upload Error: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload failed. Please check backend upload service.')),
+          SnackBar(content: Text(_friendlyUploadError(e))),
         );
       }
     } finally {

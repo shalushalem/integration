@@ -1111,7 +1111,12 @@ class _AddItemModalState extends State<_AddItemModal>
   Future<void> _pickGallery() async {
     try {
       final picker = ImagePicker();
-      final files = await picker.pickMultiImage(imageQuality: 90, limit: 6);
+      final files = await picker.pickMultiImage(
+        imageQuality: 75,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        limit: 6,
+      );
       if (files.isEmpty) return;
       if (!mounted) return;
 
@@ -1163,13 +1168,27 @@ class _AddItemModalState extends State<_AddItemModal>
 
   // Single image -> returns detected items (throws on failure)
   Future<List<_DetectedItem>> _detectOneImage(Uint8List bytes) async {
-    var response = await _backendService.analyzeImage(bytes);
-    response ??= await Future<Map<String, dynamic>?>.delayed(
-      const Duration(seconds: 2),
-      () => _backendService.analyzeImage(bytes),
-    );
+    Object? lastError;
+    Map<String, dynamic>? response;
+    final backoffSeconds = <int>[0, 2, 5, 10];
+    for (var i = 0; i < backoffSeconds.length; i++) {
+      if (backoffSeconds[i] > 0) {
+        await Future<void>.delayed(Duration(seconds: backoffSeconds[i]));
+      }
+      try {
+        response = await _backendService.analyzeImage(bytes);
+      } catch (e) {
+        lastError = e;
+      }
+      if (response != null) break;
+    }
     if (response == null) {
-      throw Exception('Analyze API returned null');
+      if (lastError != null) throw lastError;
+      throw Exception('Analyze API returned null after retries');
+    }
+    if (response['success'] == false) {
+      final err = (response['error'] ?? 'Invalid image.').toString().trim();
+      throw Exception(err.isEmpty ? 'Invalid image.' : err);
     }
 
     final dynamic payload = response['data'] ?? response;
@@ -1226,15 +1245,43 @@ class _AddItemModalState extends State<_AddItemModal>
       }
     } catch (e) {
       if (mounted) {
-        final msg = e.toString().toLowerCase().contains('timeout') ||
-                e.toString().toLowerCase().contains('null')
-            ? 'Detection is warming up. Tap Try Again in 10 seconds.'
-            : 'Detection failed. Please retake with better lighting.';
+        final rawMsg = e.toString().replaceFirst('Exception: ', '').trim();
+        String msg;
+        if (e is BackendAnalyzeException) {
+          if (e.statusCode == 413) {
+            msg = 'Photo is too large. Retake from a little distance and try again.';
+          } else if (e.statusCode == 429) {
+            msg = 'AI is busy right now. Try again in a few seconds.';
+          } else if (e.statusCode == 502 || e.statusCode == 503 || e.statusCode == 504) {
+            msg = 'AI detection service is unavailable right now. You can continue with Add manually.';
+          } else if (e.message.toLowerCase().contains('timed out')) {
+            msg = 'Detection timed out. Try again, or continue with Add manually.';
+          } else {
+            msg = 'Detection failed. You can continue with Add manually.';
+          }
+        } else {
+          final raw = e.toString().toLowerCase();
+          if (rawMsg.isNotEmpty &&
+              !raw.contains('backendanalyzeexception') &&
+              !raw.contains('exception')) {
+            msg = rawMsg;
+          } else {
+            msg = raw.contains('timeout')
+              ? 'Detection timed out. Try again, or continue with Add manually.'
+              : 'Detection failed. You can continue with Add manually.';
+          }
+        }
         setState(() {
           _detectError = msg;
           _step = _ModalStep.results;
           _detected = [];
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg, style: const TextStyle(color: Colors.white)),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
@@ -1383,6 +1430,17 @@ class _AddItemModalState extends State<_AddItemModal>
       'maskedUrl': null,
       'worn': 0,
       'liked': false,
+    });
+  }
+
+  void _openManualEntryFromCurrentPhoto() {
+    final fallbackName =
+        _nameCtrl.text.trim().isEmpty ? 'New Item' : _nameCtrl.text.trim();
+    setState(() {
+      _editingIndex = null;
+      _nameCtrl.text = fallbackName;
+      _selectedCat = _selectedCat.isEmpty ? _cats.first : _selectedCat;
+      _step = _ModalStep.editing;
     });
   }
 
@@ -2138,7 +2196,7 @@ class _AddItemModalState extends State<_AddItemModal>
       );
     }
 
-    // No items selected OR error state â€” hide primary button, show only Cancel
+    // No items selected OR error state â€” allow manual fallback + cancel.
     if (_step == _ModalStep.results && (_detected.where((i) => i.selected).isEmpty)) {
       return Container(
         padding: const EdgeInsets.fromLTRB(18, 12, 18, 20),
@@ -2146,23 +2204,57 @@ class _AddItemModalState extends State<_AddItemModal>
           border: Border(top: BorderSide(color: t.cardBorder)),
           color: t.backgroundSecondary.withValues(alpha: 0.97),
         ),
-        child: SizedBox(
-          width: double.infinity,
-          child: GestureDetector(
+        child: Row(children: [
+          GestureDetector(
             onTap: () => Navigator.of(context).pop(),
             child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 13),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
               decoration: BoxDecoration(
                 color: t.panel,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: t.cardBorder, width: 1.5),
               ),
-              alignment: Alignment.center,
-              child: Text(AppLocalizations.t(context, 'cancel'), style: TextStyle(
-                  fontFamily: GoogleFonts.inter().fontFamily, fontSize: 14, color: t.mutedText)),
+              child: Text(
+                AppLocalizations.t(context, 'cancel'),
+                style: TextStyle(
+                  fontFamily: GoogleFonts.inter().fontFamily,
+                  fontSize: 14,
+                  color: t.mutedText,
+                ),
+              ),
             ),
           ),
-        ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: GestureDetector(
+              onTap: _openManualEntryFromCurrentPhoto,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [t.accent.primary, t.accent.tertiary]),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: t.accent.primary.withValues(alpha: 0.40),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  'Add manually',
+                  style: TextStyle(
+                    fontFamily: GoogleFonts.inter().fontFamily,
+                    fontSize: 14,
+                    color: t.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]),
       );
     }
 

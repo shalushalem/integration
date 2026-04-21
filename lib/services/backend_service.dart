@@ -6,14 +6,52 @@ import 'package:myapp/config/env.dart';
 
 typedef TokenRefresher = Future<String?> Function();
 
+class BackendUploadException implements Exception {
+  const BackendUploadException({
+    required this.message,
+    this.statusCode,
+    this.detail,
+    this.rawBody,
+  });
+
+  final String message;
+  final int? statusCode;
+  final dynamic detail;
+  final String? rawBody;
+
+  @override
+  String toString() =>
+      'BackendUploadException(status=$statusCode, message=$message)';
+}
+
+class BackendAnalyzeException implements Exception {
+  const BackendAnalyzeException({
+    required this.message,
+    this.statusCode,
+    this.rawBody,
+  });
+
+  final String message;
+  final int? statusCode;
+  final String? rawBody;
+
+  @override
+  String toString() =>
+      'BackendAnalyzeException(status=$statusCode, message=$message)';
+}
+
 class BackendService {
   BackendService({this.authToken, this.refreshAuthToken});
 
   final String baseUrl = Env.backendApiUrl;
   final String _dataBasePath = '/api/data';
-  static const int _maxImageBytes = 4 * 1024 * 1024;
+  static const int _maxUploadImageBytes = 8 * 1024 * 1024;
+  static const int _maxAnalyzeImageBytes = 4 * 1024 * 1024;
   String? authToken;
   final TokenRefresher? refreshAuthToken;
+
+  static int get maxImageBytes => _maxUploadImageBytes;
+  static int get maxAnalyzeImageBytes => _maxAnalyzeImageBytes;
 
   void setAuthToken(String? token) {
     authToken = (token ?? '').trim().isEmpty ? null : token!.trim();
@@ -143,6 +181,48 @@ class BackendService {
     return const <String>[];
   }
 
+  List<Map<String, String>> _normalizeChatHistory(
+    List<Map<String, String>> chatHistory,
+  ) {
+    final normalized = <Map<String, String>>[];
+    for (final item in chatHistory) {
+      final role = (item['role'] ?? '').trim().toLowerCase();
+      final content = (item['content'] ?? '').trim();
+      if (content.isEmpty) continue;
+      if (role != 'user' && role != 'assistant' && role != 'system') continue;
+      normalized.add({'role': role, 'content': content});
+    }
+    return normalized;
+  }
+
+  Map<String, dynamic> _buildCurrentMemoryPayload({
+    required String currentMemory,
+    required List<Map<String, String>> history,
+  }) {
+    final rawMemory = currentMemory.trim();
+    final payload = <String, dynamic>{};
+
+    if (rawMemory.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawMemory);
+        if (decoded is Map<String, dynamic>) {
+          payload.addAll(decoded);
+        } else if (decoded is Map) {
+          payload.addAll(
+            decoded.map((key, value) => MapEntry(key.toString(), value)),
+          );
+        } else {
+          payload['summary'] = rawMemory;
+        }
+      } catch (_) {
+        payload['summary'] = rawMemory;
+      }
+    }
+
+    payload['history'] = history;
+    return payload;
+  }
+
   String? _asOptionalActionString(dynamic value) {
     if (value is String) {
       final v = value.trim();
@@ -159,12 +239,52 @@ class BackendService {
   }
 
   bool _shouldTryNextCandidate(int statusCode) {
-    // Fallback probing is only for route-not-found aliases.
-    return statusCode == 404;
+    // Probe route aliases for not-found and transient upstream failures.
+    return statusCode == 404 ||
+        statusCode == 429 ||
+        statusCode == 502 ||
+        statusCode == 503 ||
+        statusCode == 504;
   }
 
-  bool _isImagePayloadSafe(Uint8List bytes) {
-    return bytes.lengthInBytes <= _maxImageBytes;
+  bool _isUploadPayloadSafe(Uint8List bytes) {
+    return bytes.lengthInBytes <= _maxUploadImageBytes;
+  }
+
+  bool _isAnalyzePayloadSafe(Uint8List bytes) {
+    return bytes.lengthInBytes <= _maxAnalyzeImageBytes;
+  }
+
+  Map<String, dynamic> _tryDecodeJsonMap(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) {
+        return decoded.map((key, value) => MapEntry(key.toString(), value));
+      }
+    } catch (_) {}
+    return const <String, dynamic>{};
+  }
+
+  BackendUploadException _wardrobeUploadHttpError(http.Response response) {
+    final body = _tryDecodeJsonMap(response.body);
+    final detail = body['detail'];
+    String message = 'Wardrobe upload failed (${response.statusCode}).';
+    if (detail is String && detail.trim().isNotEmpty) {
+      message = detail.trim();
+    } else if (detail is Map) {
+      final mapped = detail.map((k, v) => MapEntry(k.toString(), v));
+      final nestedMessage = (mapped['message'] ?? '').toString().trim();
+      if (nestedMessage.isNotEmpty) {
+        message = nestedMessage;
+      }
+    }
+    return BackendUploadException(
+      statusCode: response.statusCode,
+      message: message,
+      detail: detail,
+      rawBody: response.body,
+    );
   }
 
   Future<void> _ensureToken() async {
@@ -385,21 +505,40 @@ class BackendService {
     Map<String, dynamic>? userProfile,
     List<Map<String, dynamic>>? wardrobeItems,
     String? moduleContext,
+    String? threadId,
   }) async {
     try {
+      final trimmedQuery = query.trim();
+      final normalizedHistory = _normalizeChatHistory(chatHistory);
+      final hasLatestUserTurn = normalizedHistory.isNotEmpty &&
+          normalizedHistory.last['role'] == 'user' &&
+          normalizedHistory.last['content'] == trimmedQuery;
+      final messagesPayload = hasLatestUserTurn
+          ? normalizedHistory
+          : <Map<String, String>>[
+              ...normalizedHistory,
+              {'role': 'user', 'content': trimmedQuery},
+            ];
+      final contextHistory = messagesPayload.length > 1
+          ? messagesPayload.sublist(0, messagesPayload.length - 1)
+          : <Map<String, String>>[];
+      final currentMemoryPayload = _buildCurrentMemoryPayload(
+        currentMemory: currentMemory,
+        history: contextHistory,
+      );
+
       final response = await _postJsonWithAuthRetry('/api/text', {
-        'messages': [
-          ...chatHistory,
-          {'role': 'user', 'content': query},
-        ],
+        'messages': messagesPayload,
         'language': 'en',
-        'current_memory': currentMemory,
+        'current_memory': currentMemoryPayload,
         'user_id': userId,
         'user_profile': userProfile ?? const <String, dynamic>{},
         'wardrobe_items':
             wardrobeItems ?? fetchedWardrobe ?? const <Map<String, dynamic>>[],
         if (moduleContext != null && moduleContext.trim().isNotEmpty)
           'module_context': moduleContext.trim(),
+        if (threadId != null && threadId.trim().isNotEmpty)
+          'thread_id': threadId.trim(),
       });
 
       if (response.statusCode == 200) {
@@ -463,6 +602,11 @@ class BackendService {
         data['full_menu_text'] = hiddenMenuText;
         data['has_actions'] =
             (extractedBoardData != null || extractedPackData != null);
+        data['updated_memory'] = data['updated_memory'] ??
+            currentMemoryPayload['summary']?.toString() ??
+            currentMemory;
+        data['thread_id'] = data['thread_id']?.toString() ??
+            (threadId != null && threadId.trim().isNotEmpty ? threadId.trim() : null);
 
         return data;
       } else {
@@ -512,18 +656,20 @@ class BackendService {
   }
 
   // ðŸš€ FIXED: Now converts Uint8List to Base64 and sends to the NEW JSON endpoint!
-  Future<Map<String, dynamic>?> analyzeImage(Uint8List imageBytes) async {
-    if (!_isImagePayloadSafe(imageBytes)) {
-      print(
-        'Analyze image skipped: payload too large (${imageBytes.lengthInBytes} bytes).',
-      );
-      return null;
+  Future<Map<String, dynamic>> analyzeImage(Uint8List imageBytes) async {
+    if (!_isAnalyzePayloadSafe(imageBytes)) {
+      return {
+        'success': false,
+        'error': 'Image is too large. Please compress it below 4MB.',
+      };
     }
     final base64String = base64Encode(imageBytes);
     return analyzeImageFromBase64(base64String);
   }
 
-  Future<Map<String, dynamic>?> analyzeImageFromBase64(String base64String) async {
+  Future<Map<String, dynamic>> analyzeImageFromBase64(String base64String) async {
+    int? lastStatusCode;
+    String? lastError;
     try {
       const candidates = <String>[
         '/api/analyze-image',
@@ -535,25 +681,55 @@ class BackendService {
       for (final path in candidates) {
         final response = await _postJsonWithAuthRetry(path, {
           'image_base64': base64String,
-        }, timeout: const Duration(seconds: 90));
+        }, timeout: const Duration(seconds: 45));
 
         if (response.statusCode == 200) {
-          return jsonDecode(response.body) as Map<String, dynamic>;
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map<String, dynamic>) {
+            if (!decoded.containsKey('success')) {
+              return {'success': true, ...decoded};
+            }
+            return decoded;
+          }
+          return {'success': false, 'error': 'Invalid server response.'};
         }
+        lastStatusCode = response.statusCode;
+        final body = _tryDecodeJsonMap(response.body);
+
+        if (response.statusCode == 422) {
+          final detail = body['detail'];
+          final message = (detail is String && detail.trim().isNotEmpty)
+              ? detail.trim()
+              : 'Invalid image.';
+          return {'success': false, 'error': message, 'status_code': 422};
+        }
+
+        if (response.statusCode == 413) {
+          final detail = body['detail'];
+          final message = (detail is String && detail.trim().isNotEmpty)
+              ? detail.trim()
+              : 'Image is too large.';
+          return {'success': false, 'error': message, 'status_code': 413};
+        }
+
+        lastError = 'Server error: ${response.statusCode}';
         print('Analyze API failed on $path: ${response.statusCode}');
         if (!_shouldTryNextCandidate(response.statusCode)) {
           break;
         }
       }
 
-      print('Analyze API Failed on all known routes.');
-      return null;
+      return {
+        'success': false,
+        'error': lastError ??
+            (lastStatusCode == null
+                ? 'Analyze API failed on all known routes.'
+                : 'Server error: $lastStatusCode'),
+      };
     } on TimeoutException catch (e) {
-      print('Garment Analysis Timeout Error: $e');
-      return null;
+      return {'success': false, 'error': 'Network timeout or error: $e'};
     } catch (e) {
-      print('Garment Analysis Error: $e');
-      return null;
+      return {'success': false, 'error': 'Network timeout or error: $e'};
     }
   }
 
@@ -602,7 +778,7 @@ class BackendService {
     required Uint8List imageBytes,
   }) async {
     try {
-      if (!_isImagePayloadSafe(imageBytes)) {
+      if (!_isUploadPayloadSafe(imageBytes)) {
         print(
           'Avatar upload skipped: payload too large (${imageBytes.lengthInBytes} bytes).',
         );
@@ -622,36 +798,47 @@ class BackendService {
     }
   }
 
-  Future<Map<String, String>?> uploadWardrobeImages({
+  Future<Map<String, String>> uploadWardrobeImages({
     required String fileId,
     required Uint8List rawImageBytes,
     required Uint8List maskedImageBytes,
   }) async {
     try {
-      if (!_isImagePayloadSafe(rawImageBytes) ||
-          !_isImagePayloadSafe(maskedImageBytes)) {
-        print(
-          'Wardrobe upload skipped: payload too large (raw=${rawImageBytes.lengthInBytes}, masked=${maskedImageBytes.lengthInBytes}).',
+      if (!_isUploadPayloadSafe(rawImageBytes) ||
+          !_isUploadPayloadSafe(maskedImageBytes)) {
+        throw BackendUploadException(
+          statusCode: 413,
+          message:
+              'Selected image is too large to upload. Please try a smaller photo.',
+          detail: <String, dynamic>{
+            'raw_bytes': rawImageBytes.lengthInBytes,
+            'masked_bytes': maskedImageBytes.lengthInBytes,
+            'max_bytes_per_image': _maxUploadImageBytes,
+          },
         );
-        return null;
       }
       final response = await _postJsonWithAuthRetry('/api/uploads/wardrobe', {
         'file_id': fileId,
         'raw_image_base64': base64Encode(rawImageBytes),
         'masked_image_base64': base64Encode(maskedImageBytes),
       });
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        return {
-          'raw_file_name': data['raw_file_name']?.toString() ?? '',
-          'masked_file_name': data['masked_file_name']?.toString() ?? '',
-          'raw_image_url': data['raw_image_url']?.toString() ?? '',
-          'masked_image_url': data['masked_image_url']?.toString() ?? '',
-        };
+      if (response.statusCode != 200) {
+        throw _wardrobeUploadHttpError(response);
       }
-      return null;
-    } catch (_) {
-      return null;
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return {
+        'raw_file_name': data['raw_file_name']?.toString() ?? '',
+        'masked_file_name': data['masked_file_name']?.toString() ?? '',
+        'raw_image_url': data['raw_image_url']?.toString() ?? '',
+        'masked_image_url': data['masked_image_url']?.toString() ?? '',
+      };
+    } on BackendUploadException {
+      rethrow;
+    } catch (e) {
+      throw BackendUploadException(
+        message: 'Wardrobe upload failed due to an unexpected error.',
+        rawBody: e.toString(),
+      );
     }
   }
 

@@ -402,12 +402,14 @@ class _ChatSession {
   String title;
   final DateTime createdAt;
   final List<Map<String, String>> history; // [{role, content}]
+  String runningMemory;
 
   _ChatSession({
     required this.id,
     required this.title,
     required this.createdAt,
     required this.history,
+    this.runningMemory = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -415,6 +417,7 @@ class _ChatSession {
         'title': title,
         'createdAt': createdAt.toIso8601String(),
         'history': history,
+        'runningMemory': runningMemory,
       };
 
   factory _ChatSession.fromJson(Map<String, dynamic> j) => _ChatSession(
@@ -424,6 +427,7 @@ class _ChatSession {
         history: (j['history'] as List)
             .map((e) => Map<String, String>.from(e as Map))
             .toList(),
+        runningMemory: (j['runningMemory'] ?? '').toString(),
       );
 }
 
@@ -454,6 +458,7 @@ class _ChatScreenState extends State<ChatScreen>
   String _runningMemory = '';
   bool _isTyping = false;
   String _userName = 'User';
+  String _userId = 'chat_user';
   final Map<String, List<List<bool>>> _checklistChecksByTitle = {};
   final Map<String, List<List<String>>> _checklistItemsByTitle = {};
   final Map<String, List<TextEditingController>> _checklistAddCtrlsByTitle = {};
@@ -507,9 +512,12 @@ class _ChatScreenState extends State<ChatScreen>
     final user = await appwrite.getCurrentUser();
     if (user != null && mounted) {
       setState(
-        () => _userName = user.name.isNotEmpty
-            ? user.name.split(' ').first
-            : 'Stylist',
+        () {
+          _userName = user.name.isNotEmpty
+              ? user.name.split(' ').first
+              : 'Stylist';
+          _userId = user.$id.trim().isEmpty ? 'chat_user' : user.$id.trim();
+        },
       );
     }
   }
@@ -595,6 +603,7 @@ class _ChatScreenState extends State<ChatScreen>
         ..clear()
         ..addAll(_chatHistory);
       _sessions[existing].title = title;
+      _sessions[existing].runningMemory = _runningMemory;
     } else {
       _sessions.insert(
         0,
@@ -603,6 +612,7 @@ class _ChatScreenState extends State<ChatScreen>
           title: title,
           createdAt: DateTime.now(),
           history: List.from(_chatHistory),
+          runningMemory: _runningMemory,
         ),
       );
     }
@@ -659,7 +669,7 @@ class _ChatScreenState extends State<ChatScreen>
           isMe: h['role'] == 'user',
         ));
       }
-      _runningMemory = '';
+      _runningMemory = session.runningMemory;
     });
     _scrollToBottom();
   }
@@ -670,36 +680,55 @@ class _ChatScreenState extends State<ChatScreen>
     setState(() {
       _messages.add(_ChatMessage(text: chip, isMe: true));
       _messages.add(_ChatMessage(text: local.intro, isMe: false, local: local));
+      // 🚀 FIX: Append local interactions to history so AI context matches UI state
+      _chatHistory.add({'role': 'user', 'content': chip});
+      _chatHistory.add({'role': 'assistant', 'content': local.intro});
     });
+    _saveCurrentSession();
     _scrollToBottom();
   }
 
   void _sendMessage([String? chipText]) async {
+    if (_isTyping) return; // 🚀 FIX: Prevent sending two messages rapidly which crashes the strictly alternating LLM API
+
     final text = chipText ?? _chatController.text.trim();
     if (text.isEmpty) return;
     _chatController.clear();
+    
     setState(() {
       _messages.add(_ChatMessage(text: text, isMe: true));
       _chatHistory.add({'role': 'user', 'content': text});
       _isTyping = true;
     });
     _scrollToBottom();
+    
     try {
       final backend = Provider.of<BackendService>(context, listen: false);
       final response = await backend.sendChatQuery(
         text,
-        'user_$_userName',
+        _userId,
         List<Map<String, String>>.from(_chatHistory),
         _runningMemory,
+        moduleContext: _module,
+        threadId: _currentSessionId,
       );
       if (!mounted) return;
+      
+      final returnedThreadId = (response['thread_id'] ?? '').toString().trim();
+      if (returnedThreadId.isNotEmpty && returnedThreadId != _currentSessionId) {
+        _currentSessionId = returnedThreadId;
+      }
+
       if (response['updated_memory'] != null) {
         _runningMemory = response['updated_memory'];
       }
+      
       final aiText =
           response['message']?['content']?.toString() ??
           AppLocalizations.t(context, 'chat_connection_error');
+          
       _chatHistory.add({'role': 'assistant', 'content': aiText});
+      
       setState(
         () => _messages.add(
           _ChatMessage(
@@ -712,8 +741,15 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       );
       _saveCurrentSession();
+      
     } catch (e) {
       if (!mounted) return;
+      
+      // 🚀 FIX: If API throws an error, pop the last user message to keep the history strictly alternating
+      if (_chatHistory.isNotEmpty && _chatHistory.last['role'] == 'user') {
+        _chatHistory.removeLast();
+      }
+      
       setState(
         () => _messages.add(
           _ChatMessage(text: '${AppLocalizations.t(context, 'chat_error_prefix')}: $e', isMe: false),
